@@ -141,6 +141,11 @@ def _extract_pdf(data: bytes) -> str:
     return text
 
 
+def extract_image_text(data: bytes, suffix: str) -> str:
+    """Public alias; the exam service reuses this OCR path as its vision fallback."""
+    return _extract_image_text(data, suffix)
+
+
 def _extract_image_text(data: bytes, suffix: str) -> str:
     try:
         from ocrmac import OCR

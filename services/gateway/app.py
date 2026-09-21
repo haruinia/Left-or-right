@@ -13,7 +13,7 @@ from time import perf_counter
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
 from starlette.datastructures import Headers
 
 from libs.common.config import get_settings
@@ -34,8 +34,10 @@ from libs.schemas import (
     CandidateCreate,
     ConsentCreate,
     CredibilitySignal,
+    ExamSolution,
     InterviewCreate,
     JobCreate,
+    MemoryHit,
     NextOption,
     OfflineInterviewInput,
     OfflineInterviewResult,
@@ -51,6 +53,8 @@ from libs.schemas import (
     ScoringRequest,
     SetupExtraction,
     TranscriptSegment,
+    ChatStreamRequest,
+    UiSettings,
     new_id,
 )
 from libs.llm_client import LLMMessage, get_llm_client
@@ -63,6 +67,15 @@ from services.asr_service.service import (
     get_asr_engine,
 )
 from services.document_service import parse_document
+from services.chat_service import iter_chat_deltas
+from services.chat_service.service import build_chat_messages
+from services.exam_service import solve_exam_screenshot
+from services.memory_service import (
+    delete_candidate_memories,
+    recall_memories,
+    scan_configured_roots,
+    scan_repo_memories,
+)
 from services.interview_orchestrator.dialogue import DialogueAssembler
 from services.interview_orchestrator.question_flow import (
     QuestionFlowState,
@@ -231,6 +244,23 @@ class _AliyunAudioContext:
     probe_chain_id: str | None
 
 
+# Dual-path capture sends the interviewer's microphone and the candidate's
+# loopback audio at the same time. A streaming ASR session is a single decoder
+# over a single PCM timeline, so interleaving two speakers into one session both
+# corrupts the decode and makes the time-overlap context matching below
+# ambiguous. Each capture channel therefore gets its own session, reader task,
+# result counter and context window.
+@dataclass
+class _AliyunChannel:
+    key: str
+    stream_id: str
+    speaker_hint: str | None
+    session: object | None = None
+    reader_task: "asyncio.Task[None] | None" = None
+    result_seq: int = 1
+    contexts: list[_AliyunAudioContext] = field(default_factory=list)
+
+
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI):
     configure_opentelemetry(fastapi_app, get_settings())
@@ -246,7 +276,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
-WEB_INDEX = Path(__file__).resolve().parents[2] / "web" / "index.html"
+WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+WEB_INDEX = WEB_ROOT / "index.html"
+WEB_SETTINGS = WEB_ROOT / "settings.html"
+WEB_COCKPIT = WEB_ROOT / "cockpit.html"
+WEB_ASSET_MEDIA_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
 
 
 def _client_key(request: Request) -> str:
@@ -619,7 +653,71 @@ def index() -> str:
     return WEB_INDEX.read_text(encoding="utf-8")
 
 
-def _probe_request_for_turn(record, turn: QATurn) -> ProbeRequest:
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page() -> str:
+    return WEB_SETTINGS.read_text(encoding="utf-8")
+
+
+@app.get("/cockpit", response_class=HTMLResponse)
+def cockpit() -> str:
+    return WEB_COCKPIT.read_text(encoding="utf-8")
+
+
+def _ui_settings_path() -> Path:
+    raw = get_settings().database_url
+    if raw.startswith("sqlite:///"):
+        db_path = Path(raw.removeprefix("sqlite:///"))
+        if str(db_path) not in {":memory:", ""}:
+            return db_path.parent / "ui_settings.json"
+    return Path("data") / "ui_settings.json"
+
+
+def _read_ui_settings() -> UiSettings:
+    path = _ui_settings_path()
+    if not path.is_file():
+        return UiSettings()
+    try:
+        return UiSettings.model_validate_json(path.read_text(encoding="utf-8"))
+    except Exception:
+        return UiSettings()
+
+
+@app.get("/api/ui/settings", response_model=UiSettings)
+def get_ui_settings() -> UiSettings:
+    return _read_ui_settings()
+
+
+@app.post("/api/ui/settings", response_model=UiSettings)
+def save_ui_settings(payload: UiSettings) -> UiSettings:
+    path = _ui_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
+    return payload
+
+
+@app.get("/styles.css")
+@app.get("/modules/{name}")
+def web_asset(request: Request, name: str = "") -> Response:
+    """Serve the split cockpit assets that index.html references.
+
+    The path is resolved under WEB_ROOT and rejected if it escapes, so a crafted
+    `name` cannot read files elsewhere on disk.
+    """
+    relative = f"modules/{name}" if name else "styles.css"
+    target = (WEB_ROOT / relative).resolve()
+    if not target.is_file() or WEB_ROOT.resolve() not in target.parents:
+        raise HTTPException(status_code=404, detail="asset not found")
+    media_type = WEB_ASSET_MEDIA_TYPES.get(target.suffix)
+    if media_type is None:
+        raise HTTPException(status_code=404, detail="asset not found")
+    return Response(target.read_text(encoding="utf-8"), media_type=media_type)
+
+
+def _probe_request_for_turn(
+    record,
+    turn: QATurn,
+    memory_hits: list[MemoryHit] | None = None,
+) -> ProbeRequest:
     return ProbeRequest(
         job_id=record.job_id,
         competency_model=record.context.competency_model,
@@ -627,7 +725,19 @@ def _probe_request_for_turn(record, turn: QATurn) -> ProbeRequest:
         latest_answer=turn.answer,
         resume_claims=_resume_claims_for_probe(record),
         probe_chains=record.context.probe_chains,
+        memory_hits=memory_hits or [],
     )
+
+
+def _recall_memory_hits(record, turn: QATurn) -> list[MemoryHit]:
+    """Recall project/past-interview memory for this answer. Never fails the probe path."""
+    if not get_settings().memory_enabled:
+        return []
+    query = f"{turn.question} {turn.answer}".strip()
+    try:
+        return recall_memories(query, exclude_interview_id=record.id)
+    except Exception:
+        return []
 
 
 def _resume_claims_for_probe(record) -> list[ResumeClaim]:
@@ -697,8 +807,22 @@ def _schedule_probe_task(
         )
         if signal is not None:
             await websocket.send_json({"type": "signal", "payload": signal.model_dump()})
+        memory_hits = await asyncio.to_thread(_recall_memory_hits, record, turn)
+        if memory_hits:
+            await websocket.send_json(
+                {
+                    "type": "memory_hits",
+                    "payload": {
+                        "interview_id": record.id,
+                        "turn_id": turn.turn_id,
+                        "items": [hit.model_dump() for hit in memory_hits],
+                    },
+                }
+            )
         try:
-            probe = await generate_probe(request)
+            probe = await generate_probe(
+                _probe_request_for_turn(record, turn, memory_hits) if memory_hits else request
+            )
         except Exception:
             return
         if probe.model_dump() != fallback.model_dump():
@@ -717,11 +841,13 @@ def _schedule_next_options_update(
         if runtime.question_flow is None:
             return
         try:
+            memory_hits = await asyncio.to_thread(_recall_memory_hits, record, turn)
             refined = await generate_next_options(
                 record,
                 runtime.question_flow.bank,
                 turn,
                 fallback_options,
+                memory_hits,
             )
         except Exception:
             return
@@ -897,6 +1023,13 @@ def _event_channel(event: dict) -> str | None:
     return None
 
 
+# The transport key for dual-path capture. It is deliberately the same field the
+# existing single-source client already sends ("channel" carries the speaker
+# name), so a one-source client keeps using exactly one channel.
+def _event_capture_channel(event: dict) -> str:
+    return _event_channel(event) or _event_speaker(event) or "default"
+
+
 def _event_session_mismatch(interview_id: str, event: dict) -> bool:
     session_id = str(event.get("session_id", "")).strip()
     return bool(session_id and session_id != interview_id)
@@ -1007,6 +1140,68 @@ async def api_parse_document(request: Request, kind: str = "resume", filename: s
             kind=kind,  # type: ignore[arg-type]
             content_type=request.headers.get("content-type", ""),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/chat/stream")
+async def api_chat_stream(payload: ChatStreamRequest):
+    try:
+        build_chat_messages(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def events():
+        try:
+            async for delta in iter_chat_deltas(payload):
+                yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True})}\n\n"
+        except Exception as exc:  # noqa: BLE001 - stream errors to the client as SSE
+            yield f"data: {json.dumps({'error': _safe_public_error(str(exc))}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.post("/api/exam/solve", response_model=ExamSolution)
+async def api_solve_exam(
+    request: Request,
+    filename: str = "exam.png",
+    question_hint: str = "",
+):
+    data = await request.body()
+    try:
+        return await asyncio.to_thread(
+            solve_exam_screenshot,
+            filename,
+            data,
+            question_hint=question_hint,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/memory/repos/scan")
+async def api_scan_repo_memory(path: str = ""):
+    try:
+        if path.strip():
+            return {"scanned": {path: await asyncio.to_thread(scan_repo_memories, path)}}
+        return {"scanned": await asyncio.to_thread(scan_configured_roots)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/memory/candidates/{candidate_id}")
+def api_delete_candidate_memory(candidate_id: str):
+    try:
+        return {"deleted": delete_candidate_memories(candidate_id)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1278,10 +1473,7 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
     runtime.senders.add(sender)
     asr_stream_id = f"{interview_id}:{new_id()}"
     engine = get_asr_engine()
-    aliyun_session = None
-    aliyun_reader_task: asyncio.Task[None] | None = None
-    aliyun_result_seq = 1
-    aliyun_audio_contexts: list[_AliyunAudioContext] = []
+    aliyun_channels: dict[str, _AliyunChannel] = {}
 
     def cancel_dialogue_silence_flush() -> None:
         if runtime.flush_task is not None and not runtime.flush_task.done():
@@ -1397,40 +1589,68 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
             if emit_probe and (force_probe or should_probe_turn(turn, record)):
                 _schedule_probe_task(runtime, record, turn)
 
-    async def ensure_aliyun_session():
-        nonlocal aliyun_session, aliyun_reader_task
+    def aliyun_channel_for(event: dict) -> _AliyunChannel:
+        # The first channel keeps the bare stream id so a single-source client
+        # (the manual-switch path, and every existing test) behaves exactly as
+        # before; only a genuinely second channel gets a suffixed stream.
+        key = _event_capture_channel(event)
+        channel = aliyun_channels.get(key)
+        if channel is not None:
+            return channel
+        stream_id = asr_stream_id if not aliyun_channels else f"{asr_stream_id}:{key}"
+        channel = _AliyunChannel(
+            key=key,
+            stream_id=stream_id,
+            speaker_hint=_event_speaker(event),
+        )
+        aliyun_channels[key] = channel
+        return channel
+
+    async def ensure_aliyun_session(channel: _AliyunChannel):
         if settings.asr_provider not in STREAMING_ASR_PROVIDERS:
             return None
-        if aliyun_session is not None and not getattr(aliyun_session, "finished", False):
-            return aliyun_session
+        if channel.session is not None and not getattr(channel.session, "finished", False):
+            return channel.session
         try:
-            aliyun_session = await engine.get_or_create_session(asr_stream_id)  # type: ignore[attr-defined]
+            channel.session = await engine.get_or_create_session(channel.stream_id)  # type: ignore[attr-defined]
         except Exception as exc:
             await _send_asr_warning(sender, _aliyun_warning_reason(exc), 0)
             return None
-        aliyun_reader_task = asyncio.create_task(_aliyun_result_reader(aliyun_session))
-        return aliyun_session
+        channel.reader_task = asyncio.create_task(_aliyun_result_reader(channel))
+        return channel.session
 
-    async def _aliyun_result_reader(session) -> None:
-        nonlocal record, aliyun_result_seq
+    async def close_aliyun_channels(*, await_readers: bool) -> None:
+        for channel in list(aliyun_channels.values()):
+            if channel.session is not None:
+                await channel.session.close()
+            if await_readers and channel.reader_task is not None:
+                await channel.reader_task
+
+    async def _aliyun_result_reader(channel: _AliyunChannel) -> None:
+        nonlocal record
+        session = channel.session
         while True:
             item = await session.result_queue.get()
             if item is None:
                 if session.error_reason:
-                    await _send_asr_warning(sender, session.error_reason, aliyun_result_seq)
+                    await _send_asr_warning(sender, session.error_reason, channel.result_seq)
                 return
-            seq = aliyun_result_seq
-            aliyun_result_seq += 1
-            context = _select_aliyun_audio_context(aliyun_audio_contexts, item)
+            seq = channel.result_seq
+            channel.result_seq += 1
+            context = _select_aliyun_audio_context(channel.contexts, item)
             if item.session_id != interview_id:
                 item = item.model_copy(update={"session_id": interview_id})
-            if context is not None and context.speaker_hint is not None and item.speaker == "unknown":
-                item = item.model_copy(update={"speaker": context.speaker_hint})
+            # Within one channel every chunk carries the same speaker, so the
+            # channel's own hint is a safer fallback than the time-matched
+            # context when the two disagree.
+            hint = (context.speaker_hint if context is not None else None) or channel.speaker_hint
+            if hint is not None and item.speaker == "unknown":
+                item = item.model_copy(update={"speaker": hint})
             decision = asr_session_manager.accept_segment(
                 seq,
                 item,
                 audio_b64=context.audio_b64 if context is not None else None,
-                stream_id=asr_stream_id,
+                stream_id=channel.stream_id,
             )
             if not decision.accepted or decision.segment is None:
                 await _send_asr_warning(sender, decision.reason, seq)
@@ -1483,11 +1703,12 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
                     await _send_asr_warning(sender, contract_warning, seq)
                     continue
                 if settings.asr_provider in STREAMING_ASR_PROVIDERS:
-                    session = await ensure_aliyun_session()
+                    channel = aliyun_channel_for(event)
+                    session = await ensure_aliyun_session(channel)
                     if session is None:
                         continue
                     start_ms, end_ms = _event_timestamp_bounds(event, seq)
-                    aliyun_audio_contexts.append(
+                    channel.contexts.append(
                         _AliyunAudioContext(
                             seq=seq,
                             start_ms=start_ms,
@@ -1500,18 +1721,18 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
                             probe_chain_id=_event_probe_chain_id(event),
                         )
                     )
-                    if len(aliyun_audio_contexts) > ALIYUN_AUDIO_CONTEXT_LIMIT:
-                        del aliyun_audio_contexts[:-ALIYUN_AUDIO_CONTEXT_LIMIT]
+                    if len(channel.contexts) > ALIYUN_AUDIO_CONTEXT_LIMIT:
+                        del channel.contexts[:-ALIYUN_AUDIO_CONTEXT_LIMIT]
                     pcm_bytes = base64.b64decode(audio_b64)
                     try:
                         await session.send_audio(pcm_bytes)
                     except Exception:
-                        if aliyun_session is not None:
-                            await aliyun_session.close()
+                        if channel.session is not None:
+                            await channel.session.close()
                         if hasattr(engine, "close_session"):
-                            await engine.close_session(asr_stream_id)  # type: ignore[attr-defined]
-                        aliyun_session = None
-                        session = await ensure_aliyun_session()
+                            await engine.close_session(channel.stream_id)  # type: ignore[attr-defined]
+                        channel.session = None
+                        session = await ensure_aliyun_session(channel)
                         if session is None:
                             continue
                         try:
@@ -1683,10 +1904,7 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
             elif event.get("type") == "end":
                 try:
                     cancel_dialogue_silence_flush()
-                    if aliyun_session is not None:
-                        await aliyun_session.close()
-                    if aliyun_reader_task is not None:
-                        await aliyun_reader_task
+                    await close_aliyun_channels(await_readers=True)
                     async with runtime.lock:
                         runtime.epoch += 1
                         await persist_dialogue_result(
@@ -1705,25 +1923,26 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
             else:
                 await sender.send_json({"type": "error", "detail": "unsupported event type"})
     except WebSocketDisconnect:
-        if aliyun_session is not None:
-            await aliyun_session.close()
+        await close_aliyun_channels(await_readers=False)
         return
     except KeyError as exc:
-        if aliyun_session is not None:
-            await aliyun_session.close()
+        await close_aliyun_channels(await_readers=False)
         await sender.send_json({"type": "error", "detail": str(exc)})
     except ValueError as exc:
-        if aliyun_session is not None:
-            await aliyun_session.close()
+        await close_aliyun_channels(await_readers=False)
         await sender.send_json({"type": "error", "detail": str(exc)})
     finally:
         runtime.senders.discard(sender)
-        asr_session_manager.close(interview_id, stream_id=asr_stream_id)
-        if hasattr(engine, "close_session"):
-            try:
-                await engine.close_session(asr_stream_id)  # type: ignore[attr-defined]
-            except Exception:
-                pass
+        stream_ids = [channel.stream_id for channel in aliyun_channels.values()] or [
+            asr_stream_id
+        ]
+        for stream_id in stream_ids:
+            asr_session_manager.close(interview_id, stream_id=stream_id)
+            if hasattr(engine, "close_session"):
+                try:
+                    await engine.close_session(stream_id)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
         if not runtime.senders:
             cancel_dialogue_silence_flush()
             try:

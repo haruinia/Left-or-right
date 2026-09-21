@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>六娃 · 设置</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600&family=Sora:wght@500;600&family=ZCOOL+XiaoWei&display=swap"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="settings-page">
+    <main class="settings-shell">
+      <header class="settings-top">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">六</span>
+          <div>
+            <span class="step">SETUP</span>
+            <h1>设置</h1>
+            <p>模型接入、快捷键，以及原来的面试工作台</p>
+          </div>
+        </div>
+        <a class="button secondary" href="/">打开六娃</a>
+      </header>
+
+      <section class="panel settings-card">
+        <span class="step">API</span>
+        <h2>大模型接入</h2>
+        <p class="small">首页截图会发给这里连上的网关模型。密钥只留在当前浏览器会话。</p>
+        <label>
+          API 地址
+          <input
+            id="gatewayOrigin"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="http://127.0.0.1:8001"
+            aria-label="Gateway 地址"
+          />
+        </label>
+        <label>
+          API Key
+          <input
+            id="gatewayKey"
+            type="password"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-label="Gateway Key"
+            placeholder="Gateway Key"
+          />
+        </label>
+        <label>
+          模型
+          <input
+            id="llmModel"
+            type="text"
+            readonly
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="连接后显示网关当前模型"
+            aria-label="当前模型"
+          />
+        </label>
+        <p class="small" id="connectedModel">等待读取模型配置</p>
+        <div class="settings-status-row">
+          <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
+          <span class="status-pill" id="modelStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>模型检查中</span></span>
+          <span class="status-pill" id="asrStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>ASR 检查中</span></span>
+        </div>
+        <div class="settings-actions">
+          <button type="button" id="saveGatewayKey" title="保存当前浏览器会话使用的 Gateway Key">保存接入</button>
+          <button class="secondary" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
+          <button class="secondary" type="button" id="checkModel" title="调用真实模型检查连接">检查模型</button>
+          <button class="secondary" type="button" id="checkAsr" title="检查 ASR 配置、依赖和 Token">检查 ASR</button>
+          <a class="button secondary" href="/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
+        </div>
+      </section>
+
+      <section class="panel settings-card">
+        <span class="step">SHORTCUTS</span>
+        <h2>快捷键</h2>
+        <p class="small">填写 Electron 加速键。首页：全屏截图放入对话框，再按发送键交给模型。展示、隐藏、退出在窗口未聚焦时也生效。</p>
+        <div class="hotkey-grid">
+          <label>
+            展示
+            <input id="hotkeyShowWindow" data-hotkey="showWindow" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="showWindow"></span>
+          </label>
+          <label>
+            隐藏
+            <input id="hotkeyHideWindow" data-hotkey="hideWindow" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="hideWindow"></span>
+          </label>
+          <label>
+            退出
+            <input id="hotkeyQuitApp" data-hotkey="quitApp" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="quitApp"></span>
+          </label>
+          <label>
+            按住操作面板
+            <input id="hotkeyToggleVisible" data-hotkey="toggleVisible" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="toggleVisible"></span>
+          </label>
+          <label>
+            紧凑 / 展开
+            <input id="hotkeyToggleCompact" data-hotkey="toggleCompact" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="toggleCompact"></span>
+          </label>
+          <label>
+            框选截图
+            <input id="hotkeyCaptureRegion" data-hotkey="captureRegion" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="captureRegion"></span>
+          </label>
+          <label>
+            全屏截图
+            <input id="hotkeyCaptureScreen" data-hotkey="captureScreen" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="captureScreen"></span>
+          </label>
+          <label>
+            发送给模型
+            <input id="hotkeySendChat" data-hotkey="sendChat" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="sendChat"></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel settings-card">
+        <span class="step">JOB</span>
+        <h2>岗位信息</h2>
+        <p class="small">给下面的面试工作台用。首页截图对话不会读这段 JD。</p>
+        <label>
+          岗位 JD
+          <textarea id="jdText" rows="8" placeholder="粘贴岗位职责、能力要求和业务背景"></textarea>
+        </label>
+        <label>
+          上传 JD 文档
+          <input
+            type="file"
+            id="jdFile"
+            aria-describedby="jdFileStatus"
+            accept=".txt,.md,.markdown,.json,.csv,.log,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/*"
+          />
+          <span class="small upload-status" id="jdFileStatus" role="status" aria-live="polite">支持 PDF、Word、图片和文本文件。</span>
+        </label>
+      </section>
+
+      <section class="panel settings-card">
+        <span class="step">RESUME</span>
+        <h2>简历信息</h2>
+        <p class="small">保存后作为候选人资料进入实时面试。</p>
+        <label>
+          简历摘要
+          <textarea id="resumeText" rows="8" placeholder="粘贴候选人经历、项目和职责"></textarea>
+        </label>
+        <label>
+          上传简历文档
+          <input
+            type="file"
+            id="resumeFile"
+            aria-describedby="resumeFileStatus"
+            accept=".txt,.md,.markdown,.json,.csv,.log,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/*"
+          />
+          <span class="small upload-status" id="resumeFileStatus" role="status" aria-live="polite">支持 PDF、Word、图片和文本文件。</span>
+        </label>
+        <label class="consent-row" for="longTermMemoryConsent">
+          <input type="checkbox" id="longTermMemoryConsent" name="long_term_memory_consent" />
+          <span>
+            记录跨面试长期记忆
+            <span class="small">勾选表示已获得候选人同意。未勾选时本次面试不会留下任何跨面试记忆。</span>
+          </span>
+        </label>
+      </section>
+
+      <div class="settings-footer">
+        <button type="button" id="saveUiSettings" title="保存岗位、简历和快捷键">保存设置</button>
+        <button class="secondary" type="button" id="loadSampleSettings" title="填入一组可直接试用的 JD 和简历">填入样例</button>
+      </div>
+      <div class="feed settings-log" id="settingsLog" role="status" aria-live="polite"></div>
+
+      <section class="panel settings-card settings-workbench" id="interview">
+        <span class="step">INTERVIEW</span>
+        <h2>面试工作台</h2>
+        <p class="small">原来的实时面试、麦克风、追问和结束评分都先放在这里，不再占首页。</p>
+        <iframe class="workbench-frame" src="/cockpit" title="面试工作台"></iframe>
+      </section>
+    </main>
+    <script type="module" src="modules/settings.js"></script>
+  </body>
+</html>

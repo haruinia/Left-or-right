@@ -1,0 +1,29 @@
+{
+  "name": "shuihuo-killer-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "六娃：隐身截屏对话。always-on-top, excluded from screen share.",
+  "main": "main/index.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.shuihuo.killer.cockpit",
+    "productName": "六娃",
+    "files": ["main/**", "preload/**", "config.example.json"],
+    "extraResources": [{ "from": "../web", "to": "web" }],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg"],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "实时转写面试对话需要麦克风权限。",
+        "NSScreenCaptureUsageDescription": "笔试截图出题需要屏幕录制权限。"
+      }
+    }
+  }
+}

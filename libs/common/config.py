@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     llm_max_retries: int = Field(default=1, ge=0)
     llm_rate_limit_enabled: bool = False
     llm_rate_limit_requests_per_minute: int = Field(default=60, ge=0)
+    vision_enabled: bool = False
+    vision_model: str = ""
+    vision_max_image_bytes: int = Field(default=4 * 1024 * 1024, gt=0)
+    memory_enabled: bool = False
+    memory_repo_roots: str = ""
+    memory_repo_max_commits: int = Field(default=200, ge=1)
+    memory_repo_max_repos: int = Field(default=20, ge=1)
+    memory_recall_limit: int = Field(default=3, ge=1, le=20)
+    memory_recall_min_score: float = Field(default=0.12, ge=0.0, le=1.0)
     asr_provider: Literal["stub", "http", "aliyun_ws", "aliyun_nls_ws"] = "stub"
     asr_base_url: str = ""
     asr_api_path: str = "/transcribe"
@@ -123,6 +132,8 @@ class Settings(BaseSettings):
     def runtime_dependencies_are_configured(self) -> "Settings":
         if self.question_bank_max < self.question_bank_min:
             raise ValueError("QUESTION_BANK_MAX must be greater than or equal to QUESTION_BANK_MIN")
+        if self.vision_enabled and self.llm_provider != "openai_compatible":
+            raise ValueError("VISION_ENABLED=true requires LLM_PROVIDER=openai_compatible")
         if self.asr_provider == "http" and not self.asr_base_url.strip():
             raise ValueError("ASR_PROVIDER=http requires ASR_BASE_URL")
         if (

@@ -380,6 +380,72 @@ class InterviewContext(BaseModel):
         return self
 
 
+class ExamSolution(BaseModel):
+    question_summary: str
+    key_points: list[str] = Field(min_length=1, max_length=8)
+    reference_answer: str
+    pitfalls: list[str] = Field(default_factory=list, max_length=5)
+    source: Literal["vision", "ocr_text"] = "vision"
+    used_fallback: bool = False
+    extracted_text: str = ""
+    warning: str = ""
+
+    @field_validator("question_summary", "reference_answer")
+    @classmethod
+    def exam_text_fields_are_not_blank(cls, value: str, info: ValidationInfo) -> str:
+        return _not_blank(value, f"exam solution {info.field_name}")
+
+    @field_validator("key_points", "pitfalls")
+    @classmethod
+    def exam_list_items_are_not_blank(cls, value: list[str], info: ValidationInfo) -> list[str]:
+        for item in value:
+            _not_blank(item, f"exam solution {info.field_name} item")
+        return value
+
+
+class MemoryHit(BaseModel):
+    memory_id: str
+    kind: Literal["project", "candidate_profile", "probe_playbook", "job_insight"]
+    subject: str
+    summary: str
+    detail: str = ""
+    score: float = Field(ge=0.0, le=1.0)
+    origin: str = ""
+
+    @field_validator("memory_id", "subject", "summary")
+    @classmethod
+    def memory_text_fields_are_not_blank(cls, value: str, info: ValidationInfo) -> str:
+        return _not_blank(value, f"memory hit {info.field_name}")
+
+
+class DistilledMemoryItem(BaseModel):
+    kind: Literal["candidate_profile", "probe_playbook", "job_insight"]
+    subject_key: str
+    summary: str
+    detail: str = ""
+
+    @field_validator("subject_key", "summary")
+    @classmethod
+    def distilled_text_fields_are_not_blank(cls, value: str, info: ValidationInfo) -> str:
+        return _not_blank(value, f"distilled memory {info.field_name}")
+
+
+class DistilledMemory(BaseModel):
+    items: list[DistilledMemoryItem] = Field(default_factory=list, max_length=8)
+
+
+class MemoryReviewItem(BaseModel):
+    turn_id: str
+    memory_subject: str
+    verdict: Literal["supported", "conflicted", "unverified"]
+    note: str
+
+    @field_validator("turn_id", "memory_subject", "note")
+    @classmethod
+    def review_text_fields_are_not_blank(cls, value: str, info: ValidationInfo) -> str:
+        return _not_blank(value, f"memory review {info.field_name}")
+
+
 class ResumeClaim(BaseModel):
     claim_id: str = Field(default_factory=new_id)
     text: str
@@ -405,6 +471,7 @@ class ProbeRequest(BaseModel):
     latest_answer: str
     resume_claims: list[ResumeClaim] = Field(default_factory=list)
     probe_chains: list[ProbeChain] = Field(default_factory=list)
+    memory_hits: list[MemoryHit] = Field(default_factory=list)
 
     @field_validator("job_id")
     @classmethod
@@ -761,7 +828,7 @@ class QuickSetupResponse(BaseModel):
 
 class ConsentCreate(BaseModel):
     candidate_id: str
-    consent_type: Literal["behavior_signal"] = "behavior_signal"
+    consent_type: Literal["behavior_signal", "long_term_memory"] = "behavior_signal"
     granted: bool = True
 
     @field_validator("candidate_id")
@@ -773,7 +840,7 @@ class ConsentCreate(BaseModel):
 class ConsentRecord(BaseModel):
     id: str = Field(default_factory=new_id)
     candidate_id: str
-    consent_type: Literal["behavior_signal"] = "behavior_signal"
+    consent_type: Literal["behavior_signal", "long_term_memory"] = "behavior_signal"
     granted: bool = True
     granted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     revoked_at: datetime | None = None
@@ -952,6 +1019,7 @@ class Report(BaseModel):
     probe_chains: list[ProbeChain] = Field(default_factory=list)
     candidate_resume_text: str = ""
     question_adoption: QuestionAdoptionStats = Field(default_factory=QuestionAdoptionStats)
+    memory_review: list[MemoryReviewItem] = Field(default_factory=list)
     summary: str
     json_path: str | None = None
     html_path: str | None = None
@@ -1038,3 +1106,93 @@ class Report(BaseModel):
                 raise ValueError(f"report transcript references unknown probe_chain_id: {turn.probe_chain_id}")
         _validate_aigc_results_cover_turn_ids(transcript_turn_ids, self.aigc_results)
         return self
+
+
+_HOTKEY_TOKENS = {
+    "CommandOrControl",
+    "Command",
+    "Control",
+    "Ctrl",
+    "Alt",
+    "Option",
+    "Shift",
+    "Super",
+    "Meta",
+    "Plus",
+    "Space",
+    "Tab",
+    "Enter",
+    "Return",
+    "Escape",
+    "Esc",
+    "Backspace",
+    "Delete",
+    "Up",
+    "Down",
+    "Left",
+    "Right",
+}
+
+
+def _valid_accelerator(value: str) -> str:
+    parts = [part for part in str(value).split("+") if part]
+    if len(parts) < 2:
+        raise ValueError("hotkey must include a modifier and a key")
+    for part in parts:
+        if part in _HOTKEY_TOKENS:
+            continue
+        if part.startswith("F") and part[1:].isdigit() and 1 <= int(part[1:]) <= 24:
+            continue
+        if len(part) == 1 and part.isalnum():
+            continue
+        raise ValueError(f"unsupported hotkey token: {part}")
+    return "+".join(parts)
+
+
+class UiHotkeys(BaseModel):
+    toggleVisible: str = "CommandOrControl+Shift+Space"
+    showWindow: str = "CommandOrControl+Shift+D"
+    hideWindow: str = "CommandOrControl+Shift+H"
+    quitApp: str = "CommandOrControl+Shift+Q"
+    toggleCompact: str = "CommandOrControl+Shift+J"
+    captureRegion: str = "CommandOrControl+Shift+U"
+    captureScreen: str = "CommandOrControl+Shift+Y"
+    sendChat: str = "CommandOrControl+Shift+Enter"
+
+    @field_validator(
+        "toggleVisible",
+        "showWindow",
+        "hideWindow",
+        "quitApp",
+        "toggleCompact",
+        "captureRegion",
+        "captureScreen",
+        "sendChat",
+    )
+    @classmethod
+    def accelerator_is_supported(cls, value: str) -> str:
+        return _valid_accelerator(value)
+
+
+class ChatHistoryTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    text: str = Field(default="", max_length=8000)
+
+
+class ChatStreamRequest(BaseModel):
+    text: str = Field(default="", max_length=8000)
+    images: list[str] = Field(default_factory=list, max_length=8)
+    history: list[ChatHistoryTurn] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def require_text_or_images(self) -> "ChatStreamRequest":
+        if not self.text.strip() and not self.images:
+            raise ValueError("chat requires text or images")
+        return self
+
+
+class UiSettings(BaseModel):
+    jd_text: str = ""
+    resume_text: str = ""
+    long_term_memory_consent: bool = False
+    hotkeys: UiHotkeys = Field(default_factory=UiHotkeys)

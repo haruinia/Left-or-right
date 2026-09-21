@@ -16,6 +16,7 @@ from libs.schemas import (
     ConsistencyFlag,
     InterviewContext,
     InterviewScore,
+    MemoryReviewItem,
     QuestionAdoptionStats,
     Report,
 )
@@ -123,6 +124,25 @@ REPORT_TEMPLATE = Template(
         </table>
         {% else %}
         <p>暂无追问链。</p>
+        {% endif %}
+      </section>
+      <section>
+        <h2>复盘：记忆对照</h2>
+        {% if memory_review %}
+        <p>以下为本场回答与面试官本地项目库、历史面试记忆的逐轮对照，仅作复核线索。</p>
+        <table>
+          <tr><th>轮次</th><th>命中记忆</th><th>对照结论</th><th>说明</th></tr>
+          {% for item in memory_review %}
+          <tr class="{{ 'flagged' if item.verdict == 'conflicted' else '' }}">
+            <td>{{ item.turn_id }}</td>
+            <td>{{ item.memory_subject }}</td>
+            <td>{{ item.verdict }}</td>
+            <td>{{ item.note }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <p>本场没有记忆命中（记忆层未开启或没有相关项目/历史记录）。</p>
         {% endif %}
       </section>
       <section>
@@ -262,6 +282,52 @@ def _probe_chain_rows(ctx: InterviewContext) -> list[dict]:
     return rows
 
 
+def _memory_review(ctx: InterviewContext) -> list[MemoryReviewItem]:
+    """Line each answer up against recalled memory, one row per turn that hit something.
+
+    The verdict comes from the probe chain that covers the turn: a cracked chain means
+    the claim did not survive drilling, a held-up chain means it did. Anything else is
+    left as `unverified` — a memory hit alone is a lead, not a conclusion.
+    """
+    from services.memory_service.service import recall_memories
+
+    verdict_by_turn = _chain_verdict_by_turn(ctx)
+    items: list[MemoryReviewItem] = []
+    for turn in ctx.turns:
+        query = f"{turn.question} {turn.answer}".strip()
+        try:
+            hits = recall_memories(query, limit=1, exclude_interview_id=ctx.session_id)
+        except Exception:
+            return items
+        if not hits:
+            continue
+        hit = hits[0]
+        verdict = verdict_by_turn.get(turn.turn_id, "unverified")
+        items.append(
+            MemoryReviewItem(
+                turn_id=turn.turn_id,
+                memory_subject=hit.subject,
+                verdict=verdict,
+                note=f"命中记忆（相似度 {hit.score:.2f}，来源 {hit.origin or '未知'}）：{hit.summary}",
+            )
+        )
+    return items
+
+
+def _chain_verdict_by_turn(ctx: InterviewContext) -> dict[str, str]:
+    verdicts: dict[str, str] = {}
+    for chain in ctx.probe_chains:
+        if chain.verdict == "cracked":
+            verdict = "conflicted"
+        elif chain.verdict == "held_up":
+            verdict = "supported"
+        else:
+            verdict = "unverified"
+        for link in chain.links:
+            verdicts[link.answer_turn_id] = verdict
+    return verdicts
+
+
 def _question_adoption_stats(ctx: InterviewContext) -> QuestionAdoptionStats:
     suggested_keys = list(dict.fromkeys(ctx.suggested_question_keys))
     for turn in ctx.turns:
@@ -391,6 +457,7 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
     _validate_report_inputs(ctx, score, aigc)
     ordered_utterances = _ordered_utterances(ctx)
     question_adoption = _question_adoption_stats(ctx)
+    memory_review = _memory_review(ctx)
     summary = (
         f"候选人在本场面试中获得 {score.total_score} 分，系统建议为 {score.recommendation}。"
         "报告中的每项评分均绑定原始回答证据，注水风险需由面试官结合上下文复核。"
@@ -407,6 +474,7 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
         utterances=ordered_utterances,
         candidate_resume_text=ctx.candidate_resume_text,
         question_adoption=question_adoption,
+        memory_review=memory_review,
         radar_chart_uri=_radar_chart_uri(score),
     )
     settings = get_settings()
@@ -423,6 +491,7 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
                 "full_transcript": [utterance.model_dump() for utterance in ordered_utterances],
                 "probe_chains": [chain.model_dump() for chain in ctx.probe_chains],
                 "question_adoption": question_adoption.model_dump(),
+                "memory_review": [item.model_dump() for item in memory_review],
                 "analysis_mode": score.analysis_mode,
             },
             ensure_ascii=False,
@@ -460,6 +529,7 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
         probe_chains=ctx.probe_chains,
         candidate_resume_text=ctx.candidate_resume_text,
         question_adoption=question_adoption,
+        memory_review=memory_review,
         summary=summary,
         json_path=str(json_path),
         html_path=str(html_path),

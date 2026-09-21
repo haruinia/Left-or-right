@@ -16,7 +16,7 @@ from libs.common.events import event_bus
 from libs.common.observability import metrics_registry, reset_rate_limiters
 from libs.common.storage import ArtifactContent
 from libs.common.tasks import task_queue
-from libs.schemas import SetupExtraction, TranscriptSegment
+from libs.schemas import ExamSolution, SetupExtraction, TranscriptSegment
 from services.asr_service.service import asr_session_manager
 from services.gateway.app import app
 
@@ -341,433 +341,464 @@ def test_gateway_report_transcript_falls_back_to_persisted_payload_when_artifact
     assert payload["full_transcript"] == report["utterances"]
 
 
+# Every module index.html loads, in graph order. Listed explicitly so a module that
+# stops being served fails this test instead of silently dropping its assertions.
+_COCKPIT_MODULES = (
+    "state",
+    "dom",
+    "ui",
+    "gateway",
+    "runtime",
+    "documents",
+    "panels",
+    "session",
+    "live",
+    "report",
+    "mic",
+    "app",
+)
+
+
+def _served_cockpit_bundle(client: TestClient, index_html: str) -> str:
+    """Concatenate index.html with every asset it references, as a browser would."""
+    parts = [index_html]
+    for asset in ("/styles.css", *(f"/modules/{name}.js" for name in _COCKPIT_MODULES)):
+        served = client.get(asset)
+        assert served.status_code == 200, asset
+        parts.append(served.text)
+    return "\n".join(parts)
+
 def test_gateway_serves_demo_ui(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
-    response = client.get("/")
+    response = client.get("/cockpit")
     assert response.status_code == 200
-    assert "水货杀手" in response.text
-    assert "/api/jobs" in response.text
-    assert "创建实时面试" in response.text
-    assert "专业追问" in response.text
-    assert "/api/interviews/quick-setup" in response.text
-    assert "/ws/interview/" in response.text
-    assert 'id="currentQuestionText"' in response.text
-    assert 'id="nextOptionList"' in response.text
-    assert 'id="debugTextPanel"' in response.text
-    assert 'data-steering-focus="resume_drill"' in response.text
-    assert "current_question" in response.text
-    assert "next_options_update" in response.text
-    assert "set_steering" in response.text
-    assert "debug_text_input_enabled" in response.text
-    assert "问题采纳统计" in response.text
-    assert 'id="roleLinks"' in response.text
-    assert "joinExistingInterviewFromUrl" in response.text
-    assert "joinInterviewIdFromUrl" in response.text
-    assert "roleFromUrl" in response.text
-    assert 'url.searchParams.set("join", state.interview.id)' in response.text
-    assert 'url.searchParams.set("role", role)' in response.text
-    assert 'fetchGatewayJson(`/api/interviews/${encodeURIComponent(interviewId)}`' in response.text
-    assert "selectedProbeChainId" in response.text
-    assert "chain_id: state.selectedProbeChainId" in response.text
-    assert "asr_warning" in response.text
-    assert "开始麦克风" in response.text
-    assert "停止麦克风" in response.text
-    assert "重连通道" in response.text
-    assert "刷新状态" in response.text
-    assert 'id="runtimeStatus" role="status" aria-live="polite"' in response.text
-    assert 'id="modelStatus" role="status" aria-live="polite"' in response.text
-    assert 'id="asrStatus" role="status" aria-live="polite"' in response.text
-    assert 'aria-label="Gateway Key"' in response.text
-    assert 'autocapitalize="off"' in response.text
-    assert 'title="刷新本地服务、模型和 ASR 配置状态"' in response.text
-    assert 'title="调用真实模型检查连接"' in response.text
-    assert 'title="检查 ASR 配置、依赖和 Token"' in response.text
-    assert 'title="保存当前浏览器会话使用的 Gateway Key"' in response.text
-    assert 'title="填入一组可直接试用的 JD、简历和回答"' in response.text
-    assert 'title="打开本地 API 文档"' in response.text
-    assert 'title="创建实时面试通道"' in response.text
-    assert 'title="清空当前面试状态并重新开始"' in response.text
-    assert "maxLiveFeedEvents = 120" in response.text
-    assert "trimLiveFeedEvents" in response.text
-    assert "setStatusTitleFromMessage" in response.text
-    assert "result.message" in response.text
-    assert "配置状态读取失败" in response.text
-    assert "modelStatusFromConfig" in response.text
-    assert "模型模拟模式" in response.text
-    assert "模型未配置完整" in response.text
-    assert "模型 ${modelName} 已配置" in response.text
-    assert "已配置，未测试" in response.text
-    assert "本地服务已连接；模型配置已填写但尚未调用真实模型测试" in response.text
-    assert "点击“检查模型”后才会确认模型连接" in response.text
-    assert "audio_chunk" in response.text
-    assert "pcm16" in response.text
-    assert "micChunkSamples = Math.floor(micSampleRate / 4)" in response.text
-    assert "audioContextConstructor" in response.text
-    assert "window.webkitAudioContext" in response.text
-    assert "当前浏览器不支持 Web Audio" in response.text
-    assert "micStarting" in response.text
-    assert "麦克风启动中" in response.text
-    assert "正在请求麦克风权限并初始化音频采集" in response.text
-    assert "micStartToken" in response.text
-    assert "micStartStillCurrent" in response.text
-    assert "if (!micStartStillCurrent(micStartToken)) return" in response.text
-    assert "麦克风启动已取消" in response.text
-    assert "micError" in response.text
-    assert "修复后再次点击开始麦克风" in response.text
-    assert "discoverGateway" in response.text
-    assert "fallbackGatewayOrigins" in response.text
-    assert "fetchGatewayJson" in response.text
-    assert "wsUrl(`/ws/interview/${interviewId}`)" in response.text
-    assert "python scripts/run_gateway.py" in response.text
-    assert "http://127.0.0.1:8001" in response.text
-    assert "无法连接到本地 gateway" in response.text
-    assert "页面正在尝试连接" in response.text
-    assert "失败详情" in response.text
-    assert "gatewayFailureTitle" in response.text
-    assert "setRuntimeStatusFromGateway(status)" in response.text
-    assert "function setRuntimeStatusFromGateway(status)" in response.text
-    assert "setRuntimeStatusGatewayUnavailable(error)" in response.text
-    assert "function setRuntimeStatusGatewayUnavailable(error)" in response.text
-    assert response.text.count("state.lastRuntimeCheckAt = Date.now()") == 2
-    assert "runtimeStatus.title = gatewayFailureTitle(error)" in response.text
-    assert "服务不可达：${errorText(error)}。${gatewayHelpText()}" in response.text
-    assert "setDependentStatusWaitingForGateway(error)" in response.text
-    assert "function setDependentStatusWaitingForGateway(error)" in response.text
-    assert "applyModelStatusFromConfig(config)" in response.text
-    assert "applyAsrStatusFromConfig(config)" in response.text
-    assert "function dependencyStatusAlreadyVerified(peer)" in response.text
-    assert "if (dependencyStatusAlreadyVerified(peer)) return" in response.text
-    assert "function refreshPeerDependencyStatusFromConfig(peer)" in response.text
-    assert 'await refreshPeerDependencyStatusFromConfig("asr")' in response.text
-    assert 'await refreshPeerDependencyStatusFromConfig("model")' in response.text
-    assert 'showGatewayKeyRequired("配置刷新", { [peer]: true })' in response.text
-    assert "setModelStatusWaitingForGateway(error)" in response.text
-    assert "setAsrStatusWaitingForGateway(error)" in response.text
-    assert "function gatewayUnavailableEventBody(error)" in response.text
-    assert "if (gatewayError) return" in response.text
-    assert "模型等待本地服务" in response.text
-    assert "ASR 等待本地服务" in response.text
-    assert "当前 gateway" in response.text
-    assert "runtimeCheckToken" in response.text
-    assert "runtimeCheckStillCurrent" in response.text
-    assert "modelCheckToken" in response.text
-    assert "modelCheckStillCurrent" in response.text
-    assert "asrCheckToken" in response.text
-    assert "asrCheckStillCurrent" in response.text
-    assert "refreshRuntimeIfVisible" in response.text
-    assert "window.addEventListener(\"online\", refreshRuntimeIfVisible)" in response.text
-    assert "gatewayOriginFromResponse" in response.text
-    assert "new URL(response.url).origin" in response.text
-    assert "resolvedOrigin" in response.text
-    assert "ASR 检查中" in response.text
-    assert "ASR 阿里云 NLS 已配置，未测试" in response.text
-    assert "ASR 阿里云 NLS 已配置（自动 Token），未测试" in response.text
-    assert "ASR 配置已填写但尚未验证依赖、Token 和音频链路" in response.text
-    assert "点击“检查 ASR”后才会确认" in response.text
-    assert "asrCheckStatusText" in response.text
-    assert "ASR 固定 Token 已配置，自动刷新可用" in response.text
-    assert "ASR Token 可生成，未跑音频" in response.text
-    assert "ASR 固定 Token 已配置" in response.text
-    assert "ASR 配置存在，未跑音频" in response.text
-    assert "ASR 长时间没有收到有效语音" in response.text
-    assert "ASR Token 已失效或被拒绝" in response.text
-    assert "ALIYUN_NLS_TOKEN 或阿里云 AccessKey 权限" in response.text
-    assert "ALIYUN_ASR_API_KEY 是否是百炼/DashScope API Key" in response.text
-    assert "NLS Token 创建失败" in response.text
-    assert "ASR WebSocket 依赖缺失" in response.text
-    assert "ASR 没有返回识别文本" in response.text
-    assert "每 250ms 发送低音量保活音频" in response.text
-    assert "避免 ASR 空闲断开" in response.text
-    assert "原始原因" in response.text
-    assert "先创建实时面试" in response.text
-    assert "实时通道连接中" in response.text
-    assert "通道未连接" in response.text
-    assert "等待重连通道" in response.text
-    assert "liveChannelUnavailableReason" in response.text
-    assert "实时通道未连接，请点击重连通道" in response.text
-    assert "WebSocket 已关闭。可点击重连通道继续当前面试。" in response.text
-    assert "恢复后点击重连通道继续当前面试" in response.text
-    assert "openSocketWithLatestGateway" in response.text
-    assert "socketToken" in response.text
-    assert "socketStillCurrent" in response.text
-    assert "if (!socketStillCurrent(socketToken)) return" in response.text
-    assert "连接前无法确认本地 gateway" in response.text
-    assert "WebSocket 初始化失败" in response.text
-    assert "handleSocketMessage" in response.text
-    assert "parseLiveSocketMessage" in response.text
-    assert "实时消息不是有效 JSON" in response.text
-    assert "validateLiveMessage" in response.text
-    assert "实时消息格式异常" in response.text
-    assert "实时消息结构异常" in response.text
-    assert "未知实时消息类型" in response.text
-    assert "formatLiveError" in response.text
-    assert "还没有候选人回答，不能生成评分报告" in response.text
-    assert "候选人回答不能为空" in response.text
-    assert "实时消息序号无效，请重连通道后重试" in response.text
-    assert "原始错误" in response.text
-    assert 'id="liveStatus" role="status" aria-live="polite"' in response.text
-    assert 'id="micStatus" role="status" aria-live="polite"' in response.text
+    # The cockpit is served as index.html + styles.css + ES modules, so the
+    # behavioural assertions below run against everything the page pulls in.
+    bundle = _served_cockpit_bundle(client, response.text)
+    assert "六娃" in bundle
+    assert "/api/jobs" in bundle
+    assert "创建实时面试" in bundle
+    assert "专业追问" in bundle
+    assert "/api/interviews/quick-setup" in bundle
+    assert "/ws/interview/" in bundle
+    assert 'id="currentQuestionText"' in bundle
+    assert 'id="nextOptionList"' in bundle
+    assert 'id="debugTextPanel"' in bundle
+    assert 'data-steering-focus="resume_drill"' in bundle
+    assert "current_question" in bundle
+    assert "next_options_update" in bundle
+    assert "set_steering" in bundle
+    assert "debug_text_input_enabled" in bundle
+    assert "问题采纳统计" in bundle
+    assert 'id="roleLinks"' in bundle
+    assert "joinExistingInterviewFromUrl" in bundle
+    assert "joinInterviewIdFromUrl" in bundle
+    assert "roleFromUrl" in bundle
+    assert 'url.searchParams.set("join", state.interview.id)' in bundle
+    assert 'url.searchParams.set("role", role)' in bundle
+    assert 'fetchGatewayJson(`/api/interviews/${encodeURIComponent(interviewId)}`' in bundle
+    assert "selectedProbeChainId" in bundle
+    assert "chain_id: state.selectedProbeChainId" in bundle
+    assert "asr_warning" in bundle
+    assert "开始麦克风" in bundle
+    assert "停止麦克风" in bundle
+    assert "重连通道" in bundle
+    assert "刷新状态" in bundle
+    assert 'id="runtimeStatus" role="status" aria-live="polite"' in bundle
+    assert 'id="modelStatus" role="status" aria-live="polite"' in bundle
+    assert 'id="asrStatus" role="status" aria-live="polite"' in bundle
+    assert 'aria-label="Gateway Key"' in bundle
+    assert 'autocapitalize="off"' in bundle
+    assert 'title="刷新本地服务、模型和 ASR 配置状态"' in bundle
+    assert 'title="调用真实模型检查连接"' in bundle
+    assert 'title="检查 ASR 配置、依赖和 Token"' in bundle
+    assert 'title="保存当前浏览器会话使用的 Gateway Key"' in bundle
+    assert 'title="填入一组可直接试用的 JD、简历和回答"' in bundle
+    assert 'title="打开本地 API 文档"' in bundle
+    assert 'title="创建实时面试通道"' in bundle
+    assert 'title="清空当前面试状态并重新开始"' in bundle
+    assert "maxLiveFeedEvents = 120" in bundle
+    assert "trimLiveFeedEvents" in bundle
+    assert "setStatusTitleFromMessage" in bundle
+    assert "result.message" in bundle
+    assert "配置状态读取失败" in bundle
+    assert "modelStatusFromConfig" in bundle
+    assert "模型模拟模式" in bundle
+    assert "模型未配置完整" in bundle
+    assert "模型 ${modelName} 已配置" in bundle
+    assert "已配置，未测试" in bundle
+    assert "本地服务已连接；模型配置已填写但尚未调用真实模型测试" in bundle
+    assert "点击“检查模型”后才会确认模型连接" in bundle
+    assert "audio_chunk" in bundle
+    assert "pcm16" in bundle
+    assert "micChunkSamples = Math.floor(micSampleRate / 4)" in bundle
+    assert "audioContextConstructor" in bundle
+    assert "window.webkitAudioContext" in bundle
+    assert "当前浏览器不支持 Web Audio" in bundle
+    assert "micStarting" in bundle
+    assert "麦克风启动中" in bundle
+    assert "正在请求麦克风权限并初始化音频采集" in bundle
+    assert "micStartToken" in bundle
+    assert "micStartStillCurrent" in bundle
+    assert "if (!micStartStillCurrent(micStartToken)) return" in bundle
+    assert "麦克风启动已取消" in bundle
+    assert "micError" in bundle
+    assert "修复后再次点击开始麦克风" in bundle
+    assert "discoverGateway" in bundle
+    assert "fallbackGatewayOrigins" in bundle
+    assert "fetchGatewayJson" in bundle
+    assert "wsUrl(`/ws/interview/${interviewId}`)" in bundle
+    assert "python scripts/run_gateway.py" in bundle
+    assert "http://127.0.0.1:8001" in bundle
+    assert "无法连接到本地 gateway" in bundle
+    assert "页面正在尝试连接" in bundle
+    assert "失败详情" in bundle
+    assert "gatewayFailureTitle" in bundle
+    assert "setRuntimeStatusFromGateway(status)" in bundle
+    assert "function setRuntimeStatusFromGateway(status)" in bundle
+    assert "setRuntimeStatusGatewayUnavailable(error)" in bundle
+    assert "function setRuntimeStatusGatewayUnavailable(error)" in bundle
+    assert bundle.count("state.lastRuntimeCheckAt = Date.now()") == 2
+    assert "runtimeStatus.title = gatewayFailureTitle(error)" in bundle
+    assert "服务不可达：${errorText(error)}。${gatewayHelpText()}" in bundle
+    assert "setDependentStatusWaitingForGateway(error)" in bundle
+    assert "function setDependentStatusWaitingForGateway(error)" in bundle
+    assert "applyModelStatusFromConfig(config)" in bundle
+    assert "applyAsrStatusFromConfig(config)" in bundle
+    assert "function dependencyStatusAlreadyVerified(peer)" in bundle
+    assert "if (dependencyStatusAlreadyVerified(peer)) return" in bundle
+    assert "function refreshPeerDependencyStatusFromConfig(peer)" in bundle
+    assert 'await refreshPeerDependencyStatusFromConfig("asr")' in bundle
+    assert 'await refreshPeerDependencyStatusFromConfig("model")' in bundle
+    assert 'showGatewayKeyRequired("配置刷新", { [peer]: true })' in bundle
+    assert "setModelStatusWaitingForGateway(error)" in bundle
+    assert "setAsrStatusWaitingForGateway(error)" in bundle
+    assert "function gatewayUnavailableEventBody(error)" in bundle
+    assert "if (gatewayError) return" in bundle
+    assert "模型等待本地服务" in bundle
+    assert "ASR 等待本地服务" in bundle
+    assert "当前 gateway" in bundle
+    assert "runtimeCheckToken" in bundle
+    assert "runtimeCheckStillCurrent" in bundle
+    assert "modelCheckToken" in bundle
+    assert "modelCheckStillCurrent" in bundle
+    assert "asrCheckToken" in bundle
+    assert "asrCheckStillCurrent" in bundle
+    assert "refreshRuntimeIfVisible" in bundle
+    assert "window.addEventListener(\"online\", refreshRuntimeIfVisible)" in bundle
+    assert "gatewayOriginFromResponse" in bundle
+    assert "new URL(response.url).origin" in bundle
+    assert "resolvedOrigin" in bundle
+    assert "ASR 检查中" in bundle
+    assert "ASR 阿里云 NLS 已配置，未测试" in bundle
+    assert "ASR 阿里云 NLS 已配置（自动 Token），未测试" in bundle
+    assert "ASR 配置已填写但尚未验证依赖、Token 和音频链路" in bundle
+    assert "点击“检查 ASR”后才会确认" in bundle
+    assert "asrCheckStatusText" in bundle
+    assert "ASR 固定 Token 已配置，自动刷新可用" in bundle
+    assert "ASR Token 可生成，未跑音频" in bundle
+    assert "ASR 固定 Token 已配置" in bundle
+    assert "ASR 配置存在，未跑音频" in bundle
+    assert "ASR 长时间没有收到有效语音" in bundle
+    assert "ASR Token 已失效或被拒绝" in bundle
+    assert "ALIYUN_NLS_TOKEN 或阿里云 AccessKey 权限" in bundle
+    assert "ALIYUN_ASR_API_KEY 是否是百炼/DashScope API Key" in bundle
+    assert "NLS Token 创建失败" in bundle
+    assert "ASR WebSocket 依赖缺失" in bundle
+    assert "ASR 没有返回识别文本" in bundle
+    assert "每 250ms 发送低音量保活音频" in bundle
+    assert "避免 ASR 空闲断开" in bundle
+    assert "原始原因" in bundle
+    assert "先创建实时面试" in bundle
+    assert "实时通道连接中" in bundle
+    assert "通道未连接" in bundle
+    assert "等待重连通道" in bundle
+    assert "liveChannelUnavailableReason" in bundle
+    assert "实时通道未连接，请点击重连通道" in bundle
+    assert "WebSocket 已关闭。可点击重连通道继续当前面试。" in bundle
+    assert "恢复后点击重连通道继续当前面试" in bundle
+    assert "openSocketWithLatestGateway" in bundle
+    assert "socketToken" in bundle
+    assert "socketStillCurrent" in bundle
+    assert "if (!socketStillCurrent(socketToken)) return" in bundle
+    assert "连接前无法确认本地 gateway" in bundle
+    assert "WebSocket 初始化失败" in bundle
+    assert "handleSocketMessage" in bundle
+    assert "parseLiveSocketMessage" in bundle
+    assert "实时消息不是有效 JSON" in bundle
+    assert "validateLiveMessage" in bundle
+    assert "实时消息格式异常" in bundle
+    assert "实时消息结构异常" in bundle
+    assert "未知实时消息类型" in bundle
+    assert "formatLiveError" in bundle
+    assert "还没有候选人回答，不能生成评分报告" in bundle
+    assert "候选人回答不能为空" in bundle
+    assert "实时消息序号无效，请重连通道后重试" in bundle
+    assert "原始错误" in bundle
+    assert 'id="liveStatus" role="status" aria-live="polite"' in bundle
+    assert 'id="micStatus" role="status" aria-live="polite"' in bundle
     assert 'class="control-hint" id="controlHint" role="status" aria-live="polite"' in (
-        response.text
+        bundle
     )
     assert 'id="liveFeed" role="log" aria-live="polite" aria-relevant="additions text"' in (
-        response.text
+        bundle
     )
-    assert 'id="sendAnswer" aria-describedby="controlHint"' in response.text
-    assert 'id="startMic" aria-describedby="controlHint"' in response.text
-    assert 'id="reconnectSocket" aria-describedby="controlHint"' in response.text
-    assert 'id="endInterview" aria-describedby="controlHint"' in response.text
-    assert "controlHintText" in response.text
-    assert "controlHintTone" in response.text
-    assert "controlHint.className" in response.text
-    assert 'id="questionCharCount" role="status" aria-live="polite"' in response.text
-    assert 'id="answerCharCount" role="status" aria-live="polite"' in response.text
-    assert "answerMinChars = 20" in response.text
-    assert "updateTextCounters" in response.text
-    assert "textTurnReady" in response.text
-    assert "sendAnswer.disabled = !textReady" in response.text
-    assert "manualProbe.disabled = !textReady" in response.text
-    assert "当前问题和候选人回答都需要填写" in response.text
-    assert "请填写当前问题和候选人回答后发送文字回答" in response.text
-    assert "建议至少 ${answerMinChars} 字" in response.text
-    assert 'answerText.addEventListener("input", updateTextCounters)' in response.text
-    assert ".control-hint.warn" in response.text
-    assert "实时通道已连接。可以发送文字回答" in response.text
-    assert "实时通道未连接。请点击重连通道" in response.text
-    assert "liveChannelReadyForInput" in response.text
-    assert "实时通道未连接，请点击重连通道。" in response.text
-    assert "sendLiveSocketPayload" in response.text
-    assert "发送失败" in response.text
-    assert "请点击重连通道后重试" in response.text
-    assert "(question ? answerText : currentQuestion).focus();" in response.text
-    assert 'answerText.value = ""' in response.text
-    assert "answerText.focus();" in response.text
-    assert "if (!manual) {" in response.text
-    assert "endingInterview" in response.text
-    assert "正在结束面试并生成评分报告，请等待结果" in response.text
-    assert "requestEndInterview" in response.text
-    assert "setPill(liveStatus, \"评分中\", \"live\");" in response.text
-    assert "setControls();" in response.text
-    assert 'sendLiveSocketPayload({ type: "end" }, "结束面试失败")' in response.text
-    assert "state.seq += 1" in response.text
-    assert "stopMicCapture({ flush: false })" in response.text
-    assert "readErrorMessage" in response.text
-    assert "readJsonResponse" in response.text
-    assert "接口响应不是有效 JSON" in response.text
-    assert "服务健康检查响应不是有效 JSON" in response.text
-    assert "资料解析响应不是有效 JSON" in response.text
-    assert "formatApiDetailItem" in response.text
-    assert "item.loc" in response.text
-    assert "payload.detail" in response.text
-    assert 'part !== "body" && part !== "query"' in response.text
-    assert 'error.name === "AbortError"' in response.text
-    assert "请求超时，请确认本地服务仍在运行" in response.text
-    assert "signal is aborted|aborted without reason" in response.text
-    assert "请求被浏览器中止，通常是前端超时或重复触发检查导致" in response.text
-    assert "failed to fetch|networkerror|load failed" in response.text
-    assert "无法连接到本地服务，请确认 gateway 正在运行后重试" in response.text
-    assert "cursor: not-allowed" in response.text
-    assert 'button[data-busy="true"]' in response.text
-    assert "setButtonBusy" in response.text
-    assert 'button.setAttribute("aria-busy", "true")' in response.text
-    assert "const { timeoutMs, ...fetchOptions } = options" in response.text
-    assert "timeoutMs: documentParseTimeoutMs" in response.text
-    assert "documentParseTimeoutMs = 45_000" in response.text
-    assert "prepareSessionTimeoutMs = 90_000" in response.text
-    assert "externalCheckTimeoutMs = 65_000" in response.text
-    assert 'else if (connected) {\n          setPill(micStatus, "麦克风未开启", "");' in response.text
-    assert "input.disabled = true" in response.text
-    assert "input.value = \"\"" in response.text
-    assert ".log,.pdf" in response.text
-    assert "supportedDocumentSuffixes" in response.text
-    assert "supportedDocumentMimeTypes" in response.text
-    assert "supportedDocumentFile(file)" in response.text
-    assert "normalizedContentType(file.type)" in response.text
-    assert 'type.startsWith("text/")' in response.text
-    assert 'type.startsWith("image/")' in response.text
-    assert "文件格式暂不支持" in response.text
-    assert "txt、md、json、csv、log、pdf、docx、doc 或图片" in response.text
-    assert "setUploadInputStatus" in response.text
-    assert 'input[type="file"]:disabled' in response.text
-    assert 'aria-describedby="jdFileStatus"' in response.text
+    assert 'id="sendAnswer" aria-describedby="controlHint"' in bundle
+    assert 'id="startMic" aria-describedby="controlHint"' in bundle
+    assert 'id="reconnectSocket" aria-describedby="controlHint"' in bundle
+    assert 'id="endInterview" aria-describedby="controlHint"' in bundle
+    assert "controlHintText" in bundle
+    assert "controlHintTone" in bundle
+    assert "controlHint.className" in bundle
+    assert 'id="questionCharCount" role="status" aria-live="polite"' in bundle
+    assert 'id="answerCharCount" role="status" aria-live="polite"' in bundle
+    assert "answerMinChars = 20" in bundle
+    assert "updateTextCounters" in bundle
+    assert "textTurnReady" in bundle
+    assert "sendAnswer.disabled = !textReady" in bundle
+    assert "manualProbe.disabled = !textReady" in bundle
+    assert "当前问题和候选人回答都需要填写" in bundle
+    assert "请填写当前问题和候选人回答后发送文字回答" in bundle
+    assert "建议至少 ${answerMinChars} 字" in bundle
+    assert 'answerText.addEventListener("input", updateTextCounters)' in bundle
+    assert ".control-hint.warn" in bundle
+    assert "实时通道已连接。可以发送文字回答" in bundle
+    assert "实时通道未连接。请点击重连通道" in bundle
+    assert "liveChannelReadyForInput" in bundle
+    assert "实时通道未连接，请点击重连通道。" in bundle
+    assert "sendLiveSocketPayload" in bundle
+    assert "发送失败" in bundle
+    assert "请点击重连通道后重试" in bundle
+    assert "(question ? answerText : currentQuestion).focus();" in bundle
+    assert 'answerText.value = ""' in bundle
+    assert "answerText.focus();" in bundle
+    assert "if (!manual) {" in bundle
+    assert "endingInterview" in bundle
+    assert "正在结束面试并生成评分报告，请等待结果" in bundle
+    assert "requestEndInterview" in bundle
+    assert "setPill(liveStatus, \"评分中\", \"live\");" in bundle
+    assert "setControls();" in bundle
+    assert 'sendLiveSocketPayload({ type: "end" }, "结束面试失败")' in bundle
+    assert "state.seq += 1" in bundle
+    assert "stopMicCapture({ flush: false })" in bundle
+    assert "readErrorMessage" in bundle
+    assert "readJsonResponse" in bundle
+    assert "接口响应不是有效 JSON" in bundle
+    assert "服务健康检查响应不是有效 JSON" in bundle
+    assert "资料解析响应不是有效 JSON" in bundle
+    assert "formatApiDetailItem" in bundle
+    assert "item.loc" in bundle
+    assert "payload.detail" in bundle
+    assert 'part !== "body" && part !== "query"' in bundle
+    assert 'error.name === "AbortError"' in bundle
+    assert "请求超时，请确认本地服务仍在运行" in bundle
+    assert "signal is aborted|aborted without reason" in bundle
+    assert "请求被浏览器中止，通常是前端超时或重复触发检查导致" in bundle
+    assert "failed to fetch|networkerror|load failed" in bundle
+    assert "无法连接到本地服务，请确认 gateway 正在运行后重试" in bundle
+    assert "cursor: not-allowed" in bundle
+    assert 'button[data-busy="true"]' in bundle
+    assert "setButtonBusy" in bundle
+    assert 'button.setAttribute("aria-busy", "true")' in bundle
+    assert "const { timeoutMs, ...fetchOptions } = options" in bundle
+    assert "timeoutMs: documentParseTimeoutMs" in bundle
+    assert "documentParseTimeoutMs = 45_000" in bundle
+    assert "prepareSessionTimeoutMs = 90_000" in bundle
+    assert "externalCheckTimeoutMs = 65_000" in bundle
+    assert 'else if (connected) {\n    setPill(micStatus, "麦克风未开启", "");' in bundle
+    assert "input.disabled = true" in bundle
+    assert "input.value = \"\"" in bundle
+    assert ".log,.pdf" in bundle
+    assert "supportedDocumentSuffixes" in bundle
+    assert "supportedDocumentMimeTypes" in bundle
+    assert "supportedDocumentFile(file)" in bundle
+    assert "normalizedContentType(file.type)" in bundle
+    assert 'type.startsWith("text/")' in bundle
+    assert 'type.startsWith("image/")' in bundle
+    assert "文件格式暂不支持" in bundle
+    assert "txt、md、json、csv、log、pdf、docx、doc 或图片" in bundle
+    assert "setUploadInputStatus" in bundle
+    assert 'input[type="file"]:disabled' in bundle
+    assert 'aria-describedby="jdFileStatus"' in bundle
     assert 'class="small upload-status" id="jdFileStatus" role="status" aria-live="polite"' in (
-        response.text
+        bundle
     )
-    assert 'aria-describedby="resumeFileStatus"' in response.text
+    assert 'aria-describedby="resumeFileStatus"' in bundle
     assert 'class="small upload-status" id="resumeFileStatus" role="status" aria-live="polite"' in (
-        response.text
+        bundle
     )
-    assert ".upload-status.live" in response.text
-    assert ".upload-status.ready" in response.text
-    assert ".upload-status.warn" in response.text
-    assert 'status.className = `small upload-status ${tone}`.trim()' in response.text
-    assert "支持 PDF、Word、图片和文本文件" in response.text
-    assert 'document.querySelector(`#${input.id}Status`)' in response.text
-    assert "正在解析" in response.text
-    assert "解析失败" in response.text
-    assert "documentParsingCount" in response.text
-    assert "documentParseToken" in response.text
-    assert "documentParseEpoch" in response.text
-    assert "documentParseStillCurrent" in response.text
-    assert "const parseStillCurrent = documentParseStillCurrent(input, documentParseToken)" in response.text
-    assert "if (!documentParseStillCurrent(input, documentParseToken)) return" in response.text
-    assert "cancelDocumentParses" in response.text
-    assert "resetDocumentUploadInputs" in response.text
-    assert "解析已取消" in response.text
-    assert "资料正在解析，完成后再创建实时面试" in response.text
-    assert "maxDocumentUploadBytes = 25 * 1024 * 1024" in response.text
-    assert "文件超过 25MB" in response.text
-    assert "请压缩、拆分或直接粘贴关键内容" in response.text
-    assert "资料上传提示" in response.text
-    assert "result.warning" in response.text
-    assert "未提取到可用文本" in response.text
-    assert "文字版 PDF、DOCX" in response.text
-    assert "DeepSeek 清洗未完成" in response.text
-    assert "resetQuestionMetaForManualEdit" in response.text
-    assert "hadProbeMeta" in response.text
-    assert "已改为手动编辑问题，将按面试官自定义问题记录" in response.text
-    assert 'title="把该能力维度生成当前面试问题"' in response.text
-    assert 'aria-label="生成${escapeHtml(item.name)}维度的面试问题"' in response.text
-    assert 'title="将此追问填入当前面试问题"' in response.text
-    assert 'aria-label="将此追问设为下一问"' in response.text
-    assert "function selectQuestion(question, meta = {})" in response.text
-    assert 'answerText.value = "";\n        updateTextCounters();\n        state.selectedQuestionSource' in (
-        response.text
+    assert ".upload-status.live" in bundle
+    assert ".upload-status.ready" in bundle
+    assert ".upload-status.warn" in bundle
+    assert 'status.className = `small upload-status ${tone}`.trim()' in bundle
+    assert "支持 PDF、Word、图片和文本文件" in bundle
+    assert 'document.querySelector(`#${input.id}Status`)' in bundle
+    assert "正在解析" in bundle
+    assert "解析失败" in bundle
+    assert "documentParsingCount" in bundle
+    assert "documentParseToken" in bundle
+    assert "documentParseEpoch" in bundle
+    assert "documentParseStillCurrent" in bundle
+    assert "const parseStillCurrent = documentParseStillCurrent(input, documentParseToken)" in bundle
+    assert "if (!documentParseStillCurrent(input, documentParseToken)) return" in bundle
+    assert "cancelDocumentParses" in bundle
+    assert "resetDocumentUploadInputs" in bundle
+    assert "解析已取消" in bundle
+    assert "资料正在解析，完成后再创建实时面试" in bundle
+    assert "maxDocumentUploadBytes = 25 * 1024 * 1024" in bundle
+    assert "文件超过 25MB" in bundle
+    assert "请压缩、拆分或直接粘贴关键内容" in bundle
+    assert "资料上传提示" in bundle
+    assert "result.warning" in bundle
+    assert "未提取到可用文本" in bundle
+    assert "文字版 PDF、DOCX" in bundle
+    assert "DeepSeek 清洗未完成" in bundle
+    assert "resetQuestionMetaForManualEdit" in bundle
+    assert "hadProbeMeta" in bundle
+    assert "已改为手动编辑问题，将按面试官自定义问题记录" in bundle
+    assert 'title="把该能力维度生成当前面试问题"' in bundle
+    assert 'aria-label="生成${escapeHtml(item.name)}维度的面试问题"' in bundle
+    assert 'title="将此追问填入当前面试问题"' in bundle
+    assert 'aria-label="将此追问设为下一问"' in bundle
+    assert "function selectQuestion(question, meta = {})" in bundle
+    assert 'answerText.value = "";\n  updateTextCounters();\n  state.selectedQuestionSource' in (
+        bundle
     )
-    assert 'currentQuestion.addEventListener("input", () =>' in response.text
-    assert "resetQuestionMetaForManualEdit();" in response.text
-    assert 'parseDocumentFile(event.target.files[0], event.target, resumeText, "简历", "resume")' in response.text
-    assert "reconnectLiveChannel" in response.text
-    assert "reconnectInterviewId" in response.text
-    assert "reconnectStillCurrent" in response.text
-    assert "重新连接当前面试实时通道" in response.text
-    assert "当前已有面试，请重置后再创建新的面试" in response.text
-    assert "资料正在解析，完成后再创建实时面试。" in response.text
-    assert "loadSampleButton" in response.text
-    assert "当前已有面试，请重置后再加载样例资料" in response.text
-    assert "当前已有面试或资料正在处理，请重置后再加载样例资料" in response.text
-    assert "prepareSessionToken" in response.text
-    assert "prepareSessionStillCurrent" in response.text
-    assert "async function postJson(url, payload, options = {})" in response.text
-    assert "timeoutMs: prepareSessionTimeoutMs" in response.text
-    assert "if (!prepareSessionStillCurrent(prepareToken)) return" in response.text
-    assert "openSocketWithLatestGateway(interview.id, () =>" in response.text
-    assert "validateSetupForm" in response.text
-    assert "面试创建失败" in response.text
-    assert "不能为空" in response.text
-    assert "重新检查服务、模型和 ASR 状态" in response.text
-    assert 'refreshStatus.addEventListener("click", checkRuntime)' in response.text
-    assert 'id="checkModel"' in response.text
-    assert "checkLlmConnection" in response.text
-    assert "/api/config/llm/check" in response.text
-    assert "timeoutMs: externalCheckTimeoutMs" in response.text
-    assert 'appendEvent("模型检查", gatewayUnavailableEventBody(error), "red")' in response.text
-    assert "if (!modelCheckStillCurrent(checkToken)) return" in response.text
-    assert "if (modelCheckStillCurrent(checkToken))" in response.text
-    assert "手动调用真实模型检查连接" in response.text
-    assert 'id="checkAsr"' in response.text
-    assert "checkAsrReadiness" in response.text
-    assert "/api/config/asr/check" in response.text
-    assert 'appendEvent("ASR 检查", gatewayUnavailableEventBody(error), "red")' in response.text
-    assert "if (!asrCheckStillCurrent(checkToken)) return" in response.text
-    assert "if (asrCheckStillCurrent(checkToken))" in response.text
-    assert "手动检查 ASR 配置、依赖和 Token" in response.text
-    assert 'id="gatewayKey"' in response.text
-    assert 'id="saveGatewayKey"' in response.text
-    assert "sessionStorage.getItem(\"gatewayApiKey\")" in response.text
-    assert '"X-API-Key": state.gatewayApiKey' in response.text
-    assert "fetchWithTimeout(" in response.text
-    assert "apiUrl(path)" in response.text
-    assert "url.searchParams.set(key, value)" in response.text
-    assert "websocketProtocols" in response.text
-    assert "base64UrlEncode" in response.text
-    assert 'gateway-key.${base64UrlEncode(state.gatewayApiKey)}' in response.text
-    assert "const socketUrl = wsUrl(`/ws/interview/${interviewId}`)" in response.text
-    assert "new WebSocket(socketUrl, websocketProtocols())" in response.text
-    assert 'data-report-format="html"' in response.text
-    assert 'data-report-format="transcript.json"' in response.text
-    assert 'title="下载 HTML 报告"' in response.text
-    assert 'aria-label="下载 HTML 报告"' in response.text
-    assert 'title="下载 PDF 报告"' in response.text
-    assert 'aria-label="下载 PDF 报告"' in response.text
-    assert 'title="下载 JSON 报告"' in response.text
-    assert 'aria-label="下载 JSON 报告"' in response.text
-    assert 'title="下载转写记录"' in response.text
-    assert 'aria-label="下载转写记录"' in response.text
-    assert ">转写</button>" in response.text
-    assert "downloadReportArtifact" in response.text
-    assert "reportDownloadStillCurrent" in response.text
-    assert 'id="credibilityBox" role="status" aria-live="polite"' in response.text
-    assert 'id="reportPanel" role="status" aria-live="polite"' in response.text
-    assert "if (!reportDownloadStillCurrent(interviewId)) return" in response.text
-    assert "reportDownloadInFlight" in response.text
-    assert "state.reportDownloadInFlight.has(downloadKey)" in response.text
-    assert "state.reportDownloadInFlight.delete(downloadKey)" in response.text
-    assert "正在下载中，请稍候" in response.text
-    assert "`/api/interviews/${interviewId}/report.${format}`" in response.text
-    assert "timeoutMs: reportDownloadTimeoutMs" in response.text
-    assert "reportDownloadTimeoutMs = 30_000" in response.text
-    assert 'button.textContent = "下载中"' in response.text
-    assert "正在下载 ${reportFormatLabel(format)} 报告" in response.text
-    assert "button.textContent = originalLabel || reportFormatLabel(format)" in response.text
-    assert "reportFormatLabel(format)" in response.text
-    assert '"transcript.json": "转写"' in response.text
-    assert "reportFilename" in response.text
-    assert "reportEvidenceRows" in response.text
-    assert "reportTotalScoreText" in response.text
-    assert "待确认" in response.text
-    assert "reportRecommendationText" in response.text
-    assert "建议待确认" in response.text
-    assert "reportSummaryText" in response.text
-    assert "暂无总评" in response.text
-    assert "reportInterviewId" in response.text
-    assert "报告 ID 或格式缺失" in response.text
-    assert "暂无维度评分" in response.text
-    assert "暂无转写记录" in response.text
-    assert "暂无证据" in response.text
-    assert 'format === "transcript.json"' in response.text
-    assert '.transcript.json`' in response.text
-    assert "gatewayAuthError" in response.text
-    assert "showGatewayKeyRequired" in response.text
-    assert 'showGatewayKeyRequired("模型检查", { model: true })' in response.text
-    assert 'showGatewayKeyRequired("ASR 检查", { asr: true })' in response.text
-    assert "需要 Gateway Key" in response.text
-    assert "Gateway 已启用鉴权" in response.text
-    assert "interviewEnded" in response.text
-    assert "reportReady" in response.text
-    assert "面试已结束，请重置后创建新的面试" in response.text
-    assert "正在结束面试并生成评分报告" in response.text
-    assert "请等待后台评分完成" in response.text
-    assert "后台评分任务已排队，系统会自动刷新报告" in response.text
-    assert 'id="refreshReport"' in response.text
-    assert "refreshQueuedReport" in response.text
-    assert "scheduleQueuedReportPolling" in response.text
-    assert "clearQueuedReportPolling" in response.text
-    assert "queuedReportMaxPollAttempts = 30" in response.text
-    assert "queuedReportPollIntervalMs = 3000" in response.text
-    assert "reportRefreshEpoch" in response.text
-    assert "reportRefreshStillCurrent" in response.text
-    assert "reportRefreshInFlight" in response.text
-    assert "reportRefreshStillCurrent(refreshEpoch, interviewId) &&" in response.text
-    assert 'button.textContent = "刷新中"' in response.text
-    assert 'button.textContent = originalLabel || "刷新报告"' in response.text
-    assert 'title="手动刷新评分报告"' in response.text
-    assert 'aria-label="手动刷新评分报告"' in response.text
-    assert "报告刷新正在进行中，请稍候" in response.text
-    assert "fetchGatewayJson(`/api/interviews/${interviewId}/report`)" in response.text
-    assert "reportPendingError" in response.text
-    assert "报告仍在生成中，请稍后再刷新" in response.text
-    assert "markReportReady" in response.text
-    assert "报告已生成" in response.text
-    assert "可以下载 HTML、PDF、JSON 或转写" in response.text
-    assert "resetSessionState" in response.text
-    assert 'currentQuestion.value = ""' in response.text
-    assert 'answerText.value = ""' in response.text
-    assert 'document.querySelector("#resetSession").addEventListener("click", resetSessionState)' in response.text
-    assert "实时转写、回答和追问事件会出现在这里" in response.text
-    assert "preparingInterview" in response.text
-    assert "正在创建实时面试，请稍候" in response.text
-    assert "当前已有面试，请重置后再创建新的面试" in response.text
+    assert 'currentQuestion.addEventListener("input", () =>' in bundle
+    assert "resetQuestionMetaForManualEdit();" in bundle
+    assert 'parseDocumentFile(event.target.files[0], event.target, resumeText, "简历", "resume")' in bundle
+    assert "reconnectLiveChannel" in bundle
+    assert "reconnectInterviewId" in bundle
+    assert "reconnectStillCurrent" in bundle
+    assert "重新连接当前面试实时通道" in bundle
+    assert "当前已有面试，请重置后再创建新的面试" in bundle
+    assert "资料正在解析，完成后再创建实时面试。" in bundle
+    assert "loadSampleButton" in bundle
+    assert "当前已有面试，请重置后再加载样例资料" in bundle
+    assert "当前已有面试或资料正在处理，请重置后再加载样例资料" in bundle
+    assert "prepareSessionToken" in bundle
+    assert "prepareSessionStillCurrent" in bundle
+    assert "async function postJson(url, payload, options = {})" in bundle
+    assert "timeoutMs: prepareSessionTimeoutMs" in bundle
+    assert "if (!prepareSessionStillCurrent(prepareToken)) return" in bundle
+    assert "openSocketWithLatestGateway(interview.id, () =>" in bundle
+    assert "validateSetupForm" in bundle
+    assert "面试创建失败" in bundle
+    assert "不能为空" in bundle
+    assert "重新检查服务、模型和 ASR 状态" in bundle
+    assert 'refreshStatus.addEventListener("click", checkRuntime)' in bundle
+    assert 'id="checkModel"' in bundle
+    assert "checkLlmConnection" in bundle
+    assert "/api/config/llm/check" in bundle
+    assert "timeoutMs: externalCheckTimeoutMs" in bundle
+    assert 'appendEvent("模型检查", gatewayUnavailableEventBody(error), "red")' in bundle
+    assert "if (!modelCheckStillCurrent(checkToken)) return" in bundle
+    assert "if (modelCheckStillCurrent(checkToken))" in bundle
+    assert "手动调用真实模型检查连接" in bundle
+    assert 'id="checkAsr"' in bundle
+    assert "checkAsrReadiness" in bundle
+    assert "/api/config/asr/check" in bundle
+    assert 'appendEvent("ASR 检查", gatewayUnavailableEventBody(error), "red")' in bundle
+    assert "if (!asrCheckStillCurrent(checkToken)) return" in bundle
+    assert "if (asrCheckStillCurrent(checkToken))" in bundle
+    assert "手动检查 ASR 配置、依赖和 Token" in bundle
+    assert 'id="gatewayKey"' in bundle
+    assert 'id="saveGatewayKey"' in bundle
+    assert "sessionStorage.getItem(\"gatewayApiKey\")" in bundle
+    assert '"X-API-Key": state.gatewayApiKey' in bundle
+    assert "fetchWithTimeout(" in bundle
+    assert "apiUrl(path)" in bundle
+    assert "url.searchParams.set(key, value)" in bundle
+    assert "websocketProtocols" in bundle
+    assert "base64UrlEncode" in bundle
+    assert 'gateway-key.${base64UrlEncode(state.gatewayApiKey)}' in bundle
+    assert "const socketUrl = wsUrl(`/ws/interview/${interviewId}`)" in bundle
+    assert "new WebSocket(socketUrl, websocketProtocols())" in bundle
+    assert 'data-report-format="html"' in bundle
+    assert 'data-report-format="transcript.json"' in bundle
+    assert 'title="下载 HTML 报告"' in bundle
+    assert 'aria-label="下载 HTML 报告"' in bundle
+    assert 'title="下载 PDF 报告"' in bundle
+    assert 'aria-label="下载 PDF 报告"' in bundle
+    assert 'title="下载 JSON 报告"' in bundle
+    assert 'aria-label="下载 JSON 报告"' in bundle
+    assert 'title="下载转写记录"' in bundle
+    assert 'aria-label="下载转写记录"' in bundle
+    assert ">转写</button>" in bundle
+    assert "downloadReportArtifact" in bundle
+    assert "reportDownloadStillCurrent" in bundle
+    assert 'id="credibilityBox" role="status" aria-live="polite"' in bundle
+    assert 'id="reportPanel" role="status" aria-live="polite"' in bundle
+    assert "if (!reportDownloadStillCurrent(interviewId)) return" in bundle
+    assert "reportDownloadInFlight" in bundle
+    assert "state.reportDownloadInFlight.has(downloadKey)" in bundle
+    assert "state.reportDownloadInFlight.delete(downloadKey)" in bundle
+    assert "正在下载中，请稍候" in bundle
+    assert "`/api/interviews/${interviewId}/report.${format}`" in bundle
+    assert "timeoutMs: reportDownloadTimeoutMs" in bundle
+    assert "reportDownloadTimeoutMs = 30_000" in bundle
+    assert 'button.textContent = "下载中"' in bundle
+    assert "正在下载 ${reportFormatLabel(format)} 报告" in bundle
+    assert "button.textContent = originalLabel || reportFormatLabel(format)" in bundle
+    assert "reportFormatLabel(format)" in bundle
+    assert '"transcript.json": "转写"' in bundle
+    assert "reportFilename" in bundle
+    assert "reportEvidenceRows" in bundle
+    assert "reportTotalScoreText" in bundle
+    assert "待确认" in bundle
+    assert "reportRecommendationText" in bundle
+    assert "建议待确认" in bundle
+    assert "reportSummaryText" in bundle
+    assert "暂无总评" in bundle
+    assert "reportInterviewId" in bundle
+    assert "报告 ID 或格式缺失" in bundle
+    assert "暂无维度评分" in bundle
+    assert "暂无转写记录" in bundle
+    assert "暂无证据" in bundle
+    assert 'format === "transcript.json"' in bundle
+    assert '.transcript.json`' in bundle
+    assert "gatewayAuthError" in bundle
+    assert "showGatewayKeyRequired" in bundle
+    assert 'showGatewayKeyRequired("模型检查", { model: true })' in bundle
+    assert 'showGatewayKeyRequired("ASR 检查", { asr: true })' in bundle
+    assert "需要 Gateway Key" in bundle
+    assert "Gateway 已启用鉴权" in bundle
+    assert "interviewEnded" in bundle
+    assert "reportReady" in bundle
+    assert "面试已结束，请重置后创建新的面试" in bundle
+    assert "正在结束面试并生成评分报告" in bundle
+    assert "请等待后台评分完成" in bundle
+    assert "后台评分任务已排队，系统会自动刷新报告" in bundle
+    assert 'id="refreshReport"' in bundle
+    assert "refreshQueuedReport" in bundle
+    assert "scheduleQueuedReportPolling" in bundle
+    assert "clearQueuedReportPolling" in bundle
+    assert "queuedReportMaxPollAttempts = 30" in bundle
+    assert "queuedReportPollIntervalMs = 3000" in bundle
+    assert "reportRefreshEpoch" in bundle
+    assert "reportRefreshStillCurrent" in bundle
+    assert "reportRefreshInFlight" in bundle
+    assert "reportRefreshStillCurrent(refreshEpoch, interviewId) &&" in bundle
+    assert 'button.textContent = "刷新中"' in bundle
+    assert 'button.textContent = originalLabel || "刷新报告"' in bundle
+    assert 'title="手动刷新评分报告"' in bundle
+    assert 'aria-label="手动刷新评分报告"' in bundle
+    assert "报告刷新正在进行中，请稍候" in bundle
+    assert "fetchGatewayJson(`/api/interviews/${interviewId}/report`)" in bundle
+    assert "reportPendingError" in bundle
+    assert "报告仍在生成中，请稍后再刷新" in bundle
+    assert "markReportReady" in bundle
+    assert "报告已生成" in bundle
+    assert "可以下载 HTML、PDF、JSON 或转写" in bundle
+    assert "resetSessionState" in bundle
+    assert 'currentQuestion.value = ""' in bundle
+    assert 'answerText.value = ""' in bundle
+    assert 'document.querySelector("#resetSession").addEventListener("click", resetSessionState)' in bundle
+    assert "今天，推进这一场面试" in bundle
+    assert "emptyFeedMarkup" in bundle
+    assert "preparingInterview" in bundle
+    assert "正在创建实时面试，请稍候" in bundle
+    assert "当前已有面试，请重置后再创建新的面试" in bundle
 
 
 def test_gateway_health_identifies_service(tmp_path: Path, monkeypatch) -> None:
@@ -3405,3 +3436,327 @@ def test_gateway_one_shot_offline_evaluate(tmp_path: Path, monkeypatch) -> None:
     assert payload["interview"]["status"] == "REPORTED"
     report_id = payload["report"]["interview_id"]
     assert client.get(f"/api/interviews/{report_id}/report").status_code == 200
+
+
+def test_gateway_exam_solve_requires_api_key_when_enabled(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch, gateway_api_key="gateway-secret")
+
+    unauthorized = client.post(
+        "/api/exam/solve?filename=exam.png",
+        content=b"fake-png",
+        headers={"content-type": "image/png"},
+    )
+    assert unauthorized.status_code == 401
+
+
+def test_gateway_exam_solve_rejects_empty_and_oversize_images(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("VISION_MAX_IMAGE_BYTES", "32")
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setenv("VISION_MAX_IMAGE_BYTES", "32")
+    get_settings.cache_clear()
+
+    empty = client.post(
+        "/api/exam/solve?filename=exam.png",
+        content=b"",
+        headers={"content-type": "image/png"},
+    )
+    assert empty.status_code == 400
+    assert empty.json() == {"detail": "exam screenshot is empty"}
+
+    oversize = client.post(
+        "/api/exam/solve?filename=exam.png",
+        content=b"x" * 64,
+        headers={"content-type": "image/png"},
+    )
+    assert oversize.status_code == 400
+    assert "larger than" in oversize.json()["detail"]
+
+    unsupported = client.post(
+        "/api/exam/solve?filename=exam.pdf",
+        content=b"x",
+        headers={"content-type": "application/pdf"},
+    )
+    assert unsupported.status_code == 400
+    assert "unsupported exam screenshot type" in unsupported.json()["detail"]
+
+
+def test_gateway_exam_solve_returns_solution(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+
+    def fake_solve(filename: str, data: bytes, *, question_hint: str = ""):
+        assert filename == "exam.png"
+        assert data == b"fake-png"
+        assert question_hint == "缓存题"
+        return ExamSolution(
+            question_summary="实现 LRU 缓存",
+            key_points=["能说清 O(1)"],
+            reference_answer="哈希表 + 双向链表。",
+            source="ocr_text",
+            used_fallback=True,
+        )
+
+    monkeypatch.setattr("services.gateway.app.solve_exam_screenshot", fake_solve)
+
+    response = client.post(
+        "/api/exam/solve?filename=exam.png&question_hint=缓存题",
+        content=b"fake-png",
+        headers={"content-type": "image/png"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "ocr_text"
+    assert payload["key_points"] == ["能说清 O(1)"]
+
+
+def test_gateway_memory_scan_rejects_paths_outside_the_allowlist(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setenv("MEMORY_ENABLED", "true")
+    monkeypatch.setenv("MEMORY_REPO_ROOTS", str(tmp_path / "roots"))
+    get_settings.cache_clear()
+
+    response = client.post(f"/api/memory/repos/scan?path={tmp_path / 'elsewhere'}")
+
+    assert response.status_code == 400
+    assert "MEMORY_REPO_ROOTS" in response.json()["detail"]
+
+
+def test_gateway_memory_scan_without_path_scans_configured_roots(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr("services.gateway.app.scan_configured_roots", lambda: {"/repo/a": 3})
+
+    response = client.post("/api/memory/repos/scan")
+
+    assert response.status_code == 200
+    assert response.json() == {"scanned": {"/repo/a": 3}}
+
+
+def test_gateway_memory_candidate_delete_validates_input(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        "services.gateway.app.delete_candidate_memories",
+        lambda candidate_id: 2,
+    )
+
+    response = client.delete("/api/memory/candidates/candidate-1")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 2}
+
+
+def test_cockpit_assets_are_served_with_web_media_types(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    home = client.get("/")
+    assert 'href="styles.css"' in home.text
+    assert 'src="modules/home.js"' in home.text
+
+    settings = client.get("/settings")
+    assert 'href="styles.css"' in settings.text
+    assert 'src="modules/settings.js"' in settings.text
+
+    cockpit = client.get("/cockpit")
+    assert 'src="modules/app.js"' in cockpit.text
+
+    styles = client.get("/styles.css")
+    assert styles.status_code == 200
+    assert styles.headers["content-type"] == "text/css; charset=utf-8"
+
+    module = client.get("/modules/app.js")
+    assert module.status_code == 200
+    assert module.headers["content-type"] == "text/javascript; charset=utf-8"
+    settings_module = client.get("/modules/settings.js")
+    assert settings_module.status_code == 200
+    assert settings_module.headers["content-type"] == "text/javascript; charset=utf-8"
+
+
+def test_cockpit_asset_route_rejects_traversal_and_unknown_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    assert client.get("/modules/nope.js").status_code == 404
+    # index.html is inside WEB_ROOT but is not a module: only css/js are served.
+    assert client.get("/modules/index.html").status_code == 404
+    for escape in ("/modules/../index.html", "/modules/..%2f..%2fpyproject.toml"):
+        assert client.get(escape).status_code in {307, 404}, escape
+
+
+def test_cockpit_ui_records_long_term_memory_consent(tmp_path: Path, monkeypatch) -> None:
+    """Long-term memory is silently dropped without consent, so the UI must ask for it.
+
+    distill_interview_memories() returns early unless has_active_consent(candidate,
+    "long_term_memory") is true, and quick-setup does not record one — so if the
+    cockpit never posts to /api/consents, the cross-interview memory can never exist.
+    """
+    client = _client(tmp_path, monkeypatch)
+    bundle = _served_cockpit_bundle(client, client.get("/cockpit").text)
+
+    assert 'id="longTermMemoryConsent"' in bundle
+    assert '"/api/consents"' in bundle
+    assert 'consent_type: "long_term_memory"' in bundle
+
+
+def test_cockpit_ui_exposes_memory_scan_and_per_candidate_delete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """interview_memories holds real-person data, so deletion must be reachable in the UI."""
+    client = _client(tmp_path, monkeypatch)
+    bundle = _served_cockpit_bundle(client, client.get("/cockpit").text)
+
+    assert 'id="scanRepoMemory"' in bundle
+    assert '"/api/memory/repos/scan"' in bundle
+    assert 'id="deleteCandidateMemory"' in bundle
+    assert "/api/memory/candidates/" in bundle
+
+
+def test_cockpit_ui_keeps_audio_speaker_label_visible(tmp_path: Path, monkeypatch) -> None:
+    """A mislabelled speaker silently disables probing, so the label cannot be implicit.
+
+    should_probe() ignores any segment whose speaker is not "candidate", so audio
+    tagged with the wrong role produces no follow-ups and no error.
+    """
+    client = _client(tmp_path, monkeypatch)
+    bundle = _served_cockpit_bundle(client, client.get("/cockpit").text)
+
+    assert "采集中 · 记为候选人" in bundle
+    assert "采集中 · 记为面试官" in bundle
+
+
+def test_cockpit_ui_pins_latest_answer_above_question_options(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The suggested questions are only usable next to what the candidate just said."""
+    client = _client(tmp_path, monkeypatch)
+    bundle = _served_cockpit_bundle(client, client.get("/cockpit").text)
+
+    assert 'id="answerEchoText"' in bundle
+    assert "renderAnswerEcho" in bundle
+    # Cmd/Ctrl+1..9 promotes the n-th suggestion without reaching for the mouse.
+    assert "pickQuestionOptionAt" in bundle
+
+
+def test_cockpit_shell_exposes_screenshot_and_visibility_controls(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The overlay is only usable live if screenshot and hide are one click or one chord."""
+    client = _client(tmp_path, monkeypatch)
+    bundle = _served_cockpit_bundle(client, client.get("/cockpit").text)
+
+    assert 'id="cockpitExam"' in bundle
+    assert 'id="cockpitVisible"' in bundle
+    assert "toggleVisible" in bundle
+    assert "cockpit-host" in bundle
+    assert 'id="examDock"' in bundle
+
+
+def test_gateway_root_is_liuwa_home(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "六娃" in page.text
+    assert 'src="modules/home.js"' in page.text
+    assert "结束并评分" not in page.text
+    assert "/api/chat/stream" in client.get("/modules/home.js").text
+
+
+def test_gateway_settings_page_hosts_interview_workbench(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    page = client.get("/settings")
+    assert page.status_code == 200
+    assert "岗位信息" in page.text
+    assert "简历信息" in page.text
+    assert "快捷键" in page.text
+    assert "展示" in page.text
+    assert "隐藏" in page.text
+    assert 'data-hotkey="quitApp"' in page.text
+    assert "大模型接入" in page.text
+    assert 'id="jdText"' in page.text
+    assert 'id="resumeText"' in page.text
+    assert 'id="saveUiSettings"' in page.text
+    assert 'src="modules/settings.js"' in page.text
+    assert 'src="/cockpit"' in page.text
+    assert "面试工作台" in page.text
+    assert "/api/ui/settings" in client.get("/modules/settings.js").text
+
+
+def test_ui_settings_roundtrip_persists_briefing_and_hotkeys(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _client(tmp_path, monkeypatch)
+    empty = client.get("/api/ui/settings")
+    assert empty.status_code == 200
+    assert empty.json()["hotkeys"]["captureRegion"] == "CommandOrControl+Shift+U"
+    assert empty.json()["hotkeys"]["sendChat"] == "CommandOrControl+Shift+Enter"
+    assert empty.json()["hotkeys"]["showWindow"] == "CommandOrControl+Shift+D"
+    assert empty.json()["hotkeys"]["hideWindow"] == "CommandOrControl+Shift+H"
+    assert empty.json()["hotkeys"]["quitApp"] == "CommandOrControl+Shift+Q"
+
+    payload = {
+        "jd_text": "负责 FastAPI 网关",
+        "resume_text": "做过 LLM 编排",
+        "long_term_memory_consent": True,
+        "hotkeys": {
+            "toggleVisible": "CommandOrControl+Shift+H",
+            "toggleCompact": "CommandOrControl+Shift+J",
+            "captureRegion": "CommandOrControl+Shift+U",
+            "captureScreen": "CommandOrControl+Shift+Y",
+        },
+    }
+    saved = client.post("/api/ui/settings", json=payload)
+    assert saved.status_code == 200
+    assert saved.json()["jd_text"] == "负责 FastAPI 网关"
+    loaded = client.get("/api/ui/settings")
+    assert loaded.json() == saved.json()
+
+
+def test_ui_settings_rejects_invalid_hotkeys(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    response = client.post(
+        "/api/ui/settings",
+        json={
+            "jd_text": "x",
+            "resume_text": "y",
+            "hotkeys": {
+                "toggleVisible": "Space",
+                "toggleCompact": "CommandOrControl+Shift+J",
+                "captureRegion": "CommandOrControl+Shift+U",
+                "captureScreen": "CommandOrControl+Shift+Y",
+            },
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_gateway_chat_stream_mock_sse(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    response = client.post("/api/chat/stream", json={"text": "看这张屏"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    pieces: list[str] = []
+    done = False
+    for line in response.text.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = json.loads(line[5:])
+        if payload.get("delta"):
+            pieces.append(payload["delta"])
+        if payload.get("done"):
+            done = True
+    assert "我是六娃" in "".join(pieces)
+    assert done is True
+
+
+def test_gateway_chat_stream_requires_text_or_images(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    response = client.post("/api/chat/stream", json={})
+    assert response.status_code == 422
+
+
+def test_gateway_chat_stream_rejects_invalid_images(tmp_path: Path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    response = client.post("/api/chat/stream", json={"images": ["not-a-data-url"]})
+    assert response.status_code == 400
+    assert "data URL" in response.json()["detail"]

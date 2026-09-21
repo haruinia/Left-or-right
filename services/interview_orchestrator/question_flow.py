@@ -7,7 +7,14 @@ from typing import Literal
 from libs.common.prompts import load_prompt
 from libs.common.textsim import normalize_text
 from libs.llm_client import LLMMessage, get_llm_client
-from libs.schemas import NextOption, NextOptions, QATurn, QuestionBank, QuestionBankItem
+from libs.schemas import (
+    MemoryHit,
+    NextOption,
+    NextOptions,
+    QATurn,
+    QuestionBank,
+    QuestionBankItem,
+)
 from services.probe_service.service import assess_credibility
 
 SteeringFocus = Literal["balanced", "resume_drill", "jd_professional"]
@@ -64,6 +71,7 @@ async def generate_next_options(
     bank: QuestionBank,
     after_turn: QATurn,
     fallback: NextOptions,
+    memory_hits: list[MemoryHit] | None = None,
 ) -> NextOptions:
     messages = [
         LLMMessage(role="system", content=load_prompt("next_options.md")),
@@ -82,6 +90,7 @@ async def generate_next_options(
                     "question_bank_unasked": [
                         item.model_dump() for item in bank.items if not item.asked
                     ],
+                    "memory_hits": [hit.model_dump() for hit in (memory_hits or [])],
                     "fallback_options": fallback.model_dump(),
                 },
                 ensure_ascii=False,

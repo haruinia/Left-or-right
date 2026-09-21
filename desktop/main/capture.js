@@ -1,0 +1,84 @@
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFile } = require('node:child_process');
+
+function run(cmd, args) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, (error) => (error ? reject(error) : resolve()));
+  });
+}
+
+function tempPngPath() {
+  const name = `liuwa-shot-${Date.now()}-${Math.random().toString(16).slice(2)}.png`;
+  return path.join(os.tmpdir(), name);
+}
+
+// Uses the macOS `screencapture` binary rather than desktopCapturer: it gives the
+// native crosshair, correct Retina scale, and never needs a renderer media stream.
+async function captureScreenshot({ interactive = true } = {}) {
+  if (process.platform !== 'darwin') {
+    throw new Error('截图目前只支持 macOS');
+  }
+  const file = tempPngPath();
+  const args = interactive ? ['-x', '-i', '-t', 'png', file] : ['-x', '-t', 'png', file];
+  await run('/usr/sbin/screencapture', args);
+  if (!fs.existsSync(file)) {
+    throw new Error('截图已取消');
+  }
+  const data = fs.readFileSync(file);
+  let mime = 'image/png';
+  let bytes = data;
+  if (data.length > 1_400_000) {
+    const jpg = file.replace(/\.png$/, '.jpg');
+    try {
+      await run('/usr/bin/sips', [
+        '-s',
+        'format',
+        'jpeg',
+        '-s',
+        'formatOptions',
+        '72',
+        '-Z',
+        '1920',
+        file,
+        '--out',
+        jpg,
+      ]);
+      bytes = fs.readFileSync(jpg);
+      mime = 'image/jpeg';
+      fs.unlinkSync(jpg);
+    } catch {
+      bytes = data;
+      mime = 'image/png';
+    }
+  }
+  fs.unlinkSync(file);
+  if (!bytes.length) {
+    throw new Error('截图为空，可能缺少屏幕录制权限');
+  }
+  return { mime, data: bytes };
+}
+
+async function solveExamScreenshot(config, data, { questionHint = '' } = {}) {
+  const params = new URLSearchParams({ filename: 'exam.png' });
+  if (questionHint) params.set('question_hint', questionHint);
+  const headers = { 'content-type': 'image/png' };
+  // The gateway reads x-api-key / Authorization: Bearer / ?api_key — a plain
+  // `api_key` header is not one of them and would 401.
+  if (config.gatewayApiKey) headers['x-api-key'] = config.gatewayApiKey;
+  const response = await fetch(`${config.gatewayUrl}/api/exam/solve?${params}`, {
+    method: 'POST',
+    headers,
+    body: data,
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`出题失败 HTTP ${response.status}: ${text.slice(0, 300)}`);
+  }
+  return JSON.parse(text);
+}
+
+module.exports = { captureScreenshot, solveExamScreenshot };

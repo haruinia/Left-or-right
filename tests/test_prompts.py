@@ -34,6 +34,14 @@ def test_load_next_options_prompt_reads_prompt_file() -> None:
     assert prompt == prompt.strip()
 
 
+def test_load_liuwa_chat_prompt_reads_prompt_file() -> None:
+    prompt = load_prompt("liuwa_chat.md")
+
+    assert prompt.startswith("你是六娃")
+    assert "截图" in prompt
+    assert prompt == prompt.strip()
+
+
 def test_load_prompt_rejects_path_separators() -> None:
     with pytest.raises(ValueError):
         load_prompt("../probe_system.md")

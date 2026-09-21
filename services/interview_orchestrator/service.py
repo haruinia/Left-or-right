@@ -794,6 +794,7 @@ def run_offline_scoring_task(interview_id: str):
             "INSERT OR REPLACE INTO reports (interview_id, payload, html) VALUES (?, ?, ?)",
             (interview_id, dumps(report.model_dump()), html),
         )
+    _distill_long_term_memory(record.context, score.recommendation)
     event_bus.publish_nowait(
         "interview.reported",
         {
@@ -803,6 +804,16 @@ def run_offline_scoring_task(interview_id: str):
         },
     )
     return report
+
+
+def _distill_long_term_memory(context, recommendation: str) -> None:
+    """Sediment cross-interview memory. Never fails the scoring pipeline."""
+    from services.memory_service.distill import distill_interview_memories
+
+    try:
+        distill_interview_memories(context, score_summary=recommendation)
+    except Exception:
+        return
 
 
 def enqueue_offline_scoring_task(interview_id: str, *, execute_inline: bool | None = None):

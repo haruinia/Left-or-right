@@ -196,6 +196,8 @@ def init_db() -> None:
         if target.dialect == "postgresql":
             schema = Path("db/postgres/001_core_schema.sql").read_text(encoding="utf-8")
             conn.executescript(schema)
+            memory_schema = Path("db/postgres/003_memory.sql").read_text(encoding="utf-8")
+            conn.executescript(memory_schema)
             if get_settings().jd_vector_backend == "pgvector":
                 vector_schema = Path("db/postgres/002_pgvector_probe_patterns.sql").read_text(
                     encoding="utf-8"
@@ -352,7 +354,9 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS consents (
                 id TEXT PRIMARY KEY,
                 candidate_id TEXT NOT NULL CHECK (trim(candidate_id) <> ''),
-                consent_type TEXT NOT NULL CHECK (consent_type IN ('behavior_signal')),
+                consent_type TEXT NOT NULL CHECK (
+                    consent_type IN ('behavior_signal', 'long_term_memory')
+                ),
                 granted INTEGER NOT NULL CHECK (granted IN (0, 1)),
                 granted_at TEXT NOT NULL,
                 revoked_at TEXT,
@@ -360,7 +364,39 @@ def init_db() -> None:
             );
             """
         )
+        _migrate_sqlite_consent_types(conn)
         _ensure_sqlite_columns(conn)
+
+
+def _migrate_sqlite_consent_types(conn: sqlite3.Connection) -> None:
+    """Widen the consents CHECK for long_term_memory on databases created before it existed."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'consents'"
+    ).fetchone()
+    if row is None or "long_term_memory" in (row["sql"] or ""):
+        return
+    conn.executescript(
+        """
+        ALTER TABLE consents RENAME TO consents_legacy;
+        CREATE TABLE consents (
+            id TEXT PRIMARY KEY,
+            candidate_id TEXT NOT NULL CHECK (trim(candidate_id) <> ''),
+            consent_type TEXT NOT NULL CHECK (
+                consent_type IN ('behavior_signal', 'long_term_memory')
+            ),
+            granted INTEGER NOT NULL CHECK (granted IN (0, 1)),
+            granted_at TEXT NOT NULL,
+            revoked_at TEXT,
+            CHECK (revoked_at IS NULL OR revoked_at >= granted_at)
+        );
+        INSERT INTO consents
+            (id, candidate_id, consent_type, granted, granted_at, revoked_at)
+        SELECT id, candidate_id, consent_type, granted, granted_at, revoked_at
+        FROM consents_legacy;
+        DROP TABLE consents_legacy;
+        """
+    )
+    conn.commit()
 
 
 def _ensure_sqlite_columns(conn: sqlite3.Connection) -> None:
@@ -464,6 +500,50 @@ def _ensure_sqlite_columns(conn: sqlite3.Connection) -> None:
             created_at TEXT NOT NULL
         )
         """
+    )
+
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_memories (
+            id TEXT PRIMARY KEY,
+            repo_path TEXT NOT NULL CHECK (trim(repo_path) <> ''),
+            repo_name TEXT NOT NULL CHECK (trim(repo_name) <> ''),
+            topic TEXT NOT NULL CHECK (trim(topic) <> ''),
+            fact TEXT NOT NULL CHECK (trim(fact) <> ''),
+            evidence TEXT NOT NULL DEFAULT '',
+            embedding TEXT NOT NULL CHECK (
+                json_valid(embedding) AND json_type(embedding) = 'array'
+            ),
+            updated_at TEXT NOT NULL,
+            UNIQUE (repo_path, topic)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS interview_memories (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL CHECK (
+                kind IN ('candidate_profile', 'probe_playbook', 'job_insight')
+            ),
+            subject_key TEXT NOT NULL CHECK (trim(subject_key) <> ''),
+            candidate_id TEXT,
+            job_id TEXT,
+            summary TEXT NOT NULL CHECK (trim(summary) <> ''),
+            detail TEXT NOT NULL DEFAULT '',
+            embedding TEXT NOT NULL CHECK (
+                json_valid(embedding) AND json_type(embedding) = 'array'
+            ),
+            source_interview_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (kind, subject_key, source_interview_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_interview_memories_candidate "
+        "ON interview_memories(candidate_id)"
     )
 
 

@@ -11,3 +11,8 @@ data/*.db
 data/*.sqlite
 data/reports/
 *.pdf
+node_modules/
+desktop/config.json
+desktop/dist/
+
+.ai-tracker

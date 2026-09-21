@@ -210,3 +210,27 @@ def test_settings_rejects_missing_provider_dependencies() -> None:
     for kwargs in cases:
         with pytest.raises(ValidationError):
             Settings(**kwargs)
+
+
+def test_vision_enabled_requires_openai_compatible_provider() -> None:
+    with pytest.raises(ValidationError, match="VISION_ENABLED=true requires"):
+        Settings(vision_enabled=True, llm_provider="mock")
+
+    assert Settings(vision_enabled=True, llm_provider="openai_compatible").vision_enabled is True
+
+
+def test_memory_settings_have_safe_defaults() -> None:
+    settings = Settings(memory_enabled=False, memory_repo_roots="")
+
+    assert settings.memory_enabled is False
+    assert settings.memory_repo_roots == ""
+    assert settings.memory_recall_limit == 3
+    assert settings.memory_repo_max_commits == 200
+
+
+def test_memory_recall_limit_is_bounded() -> None:
+    with pytest.raises(ValidationError):
+        Settings(memory_recall_limit=99)
+
+    with pytest.raises(ValidationError):
+        Settings(memory_recall_min_score=1.5)

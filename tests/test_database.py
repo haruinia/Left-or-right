@@ -756,3 +756,80 @@ def test_sqlite_init_migrates_realtime_columns_and_legacy_turns(
     assert "question_origin" in turn_columns
     assert turns[0].turn_id == "turn-1"
     assert turns[0].answer_start_ms == 10
+
+
+def test_sqlite_memory_tables_enforce_their_contracts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'memory-contract.db'}")
+    get_settings.cache_clear()
+    init_db()
+
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO project_memories
+            (id, repo_path, repo_name, topic, fact, evidence, embedding, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("p1", "/repo/a", "a", "技术栈", "Python 为主", "git ls-files", "[0.1]", "2026-06-02"),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO project_memories
+                (id, repo_path, repo_name, topic, fact, evidence, embedding, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("p2", "/repo/a", "a", "技术栈", "重复主题", "", "[0.1]", "2026-06-02"),
+            )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO project_memories
+                (id, repo_path, repo_name, topic, fact, evidence, embedding, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("p3", "/repo/b", "b", "  ", "空主题", "", "[0.1]", "2026-06-02"),
+            )
+
+        conn.execute(
+            """
+            INSERT INTO interview_memories
+            (id, kind, subject_key, candidate_id, job_id, summary, detail,
+             embedding, source_interview_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("m1", "candidate_profile", "c1", "c1", None, "画像", "", "[0.1]", "i1", "2026-06-02"),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO interview_memories
+                (id, kind, subject_key, candidate_id, job_id, summary, detail,
+                 embedding, source_interview_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("m2", "gossip", "c1", "c1", None, "画像", "", "[0.1]", "i2", "2026-06-02"),
+            )
+
+
+def test_sqlite_consents_accept_long_term_memory(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'consent-memory.db'}")
+    get_settings.cache_clear()
+    init_db()
+
+    with connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO consents (id, candidate_id, consent_type, granted, granted_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("c1", "candidate-1", "long_term_memory", 1, "2026-06-02T10:00:00+00:00"),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                """
+                INSERT INTO consents (id, candidate_id, consent_type, granted, granted_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("c2", "candidate-1", "marketing", 1, "2026-06-02T10:00:00+00:00"),
+            )
