@@ -280,7 +280,11 @@ WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 WEB_INDEX = WEB_ROOT / "index.html"
 WEB_SETTINGS = WEB_ROOT / "settings.html"
 WEB_COCKPIT = WEB_ROOT / "cockpit.html"
-WEB_ASSET_MEDIA_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
+WEB_ASSET_MEDIA_TYPES = {
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+}
 
 
 def _client_key(request: Request) -> str:
@@ -675,11 +679,15 @@ def _ui_settings_path() -> Path:
 def _read_ui_settings() -> UiSettings:
     path = _ui_settings_path()
     if not path.is_file():
-        return UiSettings()
-    try:
-        return UiSettings.model_validate_json(path.read_text(encoding="utf-8"))
-    except Exception:
-        return UiSettings()
+        settings = UiSettings()
+    else:
+        try:
+            settings = UiSettings.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:
+            settings = UiSettings()
+    if settings.study_goal.strip() == "力扣刷题与笔面试复习":
+        settings.study_goal = "看懂眼前这段代码或报错"
+    return settings
 
 
 @app.get("/api/ui/settings", response_model=UiSettings)
@@ -689,6 +697,10 @@ def get_ui_settings() -> UiSettings:
 
 @app.post("/api/ui/settings", response_model=UiSettings)
 def save_ui_settings(payload: UiSettings) -> UiSettings:
+    try:
+        payload.hotkeys.validate_unique()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     path = _ui_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
@@ -1146,14 +1158,15 @@ async def api_parse_document(request: Request, kind: str = "resume", filename: s
 
 @app.post("/api/chat/stream")
 async def api_chat_stream(payload: ChatStreamRequest):
+    study_settings = _read_ui_settings()
     try:
-        build_chat_messages(payload)
+        build_chat_messages(payload, study_settings)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def events():
         try:
-            async for delta in iter_chat_deltas(payload):
+            async for delta in iter_chat_deltas(payload, study_settings):
                 yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as exc:  # noqa: BLE001 - stream errors to the client as SSE

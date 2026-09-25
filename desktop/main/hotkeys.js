@@ -3,14 +3,20 @@
 const { globalShortcut } = require('electron');
 
 const BINDINGS = [
-  { accelerator: 'CommandOrControl+Shift+Space', action: 'toggleVisible', label: '按住操作面板' },
-  { accelerator: 'CommandOrControl+Shift+D', action: 'showWindow', label: '展示' },
-  { accelerator: 'CommandOrControl+Shift+H', action: 'hideWindow', label: '隐藏' },
+  { accelerator: 'CommandOrControl+Shift+U', action: 'captureRegion', label: '截图' },
+  { accelerator: 'CommandOrControl+Shift+Enter', action: 'sendChat', label: '发送' },
+  { accelerator: 'CommandOrControl+Shift+H', action: 'toggleWindow', label: '隐藏/显示' },
   { accelerator: 'CommandOrControl+Shift+Q', action: 'quitApp', label: '退出' },
-  { accelerator: 'CommandOrControl+Shift+J', action: 'toggleCompact', label: '紧凑/展开' },
-  { accelerator: 'CommandOrControl+Shift+U', action: 'captureRegion', label: '框选截图' },
+  { accelerator: 'CommandOrControl+Shift+N', action: 'newQuestion', label: '新对话' },
+  { accelerator: 'CommandOrControl+Shift+Backspace', action: 'clearShots', label: '清空截图' },
+
+  { accelerator: 'CommandOrControl+Shift+Space', action: 'toggleVisible', label: '按住操作面板' },
   { accelerator: 'CommandOrControl+Shift+Y', action: 'captureScreen', label: '全屏截图' },
-  { accelerator: 'CommandOrControl+Shift+Enter', action: 'sendChat', label: '发送给模型' },
+  { accelerator: 'CommandOrControl+Shift+J', action: 'toggleCompact', label: '紧凑/展开' },
+  { accelerator: 'CommandOrControl+Shift+Up', action: 'moveUp', label: '窗口上移' },
+  { accelerator: 'CommandOrControl+Shift+Down', action: 'moveDown', label: '窗口下移' },
+  { accelerator: 'CommandOrControl+Shift+Left', action: 'moveLeft', label: '窗口左移' },
+  { accelerator: 'CommandOrControl+Shift+Right', action: 'moveRight', label: '窗口右移' },
 ];
 
 function formatAccelerator(accelerator, platform = process.platform) {
@@ -25,6 +31,9 @@ function formatAccelerator(accelerator, platform = process.platform) {
     Space: 'Space',
     Enter: 'Enter',
     Return: 'Enter',
+    Backspace: '⌫',
+    Delete: '⌦',
+    Up: '↑', Down: '↓', Left: '←', Right: '→',
   };
   const parts = String(accelerator)
     .split('+')
@@ -38,8 +47,11 @@ function registerHotkeys(handlers, bindings = BINDINGS) {
   for (const binding of bindings) {
     const handler = handlers[binding.action];
     if (!handler) continue;
-    const ok = globalShortcut.register(binding.accelerator, handler);
-    if (!ok) failed.push(binding);
+    try {
+      if (!globalShortcut.register(binding.accelerator, handler)) failed.push(binding);
+    } catch {
+      failed.push(binding);
+    }
   }
   return failed;
 }

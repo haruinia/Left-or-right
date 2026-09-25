@@ -369,7 +369,7 @@ function emptyFeedMarkup() {
   return `<div class="chat-welcome">
     <div class="welcome-identity">
       <span class="brand-mark" aria-hidden="true">六</span>
-      <span class="welcome-kicker">六娃 · 面试工作台</span>
+      <span class="welcome-kicker">左右 · 面试工作台</span>
     </div>
     <h2>今天，推进这一场面试？</h2>
     <p>把转写和下一问交给驾驶舱，<br />把注意力留给对话。</p>

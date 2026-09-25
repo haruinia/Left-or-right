@@ -1,13 +1,15 @@
 'use strict';
 
 const { pathToFileURL } = require('node:url');
+const path = require('node:path');
 const { app, ipcMain, Menu, Tray, nativeImage, shell, nativeTheme } = require('electron');
 const { loadConfig } = require('./config');
-const { createWindow, toggleCompact, toggleVisible, showWindow, hideWindow, beginHoldInteract, setClickThrough, isInteractive } = require('./window');
+const { createWindow, moveWindow, toggleCompact, toggleVisible, beginHoldInteract, setClickThrough, isInteractive } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
 const { startBackend, stopBackend, waitForHealth } = require('./backend');
 
+app.setName('左右');
 const config = loadConfig();
 let win = null;
 let tray = null;
@@ -18,13 +20,23 @@ let lastHealthy = false;
 function hotkeyHandlers() {
   return {
     toggleVisible: () => beginHoldInteract(win),
-    showWindow: () => showWindow(win),
-    hideWindow: () => hideWindow(win),
+    toggleWindow: () => toggleVisible(win),
     quitApp: () => app.quit(),
+    clearShots: () => {
+      if (win && !win.isDestroyed()) win.webContents.send('liuwa:clear-shots');
+    },
     toggleCompact: () => toggleCompact(win),
+    moveUp: () => moveWindow(win, 0, -32),
+    moveDown: () => moveWindow(win, 0, 32),
+    moveLeft: () => moveWindow(win, -32, 0),
+    moveRight: () => moveWindow(win, 32, 0),
+
     captureRegion: () => attachScreenshot({ interactive: true }),
     captureScreen: () => attachScreenshot({ interactive: false }),
     sendChat: () => sendChat(),
+    newQuestion: () => {
+      if (win && !win.isDestroyed()) win.webContents.send('liuwa:new-question');
+    },
   };
 }
 
@@ -32,7 +44,7 @@ async function refreshUiHotkeys() {
   try {
     const headers = {};
     if (config.gatewayApiKey) headers['x-api-key'] = config.gatewayApiKey;
-    const response = await fetch(`${config.gatewayUrl}/api/ui/settings`, { headers });
+    const response = await fetch(`${config.gatewayUrl}/api/ui/settings`, { headers, signal: AbortSignal.timeout(3000) });
     if (!response.ok) return;
     const data = await response.json();
     const next = bindingsWith(data.hotkeys || {});
@@ -42,6 +54,7 @@ async function refreshUiHotkeys() {
     currentBindings = next;
     failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
     buildTray();
+    if (win && !win.isDestroyed()) win.webContents.send('cockpit:hotkeys', hotkeySnapshot());
   } catch {
     // Overlay keeps the last working chords if the settings API is down.
   }
@@ -102,8 +115,10 @@ async function attachScreenshot({ interactive }) {
 function buildTray(gatewayHealthy = lastHealthy) {
   lastHealthy = Boolean(gatewayHealthy);
   if (!tray) {
-    tray = new Tray(nativeImage.createEmpty());
-    tray.setToolTip('六娃');
+    const trayIcon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png')).resize({ width: 18, height: 18 });
+    trayIcon.setTemplateImage(true);
+    tray = new Tray(trayIcon);
+    tray.setToolTip('左右');
   }
   const hotkeyItems = currentBindings.map((binding) => {
     const taken = failedHotkeys.some((failed) => failed.accelerator === binding.accelerator);
@@ -119,8 +134,7 @@ function buildTray(gatewayHealthy = lastHealthy) {
         enabled: false,
       },
       { type: 'separator' },
-      { label: '展示', click: () => showWindow(win) },
-      { label: '隐藏', click: () => hideWindow(win) },
+      { label: '隐藏/显示', click: () => toggleVisible(win) },
       { label: '紧凑/展开', click: () => toggleCompact(win) },
       { type: 'separator' },
       { label: '共享保护：已开启（仅 macOS 生效）', enabled: false },
@@ -133,15 +147,21 @@ function buildTray(gatewayHealthy = lastHealthy) {
   );
 }
 
-function registerIpc() {
-  ipcMain.handle('cockpit:getConfig', () => ({
-    gatewayUrl: config.gatewayUrl,
-    gatewayApiKey: config.gatewayApiKey,
+function hotkeySnapshot() {
+  return {
     hotkeys: currentBindings.map((binding) => ({
       ...binding,
       display: formatAccelerator(binding.accelerator),
     })),
     failedHotkeys: failedHotkeys.map((binding) => binding.accelerator),
+  };
+}
+
+function registerIpc() {
+  ipcMain.handle('cockpit:getConfig', () => ({
+    gatewayUrl: config.gatewayUrl,
+    gatewayApiKey: config.gatewayApiKey,
+    ...hotkeySnapshot(),
   }));
   ipcMain.on('cockpit:getConfigSync', (event) => {
     event.returnValue = { gatewayUrl: config.gatewayUrl, gatewayApiKey: config.gatewayApiKey };
@@ -157,6 +177,14 @@ function registerIpc() {
 }
 
 app.whenReady().then(async () => {
+  app.dock?.setIcon(path.join(__dirname, '..', 'assets', 'icon.png'));
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { role: 'appMenu', label: '左右' },
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ]));
   nativeTheme.themeSource = 'light';
   if (config.spawnBackend) {
     startBackend(config);

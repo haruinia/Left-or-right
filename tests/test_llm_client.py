@@ -558,4 +558,4 @@ def test_stream_text_mock_mode_does_not_call_http(monkeypatch) -> None:
             bits.append(delta)
         return "".join(bits)
 
-    assert "六娃" in __import__("asyncio").run(collect())
+    assert "左右" in __import__("asyncio").run(collect())

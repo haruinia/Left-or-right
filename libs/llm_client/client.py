@@ -214,7 +214,7 @@ def _request_payload(
 
 
 def _mock_text_chunks() -> list[str]:
-    text = "我是六娃。当前是本地 mock：到设置页接上大模型后，截图会按流式显示。"
+    text = "我是左右。当前是演示模式，尚未连接真实 AI。连接模型后，我会根据截图和你的复习预设讲解思路。"
     return [text[index : index + 2] for index in range(0, len(text), 2)]
 
 

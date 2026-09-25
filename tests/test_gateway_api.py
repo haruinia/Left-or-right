@@ -375,7 +375,7 @@ def test_gateway_serves_demo_ui(tmp_path: Path, monkeypatch) -> None:
     # The cockpit is served as index.html + styles.css + ES modules, so the
     # behavioural assertions below run against everything the page pulls in.
     bundle = _served_cockpit_bundle(client, response.text)
-    assert "六娃" in bundle
+    assert "左右" in bundle
     assert "/api/jobs" in bundle
     assert "创建实时面试" in bundle
     assert "专业追问" in bundle
@@ -3656,9 +3656,15 @@ def test_gateway_root_is_liuwa_home(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     page = client.get("/")
     assert page.status_code == 200
-    assert "六娃" in page.text
+    assert "左右" in page.text
     assert 'src="modules/home.js"' in page.text
     assert "结束并评分" not in page.text
+    assert '<button' not in page.text
+    assert page.text.count('src="modules/pangsi-mark.svg"') == 1
+    assert 'aria-label="全部快捷键"' in page.text
+    assert 'data-key-action="newQuestion"' in page.text
+    assert 'data-key-action="toggleWindow"' in page.text
+    assert 'data-key-action="clearShots"' in page.text
     assert "/api/chat/stream" in client.get("/modules/home.js").text
 
 
@@ -3669,15 +3675,22 @@ def test_gateway_settings_page_hosts_interview_workbench(tmp_path: Path, monkeyp
     assert "岗位信息" in page.text
     assert "简历信息" in page.text
     assert "快捷键" in page.text
-    assert "展示" in page.text
-    assert "隐藏" in page.text
+    assert "隐藏 / 显示" in page.text
+    assert 'data-hotkey="toggleWindow"' in page.text
+    assert 'data-hotkey="clearShots"' in page.text
     assert 'data-hotkey="quitApp"' in page.text
     assert "大模型接入" in page.text
     assert 'id="jdText"' in page.text
     assert 'id="resumeText"' in page.text
     assert 'id="saveUiSettings"' in page.text
     assert 'src="modules/settings.js"' in page.text
-    assert 'src="/cockpit"' in page.text
+    assert 'href="/cockpit"' in page.text
+    assert "<iframe" not in page.text
+    assert 'id="studySpecialty"' in page.text
+    assert 'id="studySpecialtyOptions"' in page.text
+    assert 'value="行测"' in page.text
+    assert 'value="申论"' in page.text
+    assert 'id="studyAnswerStyle"' in page.text
     assert "面试工作台" in page.text
     assert "/api/ui/settings" in client.get("/modules/settings.js").text
 
@@ -3690,16 +3703,22 @@ def test_ui_settings_roundtrip_persists_briefing_and_hotkeys(
     assert empty.status_code == 200
     assert empty.json()["hotkeys"]["captureRegion"] == "CommandOrControl+Shift+U"
     assert empty.json()["hotkeys"]["sendChat"] == "CommandOrControl+Shift+Enter"
-    assert empty.json()["hotkeys"]["showWindow"] == "CommandOrControl+Shift+D"
-    assert empty.json()["hotkeys"]["hideWindow"] == "CommandOrControl+Shift+H"
+    assert empty.json()["hotkeys"]["toggleWindow"] == "CommandOrControl+Shift+H"
+    assert empty.json()["hotkeys"]["clearShots"] == "CommandOrControl+Shift+Backspace"
     assert empty.json()["hotkeys"]["quitApp"] == "CommandOrControl+Shift+Q"
+    assert empty.json()["hotkeys"]["newQuestion"] == "CommandOrControl+Shift+N"
 
     payload = {
+        "study_specialty": "电子信息",
+        "study_language": "C++",
+        "study_goal": "算法与专业课复习",
+        "study_answer_style": "hints",
+        "study_instructions": "先用一个小例子说明",
         "jd_text": "负责 FastAPI 网关",
         "resume_text": "做过 LLM 编排",
         "long_term_memory_consent": True,
         "hotkeys": {
-            "toggleVisible": "CommandOrControl+Shift+H",
+            "toggleVisible": "CommandOrControl+Shift+P",
             "toggleCompact": "CommandOrControl+Shift+J",
             "captureRegion": "CommandOrControl+Shift+U",
             "captureScreen": "CommandOrControl+Shift+Y",
@@ -3708,8 +3727,77 @@ def test_ui_settings_roundtrip_persists_briefing_and_hotkeys(
     saved = client.post("/api/ui/settings", json=payload)
     assert saved.status_code == 200
     assert saved.json()["jd_text"] == "负责 FastAPI 网关"
+    assert saved.json()["study_specialty"] == "电子信息"
+    assert saved.json()["study_answer_style"] == "hints"
     loaded = client.get("/api/ui/settings")
     assert loaded.json() == saved.json()
+
+
+def test_study_settings_flow_into_chat_without_legacy_personal_data(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    captured = []
+
+    class FakeClient:
+        async def stream_text(self, messages):
+            captured.extend(messages)
+            yield "解题思路"
+
+    monkeypatch.setattr("services.chat_service.service.get_llm_client", lambda: FakeClient())
+    client.post("/api/ui/settings", json={
+        "study_specialty": "电子信息",
+        "study_language": "C++",
+        "study_answer_style": "hints",
+        "study_instructions": "先举例",
+        "resume_text": "不应发送的简历信息",
+        "jd_text": "不应发送的岗位信息",
+    })
+    image = "data:image/png;base64," + base64.b64encode(b"image").decode()
+    response = client.post("/api/chat/stream", json={"images": [image]})
+    assert response.status_code == 200
+    assert "解题思路" in response.text
+    context = "\n".join(message.content for message in captured)
+    assert "电子信息" in context and "C++" in context
+    assert "先举例" in context and "先不提供完整代码" in context
+    assert "不应发送" not in context
+    assert captured[-1].images == (image,)
+
+    captured.clear()
+    client.post("/api/ui/settings", json={"study_specialty": "数学"})
+    client.post("/api/chat/stream", json={"text": "继续讲解"})
+    assert "数学" in captured[1].content
+    assert "电子信息" not in captured[1].content
+
+    captured.clear()
+    client.post("/api/ui/settings", json={"study_specialty": "行测", "study_language": "Python", "study_goal": "力扣刷题与笔面试复习"})
+    client.post("/api/chat/stream", json={"text": "这道数量关系怎么做"})
+    xingce = captured[1].content
+    assert "行测" in xingce and "判断推理" in xingce and "不要写程序代码" in xingce
+    assert "作答语言：中文" in xingce
+    assert "Python" not in xingce and "力扣" not in xingce and "参考代码" not in xingce
+
+    captured.clear()
+    client.post("/api/ui/settings", json={"study_specialty": "计算机 / 软件工程", "study_goal": "力扣刷题与笔面试复习"})
+    client.post("/api/chat/stream", json={"text": "这段报错什么意思"})
+    assert "看懂眼前这段代码或报错" in captured[1].content
+    assert "力扣" not in captured[1].content
+    assert client.get("/api/ui/settings").json()["study_goal"] == "看懂眼前这段代码或报错"
+
+
+def test_study_settings_validation_preserves_saved_profile(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    client.post("/api/ui/settings", json={"study_specialty": "软件工程"})
+    assert client.post("/api/ui/settings", json={"study_answer_style": "invalid"}).status_code == 422
+    assert client.post("/api/ui/settings", json={"study_instructions": "x" * 2001}).status_code == 422
+    assert client.get("/api/ui/settings").json()["study_specialty"] == "软件工程"
+
+
+def test_old_settings_files_receive_study_defaults(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    (tmp_path / "ui_settings.json").write_text('{"jd_text": "existing job"}', encoding="utf-8")
+    settings = client.get("/api/ui/settings").json()
+    assert settings["jd_text"] == "existing job"
+    assert settings["study_answer_style"] == "walkthrough"
+    assert settings["study_goal"] == "看懂眼前这段代码或报错"
 
 
 def test_ui_settings_rejects_invalid_hotkeys(tmp_path: Path, monkeypatch) -> None:
@@ -3745,7 +3833,7 @@ def test_gateway_chat_stream_mock_sse(tmp_path: Path, monkeypatch) -> None:
             pieces.append(payload["delta"])
         if payload.get("done"):
             done = True
-    assert "我是六娃" in "".join(pieces)
+    assert "我是左右" in "".join(pieces)
     assert done is True
 
 

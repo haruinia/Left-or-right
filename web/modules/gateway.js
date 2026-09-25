@@ -150,7 +150,7 @@ async function discoverGateway() {
       }
       const status = await readJsonResponse(response, "服务健康检查响应不是有效 JSON");
       if (status.service !== "shuihuo-killer-gateway") {
-        failures.push(`${origin}: 不是六娃 gateway`);
+        failures.push(`${origin}: 不是左右 gateway`);
         continue;
       }
       const previousOrigin = state.apiOrigin;

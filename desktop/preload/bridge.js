@@ -11,8 +11,11 @@ const api = {
   onCapture: (callback) => ipcRenderer.on('liuwa:capture', (_event, payload) => callback(payload)),
   onCaptureError: (callback) =>
     ipcRenderer.on('liuwa:capture-error', (_event, payload) => callback(payload)),
+  onNewQuestion: (callback) => ipcRenderer.on('liuwa:new-question', () => callback()),
+  onClearShots: (callback) => ipcRenderer.on('liuwa:clear-shots', () => callback()),
   onSend: (callback) => ipcRenderer.on('liuwa:send', () => callback()),
   onCompact: (callback) => ipcRenderer.on('cockpit:compact', (_event, value) => callback(value)),
+  onHotkeys: (callback) => ipcRenderer.on('cockpit:hotkeys', (_event, value) => callback(value)),
   onArmed: (callback) => ipcRenderer.on('cockpit:armed', (_event, value) => callback(value)),
 };
 

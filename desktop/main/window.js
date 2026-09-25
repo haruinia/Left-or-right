@@ -2,7 +2,7 @@
 
 const { execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
-const { app, BrowserWindow, shell } = require('electron');
+const { app, BrowserWindow, shell, screen } = require('electron');
 
 const COMPACT = { width: 320, height: 240 };
 const EXPANDED = { width: 440, height: 720 };
@@ -21,6 +21,8 @@ const RENDERER_INDEX = app.isPackaged
 function createWindow(config) {
   const isMac = process.platform === 'darwin';
   const win = new BrowserWindow({
+    title: '左右',
+    icon: path.join(__dirname, '..', 'assets', 'icon.png'),
     width: EXPANDED.width,
     height: EXPANDED.height,
     minWidth: COMPACT.width,
@@ -92,6 +94,7 @@ function createWindow(config) {
       input.key === 'Meta' ||
       input.key === 'Control' ||
       input.key === 'Shift' ||
+      input.key === 'Alt' ||
       input.key === ' ' ||
       input.key === 'Space'
     ) {
@@ -106,6 +109,15 @@ function createWindow(config) {
   }, 1000);
   win.on('closed', () => clearInterval(rememberFrontApp));
   return win;
+}
+
+function moveWindow(win, dx, dy) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const x = Math.max(area.x, Math.min(bounds.x + dx, area.x + Math.max(0, area.width - bounds.width)));
+  const y = Math.max(area.y, Math.min(bounds.y + dy, area.y + Math.max(0, area.height - bounds.height)));
+  win.setPosition(x, y, false);
 }
 
 function toggleCompact(win) {
@@ -207,6 +219,7 @@ function beginHoldInteract(win) {
 
 module.exports = {
   createWindow,
+  moveWindow,
   toggleCompact,
   toggleVisible,
   showWindow,

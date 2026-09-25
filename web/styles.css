@@ -1926,116 +1926,54 @@ body.settings-page {
 
 .liuwa-orb {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   width: min(440px, calc(100% - 24px));
   height: min(720px, calc(100dvh - 24px));
   margin: 12px auto;
   padding: 16px 16px 14px;
-  border: 1px solid #fff;
-  border-radius: 26px;
-  background: var(--frost-card);
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(15px);
-  -webkit-backdrop-filter: blur(15px);
-}
-
-.liuwa-page.is-empty .liuwa-orb {
-  display: flex;
-  flex-direction: column;
-}
-
-.liuwa-page.is-empty .liuwa-brand {
-  margin-top: auto;
-}
-
-.liuwa-page.is-empty .liuwa-dock {
-  margin-top: auto;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.32);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 16px 56px rgba(38, 56, 76, 0.08);
+  backdrop-filter: blur(22px) saturate(115%);
+  -webkit-backdrop-filter: blur(22px) saturate(115%);
 }
 
 .liuwa-brand {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 10px;
   -webkit-app-region: drag;
 }
 
-.liuwa-page:not(.is-empty) .liuwa-brand {
-  flex-direction: row;
-  justify-content: flex-start;
-  gap: 12px;
-}
-
 .liuwa-mark {
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
+  width: 34px;
+  height: 34px;
   flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.58);
-  color: var(--accent);
-  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.08em;
-  line-height: 1;
-  padding: 0 0 2px;
 }
 
-.liuwa-page:not(.is-empty) .liuwa-mark {
-  width: 36px;
-  height: 36px;
-  background: var(--accent);
-  border-color: transparent;
-  color: #fff;
-  font-size: 16px;
-  padding: 0 0 1px;
-}
-
-.liuwa-name {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  text-align: center;
-}
-
-.liuwa-page:not(.is-empty) .liuwa-name {
-  flex-direction: row;
-  align-items: baseline;
-  gap: 8px;
-  text-align: left;
-}
-
-.liuwa-kicker {
-  margin: 0;
+.liuwa-name { display: grid; gap: 2px; }
+.liuwa-name h1 { margin: 0; font-size: 23px; font-weight: 600; letter-spacing: 0.12em; line-height: 1.1; }
+.liuwa-wordmark-dot { color: #6983a6; }
+.liuwa-kicker { margin: 0; color: var(--muted); font-size: 10px; letter-spacing: 0.08em; }
+.liuwa-settings {
+  margin-left: auto;
+  padding: 8px;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  -webkit-app-region: no-drag;
 }
-
-.liuwa-name h1 {
-  margin: 0;
-  color: var(--ink);
-  font-family: "SF Pro Display", "PingFang SC", "Hiragino Sans GB", sans-serif;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.liuwa-page:not(.is-empty) .liuwa-name h1 {
-  font-size: 16px;
-  letter-spacing: -0.02em;
-}
-
-.liuwa-page:not(.is-empty) .liuwa-kicker {
+.liuwa-context {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(66, 89, 120, 0.1);
+  color: var(--muted);
   font-size: 11px;
-  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
 }
+.liuwa-context span:last-child { color: var(--faint); }
 
 .liuwa-thread {
   min-height: 0;
@@ -2056,9 +1994,16 @@ body.settings-page {
   font-size: 14px;
 }
 
-.liuwa-idle p {
-  margin: 0;
-}
+.liuwa-idle-mark { display: block; width: 76px; height: 76px; margin: 0 auto 24px; opacity: 0.8; }
+.liuwa-idle h2 { margin: 0 0 10px; color: var(--ink); font-size: 21px; font-weight: 500; line-height: 1.5; letter-spacing: 0.03em; }
+.liuwa-idle p { margin: 0; line-height: 1.8; }
+.liuwa-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.liuwa-actions button { padding: 9px 14px; min-height: 40px; white-space: nowrap; }
+.liuwa-next { margin-left: auto; }
+.liuwa-orb [hidden] { display: none !important; }
+.liuwa-orb button:disabled { opacity: 0.5; cursor: default; }
+.liuwa-orb a:focus-visible, .liuwa-orb button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.liuwa-orb textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .liuwa-turn {
   display: grid;
@@ -2088,7 +2033,9 @@ body.settings-page {
 }
 
 .liuwa-turn p {
-  max-width: 36ch;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   margin: 0;
   padding: 10px 12px;
   border-radius: 14px;
@@ -2103,8 +2050,8 @@ body.settings-page {
 
 .liuwa-turn.is-assistant p {
   justify-self: start;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   color: var(--ink);
 }
 
@@ -2129,6 +2076,14 @@ body.settings-page {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.liuwa-shot-note {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .liuwa-thumb {
@@ -2163,29 +2118,30 @@ body.settings-page {
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.22);
   color: var(--ink);
 }
 
-.liuwa-keys {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.liuwa-keys kbd {
-  margin-right: 4px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 1px 6px;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--ink);
-  font: 600 11px "SF Pro Text", ui-monospace, sans-serif;
-}
+.liuwa-optional { margin-left: 4px; font-weight: 400; opacity: 0.75; }
+.liuwa-orb button.secondary { background: rgba(255, 255, 255, 0.2); border-color: rgba(86, 108, 137, 0.18); box-shadow: none; }
+.liuwa-orb button.secondary:hover { background: rgba(255, 255, 255, 0.48); }
+.liuwa-orb button { border-radius: 10px; box-shadow: none; }
+.liuwa-shortcuts { border-top: 1px solid rgba(66, 89, 120, 0.1); margin-top: 4px; padding-top: 8px; color: var(--muted); font-size: 11px; }
+.liuwa-shortcut-primary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-bottom: 4px; }
+.liuwa-shortcut-primary > span { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.liuwa-shortcuts details { margin-top: 2px; }
+.liuwa-shortcuts summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; min-height: 28px; list-style: none; color: var(--muted); }
+.liuwa-shortcuts summary::-webkit-details-marker { display: none; }
+.liuwa-shortcut-peek { display: inline-flex; gap: 8px; align-items: center; }
+.liuwa-shortcuts kbd { font: inherit; font-size: 10px; color: var(--ink); border: 1px solid rgba(86, 108, 137, 0.15); border-radius: 4px; background: rgba(255, 255, 255, 0.24); padding: 2px 5px; white-space: nowrap; }
+.liuwa-shortcut-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+.liuwa-shortcut-grid > span { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.liuwa-shortcut-note { margin: 4px 0 12px; line-height: 1.6; }
+.liuwa-hotkey-warning { margin: 10px 0 0; color: #922f35; line-height: 1.6; }
+.liuwa-shortcuts kbd.is-conflict { color: #922f35; border-color: currentColor; }
 
 .liuwa-status {
+  overflow-wrap: anywhere;
   min-height: 1.2em;
   margin: 0;
   color: var(--accent);
@@ -2245,6 +2201,7 @@ body.liuwa-armed .liuwa-orb {
   box-shadow: 0 12px 36px rgba(24, 60, 121, 0.12), 0 0 0 2px rgba(36, 97, 239, 0.45);
 }
 
+body.liuwa-compact .liuwa-context,
 body.liuwa-compact .liuwa-thread,
 body.liuwa-compact .liuwa-note,
 body.liuwa-compact .liuwa-shots {
@@ -2252,7 +2209,7 @@ body.liuwa-compact .liuwa-shots {
 }
 
 body.liuwa-compact .liuwa-orb {
-  grid-template-rows: auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2273,3 +2230,56 @@ body.liuwa-compact .liuwa-orb {
   }
 }
 
+
+/* Settings keeps routine study preferences open and legacy tools out of the way. */
+#studySettingsForm { display: grid; gap: 20px; min-width: 0; }
+.settings-disclosure { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); }
+.settings-disclosure > summary { padding: 18px 20px; font-weight: 600; cursor: pointer; }
+.settings-disclosure > summary span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 400; }
+.settings-disclosure[open] > summary { border-bottom: 1px solid var(--line); }
+.settings-disclosure .settings-card { border: 0; box-shadow: none; }
+.settings-footer { position: sticky; bottom: 12px; align-items: center; justify-content: space-between; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); }
+.settings-log:empty { display: none; }
+.settings-page input, .settings-page textarea, .settings-page select { min-width: 0; width: 100%; }
+.settings-page input[type="checkbox"] { width: 16px; }
+.settings-card > .small { margin: 0; }
+@media (max-width: 380px) {
+  .liuwa-orb { padding: 12px; }
+  .liuwa-actions { gap: 6px; }
+  .liuwa-actions button { padding: 8px 10px; }
+  .liuwa-idle h2 { font-size: 18px; }
+  .settings-footer { bottom: 0; }
+}
+
+.liuwa-page, .settings-page {
+  --muted: #52617a;
+  --faint: #66758e;
+}
+.settings-page { background: var(--bg); }
+.liuwa-page h1, .liuwa-page h2, .settings-page h1, .settings-page h2 { font-family: inherit; }
+.settings-page select { font: inherit; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); }
+.settings-page select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A browser can only show glass over its own page; the desktop canvas stays transparent. */
+html:not(.liuwa-host) .liuwa-page {
+  background:
+    radial-gradient(ellipse at 14% 28%, rgba(166, 186, 201, 0.48), transparent 50%),
+    radial-gradient(ellipse at 84% 74%, rgba(174, 187, 183, 0.48), transparent 48%),
+    linear-gradient(135deg, #e3e9ee, #d4dde5 55%, #edf0ed);
+}
+.settings-brand-logo { width: 40px; height: 40px; flex: 0 0 auto; }
+.settings-page input[data-hotkey] { cursor: pointer; font-weight: 500; letter-spacing: 0.06em; }
+.settings-page input[data-hotkey]:focus { border-color: var(--accent); background: var(--accent-soft); }
+#hotkeyFeedback.is-error { color: var(--red); }
+@media (max-width: 380px) {
+  .liuwa-shortcut-grid { gap: 10px 8px; font-size: 10px; }
+  .liuwa-shortcuts kbd { padding: 2px 3px; font-size: 9px; }
+}
+@media (max-height: 600px) {
+  .liuwa-idle-mark { width: 48px; height: 48px; margin-bottom: 12px; }
+  .liuwa-idle h2 { font-size: 18px; }
+}
+
+.liuwa-shortcut-heading { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+body.liuwa-compact .liuwa-dock { min-height: 0; overflow: auto; }
+.liuwa-page.liuwa-compact .liuwa-thread { display: none; }

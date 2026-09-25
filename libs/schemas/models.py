@@ -1135,9 +1135,14 @@ _HOTKEY_TOKENS = {
 
 
 def _valid_accelerator(value: str) -> str:
-    parts = [part for part in str(value).split("+") if part]
+    parts = [part.strip() for part in str(value).split("+")]
+    modifiers = {"CommandOrControl", "Command", "Control", "Ctrl", "Alt", "Option", "Shift", "Super", "Meta"}
     if len(parts) < 2:
         raise ValueError("hotkey must include a modifier and a key")
+    if not any(part in modifiers for part in parts):
+        raise ValueError("hotkey must include a modifier")
+    if sum(part not in modifiers for part in parts) != 1 or len(set(parts)) != len(parts):
+        raise ValueError("hotkey requires exactly one key and distinct modifiers")
     for part in parts:
         if part in _HOTKEY_TOKENS:
             continue
@@ -1150,28 +1155,54 @@ def _valid_accelerator(value: str) -> str:
 
 
 class UiHotkeys(BaseModel):
-    toggleVisible: str = "CommandOrControl+Shift+Space"
-    showWindow: str = "CommandOrControl+Shift+D"
-    hideWindow: str = "CommandOrControl+Shift+H"
-    quitApp: str = "CommandOrControl+Shift+Q"
-    toggleCompact: str = "CommandOrControl+Shift+J"
+    moveUp: str = "CommandOrControl+Shift+Up"
+    moveDown: str = "CommandOrControl+Shift+Down"
+    moveLeft: str = "CommandOrControl+Shift+Left"
+    moveRight: str = "CommandOrControl+Shift+Right"
+
     captureRegion: str = "CommandOrControl+Shift+U"
-    captureScreen: str = "CommandOrControl+Shift+Y"
     sendChat: str = "CommandOrControl+Shift+Enter"
+    toggleWindow: str = "CommandOrControl+Shift+H"
+    quitApp: str = "CommandOrControl+Shift+Q"
+    newQuestion: str = "CommandOrControl+Shift+N"
+    clearShots: str = "CommandOrControl+Shift+Backspace"
+
+    toggleVisible: str = "CommandOrControl+Shift+Space"
+    captureScreen: str = "CommandOrControl+Shift+Y"
+    toggleCompact: str = "CommandOrControl+Shift+J"
 
     @field_validator(
+        "moveUp",
+        "moveDown",
+        "moveLeft",
+        "moveRight",
         "toggleVisible",
-        "showWindow",
-        "hideWindow",
+        "toggleWindow",
         "quitApp",
         "toggleCompact",
         "captureRegion",
         "captureScreen",
         "sendChat",
+        "newQuestion",
+        "clearShots",
     )
     @classmethod
     def accelerator_is_supported(cls, value: str) -> str:
         return _valid_accelerator(value)
+
+    def validate_unique(self) -> None:
+        # Check both desktop platforms: CommandOrControl resolves differently on macOS.
+        for primary in ("Command", "Control"):
+            aliases = {
+                "CommandOrControl": primary, "Ctrl": "Control", "Option": "Alt",
+                "Super": "Command", "Meta": "Command", "Return": "Enter", "Esc": "Escape",
+            }
+            seen: set[tuple[str, ...]] = set()
+            for value in self.model_dump().values():
+                signature = tuple(sorted(aliases.get(part, part).upper() for part in value.split("+")))
+                if signature in seen:
+                    raise ValueError("快捷键不能重复，请为每项功能设置不同的组合键。")
+                seen.add(signature)
 
 
 class ChatHistoryTurn(BaseModel):
@@ -1192,6 +1223,11 @@ class ChatStreamRequest(BaseModel):
 
 
 class UiSettings(BaseModel):
+    study_specialty: str = Field(default="计算机 / 软件工程", max_length=120)
+    study_language: str = Field(default="Python", max_length=80)
+    study_goal: str = Field(default="看懂眼前这段代码或报错", max_length=1000)
+    study_answer_style: Literal["hints", "walkthrough", "solution"] = "walkthrough"
+    study_instructions: str = Field(default="", max_length=2000)
     jd_text: str = ""
     resume_text: str = ""
     long_term_memory_consent: bool = False

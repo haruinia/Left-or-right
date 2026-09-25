@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>六娃 · 设置</title>
+    <title>左右 · 设置</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -17,22 +17,62 @@
     <main class="settings-shell">
       <header class="settings-top">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">六</span>
+          <img class="settings-brand-logo" src="modules/pangsi-mark.svg" alt="左右标志：两条相伴的思路线" />
           <div>
             <span class="step">SETUP</span>
             <h1>设置</h1>
-            <p>模型接入、快捷键，以及原来的面试工作台</p>
+            <p>在这里设好复习偏好，回到左右专心看题。</p>
           </div>
         </div>
-        <a class="button secondary" href="/">打开六娃</a>
+        <a class="button secondary" href="/">打开左右</a>
       </header>
 
+      <form id="studySettingsForm">
+      <section class="panel settings-card" id="study">
+        <h2>复习预设</h2>
+        <p class="small">每次提问都会带上这些偏好，修改后从下一次发送开始生效。</p>
+        <div class="hotkey-grid">
+          <label>专业 / 方向
+            <input id="studySpecialty" list="studySpecialtyOptions" maxlength="120" placeholder="选择或填写，例如：计算机 / 软件工程、行测" />
+            <datalist id="studySpecialtyOptions">
+              <option value="计算机 / 软件工程"></option>
+              <option value="行测"></option>
+              <option value="申论"></option>
+              <option value="考研"></option>
+              <option value="英语"></option>
+              <option value="金融"></option>
+              <option value="法学"></option>
+              <option value="医学"></option>
+              <option value="会计"></option>
+              <option value="电子信息"></option>
+              <option value="教师资格"></option>
+            </datalist>
+          </label>
+          <label>语言偏好
+            <input id="studyLanguage" maxlength="80" placeholder="编程题填 Python、Java、C++；行测等可留空" />
+          </label>
+        </div>
+        <p class="small" id="studySpecialtyHint" hidden>这个方向按中文题型讲解，不会把编程语言发给模型。</p>
+        <label>复习目标
+          <textarea id="studyGoal" rows="2" maxlength="1000" placeholder="例如：看懂报错和当前代码；或行测数量关系与判断推理"></textarea>
+        </label>
+        <label>默认讲解方式
+          <select id="studyAnswerStyle">
+            <option value="hints">先给提示 · 留给自己思考</option>
+            <option value="walkthrough">讲解思路 · 步骤、例子与易错点</option>
+            <option value="solution">完整解答 · 思路和答案</option>
+          </select>
+        </label>
+        <label>补充偏好（选填）
+          <textarea id="studyInstructions" rows="3" maxlength="2000" placeholder="例如：先从暴力解法讲起，再解释怎么优化；用 Java 举例"></textarea>
+        </label>
+      </section>
+
       <section class="panel settings-card">
-        <span class="step">API</span>
         <h2>大模型接入</h2>
-        <p class="small">首页截图会发给这里连上的网关模型。密钥只留在当前浏览器会话。</p>
+        <p class="small">截图由本地服务转发给当前模型。下面是服务连接信息，模型配置沿用服务端配置。</p>
         <label>
-          API 地址
+          本地服务地址
           <input
             id="gatewayOrigin"
             type="url"
@@ -44,7 +84,7 @@
           />
         </label>
         <label>
-          API Key
+          服务访问密钥（选填）
           <input
             id="gatewayKey"
             type="password"
@@ -68,34 +108,30 @@
           />
         </label>
         <p class="small" id="connectedModel">等待读取模型配置</p>
+        <p class="small">服务地址与访问密钥只用于当前浏览器会话；桌面应用仍使用启动时的连接配置。</p>
+        <p class="small">本地 Codex：待接入。接入后继续使用同一个截图提问入口。</p>
         <div class="settings-status-row">
           <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
           <span class="status-pill" id="modelStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>模型检查中</span></span>
-          <span class="status-pill" id="asrStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>ASR 检查中</span></span>
         </div>
         <div class="settings-actions">
           <button type="button" id="saveGatewayKey" title="保存当前浏览器会话使用的 Gateway Key">保存接入</button>
           <button class="secondary" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
           <button class="secondary" type="button" id="checkModel" title="调用真实模型检查连接">检查模型</button>
-          <button class="secondary" type="button" id="checkAsr" title="检查 ASR 配置、依赖和 Token">检查 ASR</button>
           <a class="button secondary" href="/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
         </div>
       </section>
 
-      <section class="panel settings-card">
-        <span class="step">SHORTCUTS</span>
-        <h2>快捷键</h2>
-        <p class="small">填写 Electron 加速键。首页：全屏截图放入对话框，再按发送键交给模型。展示、隐藏、退出在窗口未聚焦时也生效。</p>
+      <details class="settings-disclosure" id="shortcuts" open>
+        <summary>桌面快捷键 <span>截图、发送与窗口操作</span></summary>
+        <section class="settings-card">
+        <p class="small">点击一个快捷键，再按下新的组合键。Esc 取消，Tab 切换。保存后约 4 秒同步到桌面，无需重启。</p>
+        <p class="small" id="hotkeyFeedback" role="status">原有功能全部保留。快捷键需包含 ⌘ / Ctrl / Alt 等修饰键。</p>
         <div class="hotkey-grid">
           <label>
-            展示
-            <input id="hotkeyShowWindow" data-hotkey="showWindow" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="showWindow"></span>
-          </label>
-          <label>
-            隐藏
-            <input id="hotkeyHideWindow" data-hotkey="hideWindow" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="hideWindow"></span>
+            隐藏 / 显示
+            <input id="hotkeyToggleWindow" data-hotkey="toggleWindow" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="toggleWindow"></span>
           </label>
           <label>
             退出
@@ -113,7 +149,7 @@
             <span class="small hotkey-preview" data-preview="toggleCompact"></span>
           </label>
           <label>
-            框选截图
+            截图
             <input id="hotkeyCaptureRegion" data-hotkey="captureRegion" spellcheck="false" />
             <span class="small hotkey-preview" data-preview="captureRegion"></span>
           </label>
@@ -123,14 +159,49 @@
             <span class="small hotkey-preview" data-preview="captureScreen"></span>
           </label>
           <label>
+            窗口上移
+            <input data-hotkey="moveUp" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="moveUp"></span>
+          </label>
+          <label>
+            窗口下移
+            <input data-hotkey="moveDown" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="moveDown"></span>
+          </label>
+          <label>
+            窗口左移
+            <input data-hotkey="moveLeft" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="moveLeft"></span>
+          </label>
+          <label>
+            窗口右移
+            <input data-hotkey="moveRight" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="moveRight"></span>
+          </label>
+          <label>
+            新对话
+            <input id="hotkeyNewQuestion" data-hotkey="newQuestion" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="newQuestion"></span>
+          </label>
+          <label>
+            清空截图
+            <input id="hotkeyClearShots" data-hotkey="clearShots" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="clearShots"></span>
+          </label>
+          <label>
             发送给模型
             <input id="hotkeySendChat" data-hotkey="sendChat" spellcheck="false" />
             <span class="small hotkey-preview" data-preview="sendChat"></span>
           </label>
         </div>
+        <button type="button" class="secondary" id="resetHotkeys">恢复默认快捷键</button>
       </section>
 
-      <section class="panel settings-card">
+      </details>
+
+      <details class="settings-disclosure" id="legacySettings">
+        <summary>其他功能与旧版工作台 <span>岗位、简历、语音与评估</span></summary>
+      <section class="settings-card">
         <span class="step">JOB</span>
         <h2>岗位信息</h2>
         <p class="small">给下面的面试工作台用。首页截图对话不会读这段 JD。</p>
@@ -150,7 +221,7 @@
         </label>
       </section>
 
-      <section class="panel settings-card">
+      <section class="settings-card">
         <span class="step">RESUME</span>
         <h2>简历信息</h2>
         <p class="small">保存后作为候选人资料进入实时面试。</p>
@@ -177,18 +248,24 @@
         </label>
       </section>
 
-      <div class="settings-footer">
-        <button type="button" id="saveUiSettings" title="保存岗位、简历和快捷键">保存设置</button>
-        <button class="secondary" type="button" id="loadSampleSettings" title="填入一组可直接试用的 JD 和简历">填入样例</button>
-      </div>
-      <div class="feed settings-log" id="settingsLog" role="status" aria-live="polite"></div>
-
-      <section class="panel settings-card settings-workbench" id="interview">
-        <span class="step">INTERVIEW</span>
+      <section class="settings-card" id="interview">
         <h2>面试工作台</h2>
-        <p class="small">原来的实时面试、麦克风、追问和结束评分都先放在这里，不再占首页。</p>
-        <iframe class="workbench-frame" src="/cockpit" title="面试工作台"></iframe>
+        <p class="small">原来的实时面试、语音转写、追问和评分仍可单独使用。</p>
+        <div class="settings-actions">
+          <a class="button secondary" href="/cockpit" target="_blank" rel="noopener">打开旧版工作台</a>
+          <button class="secondary" type="button" id="checkAsr">检查语音服务</button>
+          <span class="status-pill" id="asrStatus" role="status"><span class="status-dot"></span><span>待检查</span></span>
+          <button class="secondary" type="button" id="loadSampleSettings">填入岗位与简历样例</button>
+        </div>
       </section>
+      </details>
+
+      <div class="settings-footer">
+        <span class="small" id="settingsSaveState" role="status">正在读取设置…</span>
+        <button type="submit" id="saveUiSettings" disabled>保存设置</button>
+      </div>
+      </form>
+      <div class="feed settings-log" id="settingsLog" role="status" aria-live="polite"></div>
     </main>
     <script type="module" src="modules/settings.js"></script>
   </body>

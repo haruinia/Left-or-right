@@ -1,3 +1,5 @@
+import { formatAccelerator } from "./shortcuts.js";
+import { isExamSpecialty } from "./study-presets.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
 
 const thread = document.querySelector("#liuwaThread");
@@ -5,12 +7,10 @@ const idle = document.querySelector("#liuwaIdle");
 const shots = document.querySelector("#liuwaShots");
 const note = document.querySelector("#liuwaNote");
 const statusNode = document.querySelector("#liuwaStatus");
-const fileInput = document.querySelector("#liuwaFiles");
 const hintCapture = document.querySelector("#hintCapture");
-const hintSend = document.querySelector("#hintSend");
-const hintShow = document.querySelector("#hintShow");
-const hintHide = document.querySelector("#hintHide");
-const hintQuit = document.querySelector("#hintQuit");
+const settingsLink = document.querySelector("#liuwaSettings");
+const presetNode = document.querySelector("#liuwaPreset");
+const modelNode = document.querySelector("#liuwaModel");
 
 const pending = [];
 const history = [];
@@ -38,12 +38,14 @@ function syncEmpty() {
 
 function renderPending() {
   if (!shots) return;
+  const held = pending.some((shot) => shot.sent);
   shots.hidden = pending.length === 0;
-  shots.innerHTML = pending
+  const caption = held ? `<p class="liuwa-shot-note">本题附图，追问会继续带上</p>` : "";
+  shots.innerHTML = caption + pending
     .map(
       (shot) =>
         `<figure class="liuwa-thumb" data-shot="${escapeHtml(shot.id)}">
-          <img src="${escapeHtml(shot.dataUrl)}" alt="待发送截图" />
+          <img src="${escapeHtml(shot.dataUrl)}" alt="${shot.sent ? "本题截图" : "待发送截图"}" />
           <button type="button" data-remove="${escapeHtml(shot.id)}" aria-label="去掉这张图">×</button>
         </figure>`
     )
@@ -52,6 +54,14 @@ function renderPending() {
 }
 
 function addShot(dataUrl) {
+  if (streaming) {
+    setStatus("请等本次回答结束后再添加截图。");
+    return;
+  }
+  if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) {
+    setStatus("请选择 PNG、JPEG、WebP 或 GIF 图片。");
+    return;
+  }
   if (pending.length >= 8) {
     setStatus("一次最多带 8 张图。");
     return;
@@ -59,7 +69,7 @@ function addShot(dataUrl) {
   pending.push({ id: String(nextShotId), dataUrl });
   nextShotId += 1;
   renderPending();
-  setStatus(`已放入 ${pending.length} 张。`);
+  setStatus(`已放入 ${pending.length} 张，发送时会一起带上。`);
 }
 
 function addShotFromBase64(mime, data) {
@@ -84,14 +94,14 @@ async function ensureGateway() {
   const failures = [];
   for (const origin of uniqueOrigins()) {
     try {
-      const response = await fetch(`${origin}/health`, { cache: "no-store" });
+      const response = await fetch(`${origin}/health`, { cache: "no-store", signal: AbortSignal.timeout(3500) });
       if (!response.ok) {
         failures.push(`${origin}: HTTP ${response.status}`);
         continue;
       }
       const payload = await response.json();
       if (payload.service !== "shuihuo-killer-gateway") {
-        failures.push(`${origin}: 不是六娃 gateway`);
+        failures.push(`${origin}: 不是左右本地服务`);
         continue;
       }
       state.apiOrigin = new URL(response.url).origin;
@@ -118,6 +128,7 @@ function appendUserTurn(images, text) {
     ${text ? `<p>${escapeHtml(text)}</p>` : ""}
   `;
   thread.append(article);
+  return article;
 }
 
 function appendAssistantTurn() {
@@ -153,30 +164,35 @@ async function readSse(response, onDelta) {
       if (payload.done) completed = true;
     }
   }
+  if (!completed) throw new Error("回答中断，请重新发送。");
 }
 
 async function sendChat() {
   if (streaming) return;
-  const images = pending.splice(0, pending.length).map((shot) => shot.dataUrl);
+  const images = pending.map((shot) => shot.dataUrl);
+  const unsent = pending.filter((shot) => !shot.sent).map((shot) => shot.dataUrl);
   const text = note ? note.value.trim() : "";
   renderPending();
-  if (!images.length && !text) {
-    setStatus("先截一张屏，或写一句再发送。");
+  if (!unsent.length && !text) {
+    setStatus(pending.length ? "写一句追问，或按新对话再截新的图。" : "先截一张屏，或写一句再发送。");
     return;
   }
   streaming = true;
   document.body.classList.add("is-busy");
-  setStatus("六娃正在看…");
-  appendUserTurn(images, text);
+  setStatus("正在分析题目…");
+  note.disabled = true;
+  shots.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  const userTurn = appendUserTurn(unsent, text);
   const streamNode = appendAssistantTurn();
+  const assistantTurn = streamNode.parentElement;
   syncEmpty();
   thread.scrollTop = thread.scrollHeight;
-  if (note) note.value = "";
   let reply = "";
   try {
     await ensureGateway();
     const response = await fetch(`${state.apiOrigin}/api/chat/stream`, {
       method: "POST",
+      signal: AbortSignal.timeout(180_000),
       headers: authHeaders({
         "content-type": "application/json",
         accept: "text/event-stream",
@@ -184,30 +200,43 @@ async function sendChat() {
       body: JSON.stringify({
         text,
         images,
-        history: history.slice(-16),
+        history: history.slice(-16).map((turn) => ({ ...turn, text: turn.text.slice(0, 8000) })),
       }),
     });
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(detail.slice(0, 240) || `HTTP ${response.status}`);
+      const failure = await response.json().catch(() => ({}));
+      const detail = typeof failure.detail === "string" ? failure.detail : "";
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("服务验证失败，请打开设置检查访问密钥。");
+      }
+      if (detail.includes("larger than") || response.status === 413) {
+        throw new Error("截图过大，请缩小截图范围或压缩图片后重试。");
+      }
+      throw new Error(detail || `发送失败，请检查服务后重试（${response.status}）。`);
     }
     await readSse(response, (delta) => {
       reply += delta;
       streamNode.textContent = reply;
       thread.scrollTop = thread.scrollHeight;
     });
-    streamNode.parentElement.classList.remove("is-stream");
-    history.push({ role: "user", text: text || "（截图）" });
+    assistantTurn.classList.remove("is-stream");
+    pending.forEach((shot) => { shot.sent = true; });
+    note.value = "";
+    renderPending();
+    history.push({ role: "user", text: text || "请继续讲解上一道截图题目" });
     history.push({ role: "assistant", text: reply });
-    setStatus("");
+    setStatus(pending.length ? "这些截图会附在后续追问里，新对话时清掉。" : "");
   } catch (error) {
+    userTurn.remove();
+    assistantTurn.remove();
     const message = error && error.message ? error.message : String(error);
-    streamNode.textContent = reply || `没发出去：${message}`;
-    streamNode.parentElement.classList.add("is-error");
-    setStatus(message);
+    setStatus(`${message} 图片和问题已保留，可再次发送。`);
   } finally {
     streaming = false;
     document.body.classList.remove("is-busy");
+    if (assistantTurn.isConnected) assistantTurn.classList.remove("is-stream");
+    note.disabled = false;
+    renderPending();
   }
 }
 
@@ -217,16 +246,23 @@ function applyHotkeyHints(cfg) {
     const binding = byAction.get(action);
     if (node && binding && binding.display) node.textContent = binding.display;
   };
-  apply(hintCapture, "captureScreen");
-  apply(hintSend, "sendChat");
-  apply(hintShow, "showWindow");
-  apply(hintHide, "hideWindow");
-  apply(hintQuit, "quitApp");
+  apply(hintCapture, "captureRegion");
+  document.querySelectorAll("[data-key-action]").forEach((node) => {
+    apply(node, node.dataset.keyAction);
+    node.classList.toggle("is-conflict", (cfg.failedHotkeys || []).includes(byAction.get(node.dataset.keyAction)?.accelerator));
+  });
+  const warning = document.querySelector("#liuwaHotkeyWarning");
+  warning.hidden = !(cfg.failedHotkeys || []).length;
+  warning.textContent = warning.hidden ? "" : "部分按键被系统或其他应用占用，请到设置更换。";
 }
 
 function wireDesktop(cockpit) {
   document.documentElement.classList.add("liuwa-host");
   document.body.classList.add("liuwa-shell");
+  document.querySelector("#liuwaShortcutNote").textContent = "连续截图会一起发送。按住操作键才能点面板。";
+  cockpit.onHotkeys?.(applyHotkeyHints);
+  cockpit.onNewQuestion?.(newQuestion);
+  cockpit.onClearShots?.(clearShots);
   if (typeof cockpit.onCapture === "function") {
     cockpit.onCapture((payload) => {
       if (!payload || !payload.data) return;
@@ -263,8 +299,10 @@ function wireDesktop(cockpit) {
 
 shots?.addEventListener("click", (event) => {
   const id = event.target.closest("[data-remove]")?.dataset.remove;
-  if (id) removeShot(id);
+  if (id && !streaming) removeShot(id);
 });
+
+note?.addEventListener("input", syncEmpty);
 
 note?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
@@ -298,18 +336,75 @@ document.addEventListener("drop", (event) => {
     });
 });
 
-fileInput?.addEventListener("change", (event) => {
-  Array.from(event.target.files || []).forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = () => addShot(String(reader.result || ""));
-    reader.readAsDataURL(file);
-  });
-  event.target.value = "";
-});
-
 if (typeof window.__GATEWAY_KEY__ === "string" && window.__GATEWAY_KEY__.trim()) {
   state.gatewayApiKey = window.__GATEWAY_KEY__.trim();
 }
 if (window.cockpit) wireDesktop(window.cockpit);
+
+function updateSettingsLink() {
+  settingsLink.href = `${state.apiOrigin}/settings`;
+}
+
+let refreshingContext = false;
+async function refreshContext() {
+  if (refreshingContext) return;
+  refreshingContext = true;
+  try {
+    await ensureGateway();
+    updateSettingsLink();
+    if (window.cockpit?.getConfig) applyHotkeyHints(await window.cockpit.getConfig());
+    const [settingsResponse, configResponse] = await Promise.all([
+      fetch(`${state.apiOrigin}/api/ui/settings`, { headers: authHeaders(), cache: "no-store", signal: AbortSignal.timeout(3500) }),
+      fetch(`${state.apiOrigin}/api/config/status`, { headers: authHeaders(), cache: "no-store", signal: AbortSignal.timeout(3500) }),
+    ]);
+    if (!settingsResponse.ok || !configResponse.ok) throw new Error("请在 Web 设置中检查服务连接与访问密钥。");
+    const settings = await settingsResponse.json();
+    if (!window.cockpit) applyHotkeyHints({ hotkeys: Object.entries(settings.hotkeys || {}).map(([action, accelerator]) => ({
+      action, accelerator, display: formatAccelerator(accelerator, /Mac|iPhone|iPad/.test(navigator.platform)),
+    })) });
+    const config = await configResponse.json();
+    const styles = { hints: "先给提示", walkthrough: "讲解思路", solution: "完整解答" };
+    const specialty = settings.study_specialty || "通用学习";
+    const language = isExamSpecialty(specialty) ? "" : settings.study_language?.trim();
+    presetNode.textContent = [specialty, language, styles[settings.study_answer_style] || "讲解思路"].filter(Boolean).join(" · ");
+    const mock = config.llm_provider === "mock" || !config.llm_api_key_configured || !config.llm_base_url_configured;
+    modelNode.textContent = mock ? "演示模式 · 未连接真实 AI" : `当前模型 · ${config.llm_model}`;
+  } catch (error) {
+    presetNode.textContent = "复习预设未同步";
+    modelNode.textContent = "连接待检查 · 打开设置";
+    modelNode.title = error.message;
+  } finally {
+    refreshingContext = false;
+  }
+}
+
+function clearShots() {
+  if (streaming) {
+    setStatus("请等本次回答结束后再清空截图。");
+    return;
+  }
+  if (!pending.length) {
+    setStatus("没有待发送的截图。");
+    return;
+  }
+  pending.length = 0;
+  renderPending();
+  setStatus("已清空截图，对话还在。");
+}
+
+function newQuestion() {
+  if (streaming) return;
+  thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
+  history.length = 0;
+  pending.length = 0;
+  note.value = "";
+  setStatus("已开始新对话，上一轮对话和截图都已清掉。");
+  renderPending();
+}
+window.addEventListener("focus", refreshContext);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshContext();
+});
+updateSettingsLink();
 syncEmpty();
-ensureGateway().catch((error) => setStatus(error.message || "未连上本地服务"));
+refreshContext();
