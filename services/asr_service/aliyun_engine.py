@@ -159,6 +159,15 @@ class AliyunASRSession:
             for item in self.settings.aliyun_asr_language_hints.split(",")
             if item.strip()
         ]
+        parameters: dict[str, Any] = {
+            "format": self.settings.aliyun_asr_format,
+            "sample_rate": self.settings.aliyun_asr_sample_rate,
+            "language_hints": hints,
+        }
+        # 可选热词表：提高专业术语/人名识别率（需预先创建并配置其 ID）。
+        vocabulary_id = self.settings.aliyun_asr_vocabulary_id.strip()
+        if vocabulary_id:
+            parameters["vocabulary_id"] = vocabulary_id
         return {
             "header": {
                 "action": "run-task",
@@ -170,11 +179,7 @@ class AliyunASRSession:
                 "task": "asr",
                 "function": "recognition",
                 "model": self.settings.aliyun_asr_model,
-                "parameters": {
-                    "format": self.settings.aliyun_asr_format,
-                    "sample_rate": self.settings.aliyun_asr_sample_rate,
-                    "language_hints": hints,
-                },
+                "parameters": parameters,
                 "input": {},
             },
         }

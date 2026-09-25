@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -29,6 +30,7 @@ from libs.common.observability import (
 from libs.common.prompts import load_prompt
 from libs.common.runtime import RuntimeStatus, get_runtime_status
 from libs.common.storage import get_artifact_store
+from libs.common.textsim import cosine_similarity, normalize_text
 from libs.schemas import (
     AIGCDetectRequest,
     CandidateCreate,
@@ -104,8 +106,18 @@ from services.interview_orchestrator.service import (
     should_probe_turn,
     start_interview,
 )
-from services.jd_kb_service.service import create_job, get_job, retrieve_job_probe_patterns
-from services.probe_service.service import fallback_probe, generate_probe, generate_question_bank
+from services.jd_kb_service.service import (
+    create_job,
+    get_job,
+    retrieve_job_probe_patterns,
+    update_job_title,
+)
+from services.probe_service.service import (
+    fallback_probe,
+    fallback_question_bank,
+    generate_probe,
+    generate_question_bank,
+)
 from services.report_service.service import build_report
 from services.scoring_service.service import score_interview
 from services.signal_service.service import extract_behavior_signal
@@ -153,6 +165,13 @@ class _LockedWebSocketSender:
             await self._websocket.send_json(payload)
 
 
+# 内容级回声消除：扬声器外放的候选人声音被麦克风拾取后，会以「面试官」身份转写出与
+# 候选人近期内容高度相似的文本。用时间窗口 + 文本相似度比对，识别并抑制这种串音回声。
+ECHO_SIMILARITY_THRESHOLD = 0.6
+ECHO_TIME_WINDOW_MS = 6000
+ECHO_REF_BUFFER = 16
+
+
 @dataclass
 class _DialogueSessionRuntime:
     assembler: DialogueAssembler
@@ -161,6 +180,8 @@ class _DialogueSessionRuntime:
     epoch: int = 0
     flush_task: asyncio.Task[None] | None = None
     question_flow: QuestionFlowState | None = None
+    # 候选人近期转写的 (归一化文本, end_ms)，供麦克风路做回声比对。
+    recent_candidate: list[tuple[str, int]] = field(default_factory=list)
 
     async def send_json(self, payload: dict) -> None:
         stale: list[_LockedWebSocketSender] = []
@@ -191,6 +212,33 @@ def _discard_dialogue_runtime(interview_id: str, runtime: _DialogueSessionRuntim
         _dialogue_runtimes.pop(interview_id, None)
 
 
+def _suppress_candidate_echo(runtime: _DialogueSessionRuntime, segment: TranscriptSegment) -> bool:
+    """跨双声道的内容级回声消除。
+
+    候选人语音从扬声器外放、被麦克风拾取后，会以 speaker=interviewer 转写出与候选人
+    近期内容几乎一致的文本。这里把候选人(扬声器)转写存入参考缓冲，麦克风(面试官)转写
+    到达时与时间窗口内的候选人文本比对相似度，超过阈值即判定为串音回声并抑制。
+
+    仅在接入了会议声音(存在候选人参考路)时才会真正生效；纯麦克风场景缓冲为空，永不抑制。
+    返回 True 表示该 segment 是回声、应丢弃。这是同步函数，在单线程事件循环中原子执行。
+    """
+    text = normalize_text(segment.text)
+    if not text:
+        return False
+    if segment.speaker == "candidate":
+        runtime.recent_candidate.append((text, segment.end_ms))
+        if len(runtime.recent_candidate) > ECHO_REF_BUFFER:
+            del runtime.recent_candidate[:-ECHO_REF_BUFFER]
+        return False
+    if segment.speaker == "interviewer":
+        for cand_text, cand_end in runtime.recent_candidate:
+            if abs(segment.end_ms - cand_end) > ECHO_TIME_WINDOW_MS:
+                continue
+            if cosine_similarity(text, cand_text) >= ECHO_SIMILARITY_THRESHOLD:
+                return True
+    return False
+
+
 async def _send_initial_question_if_available(
     sender: _LockedWebSocketSender,
     runtime: _DialogueSessionRuntime,
@@ -203,7 +251,7 @@ async def _send_initial_question_if_available(
             try:
                 bank = get_question_bank(interview_id)
             except KeyError:
-                return
+                return record
             runtime.question_flow = QuestionFlowState(
                 bank=bank,
                 current_question=initial_question(bank),
@@ -766,6 +814,57 @@ def _resume_claims_for_probe(record) -> list[ResumeClaim]:
     return claims
 
 
+async def _refine_question_bank_in_background(
+    interview_id: str,
+    jd_text: str,
+    resume_text: str,
+    competency_model,
+    fallback_bank,
+) -> None:
+    try:
+        refined = await generate_question_bank(
+            interview_id, jd_text, resume_text, competency_model
+        )
+    except Exception:
+        return
+    # 按题目内容比较：mock/兜底场景下重新生成的题库只有随机 id 不同，不应覆盖
+    def bank_signature(bank) -> list[tuple[str, str, str]]:
+        return [(item.question, item.category, item.basis) for item in bank.items]
+
+    if bank_signature(refined) == bank_signature(fallback_bank):
+        return
+    try:
+        # 保留兜底题库中已经被问过的题（按题面匹配）
+        current = get_question_bank(interview_id)
+        asked_questions = {item.question.strip() for item in current.items if item.asked}
+        if asked_questions:
+            refined = refined.model_copy(
+                update={
+                    "items": [
+                        item.model_copy(update={"asked": item.question.strip() in asked_questions})
+                        for item in refined.items
+                    ]
+                }
+            )
+        save_question_bank(refined)
+    except (KeyError, ValueError):
+        return
+    runtime = _dialogue_runtimes.get(interview_id)
+    if runtime is None:
+        return
+    async with runtime.lock:
+        if runtime.question_flow is not None:
+            runtime.question_flow.bank = refined
+    await runtime.send_json(
+        {"type": "question_bank_update", "payload": refined.model_dump()}
+    )
+
+
+def _provisional_job_title(jd_text: str) -> str:
+    first_line = next((line.strip() for line in jd_text.splitlines() if line.strip()), "")
+    return first_line[:40] or "未命名岗位"
+
+
 def _extract_quick_setup_fields(payload: QuickSetupRequest) -> tuple[SetupExtraction, bool]:
     fallback = SetupExtraction(job_title="未命名岗位", candidate_name="候选人")
     messages = [
@@ -797,7 +896,7 @@ def _extract_quick_setup_fields(payload: QuickSetupRequest) -> tuple[SetupExtrac
 
 
 def _schedule_probe_task(
-    websocket: WebSocket,
+    runtime: _DialogueSessionRuntime,
     record,
     turn: QATurn,
 ) -> None:
@@ -808,8 +907,8 @@ def _schedule_probe_task(
             fallback = fallback_probe(request)
         except Exception:
             return
-        await websocket.send_json({"type": "probe", "payload": fallback.model_dump()})
-        await websocket.send_json(
+        await runtime.send_json({"type": "probe", "payload": fallback.model_dump()})
+        await runtime.send_json(
             {"type": "credibility", "payload": fallback.credibility.model_dump()}
         )
         signal = (
@@ -818,10 +917,10 @@ def _schedule_probe_task(
             else None
         )
         if signal is not None:
-            await websocket.send_json({"type": "signal", "payload": signal.model_dump()})
+            await runtime.send_json({"type": "signal", "payload": signal.model_dump()})
         memory_hits = await asyncio.to_thread(_recall_memory_hits, record, turn)
         if memory_hits:
-            await websocket.send_json(
+            await runtime.send_json(
                 {
                     "type": "memory_hits",
                     "payload": {
@@ -838,7 +937,7 @@ def _schedule_probe_task(
         except Exception:
             return
         if probe.model_dump() != fallback.model_dump():
-            await websocket.send_json({"type": "probe_update", "payload": probe.model_dump()})
+            await runtime.send_json({"type": "probe_update", "payload": probe.model_dump()})
 
     asyncio.create_task(_run())
 
@@ -1260,19 +1359,40 @@ def api_create_interview(payload: InterviewCreate):
 
 @app.post("/api/interviews/quick-setup", response_model=QuickSetupResponse)
 async def api_quick_setup(payload: QuickSetupRequest) -> QuickSetupResponse:
-    extraction, extraction_confident = _extract_quick_setup_fields(payload)
-    job = create_job(JobCreate(title=extraction.job_title, jd_text=payload.jd_text))
+    # 字段提取与胜任力模型并行；题库先用确定性兜底立即返回，
+    # 真实模型题库在后台生成，完成后入库并通过 WebSocket 推送补充。
+    provisional_title = _provisional_job_title(payload.jd_text)
+    extraction_task = asyncio.create_task(
+        asyncio.to_thread(_extract_quick_setup_fields, payload)
+    )
+    job_task = asyncio.create_task(
+        asyncio.to_thread(
+            create_job, JobCreate(title=provisional_title, jd_text=payload.jd_text)
+        )
+    )
+    (extraction, extraction_confident), job = await asyncio.gather(extraction_task, job_task)
+    if extraction.job_title != job.title:
+        job = update_job_title(job.id, extraction.job_title)
     candidate = get_or_create_candidate(
         CandidateCreate(name=extraction.candidate_name, resume_text=payload.resume_text)
     )
     interview = create_interview(InterviewCreate(job_id=job.id, candidate_id=candidate.id))
-    question_bank = await generate_question_bank(
+    question_bank = fallback_question_bank(
         interview.id,
         payload.jd_text,
         payload.resume_text,
         job.competency_model,
     )
     save_question_bank(question_bank)
+    asyncio.create_task(
+        _refine_question_bank_in_background(
+            interview.id,
+            payload.jd_text,
+            payload.resume_text,
+            job.competency_model,
+            question_bank,
+        )
+    )
     return QuickSetupResponse(
         interview_id=interview.id,
         job_id=job.id,
@@ -1425,14 +1545,20 @@ def api_report_pdf(interview_id: str):
         report, _ = get_report(interview_id)
         pdf_path = report.get("pdf_path")
         if pdf_path and Path(pdf_path).exists():
-            return FileResponse(pdf_path, media_type="application/pdf", filename=f"{interview_id}.pdf")
+            # 下载名遵循命名规则：合格/不合格-姓名-分数.pdf
+            return FileResponse(
+                pdf_path, media_type="application/pdf", filename=Path(pdf_path).name
+            )
         pdf_uri = report.get("artifact_uris", {}).get("pdf")
         if pdf_uri:
             artifact = get_artifact_store().get_file(pdf_uri)
+            download_name = Path(pdf_uri).name or f"{interview_id}.pdf"
             return Response(
                 content=artifact.content,
                 media_type=artifact.content_type or "application/pdf",
-                headers={"content-disposition": f'attachment; filename="{interview_id}.pdf"'},
+                headers={
+                    "content-disposition": f"attachment; filename*=UTF-8''{quote(download_name)}"
+                },
             )
         raise KeyError(f"report pdf not found: {interview_id}")
     except KeyError as exc:
@@ -1669,6 +1795,8 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
                 await _send_asr_warning(sender, decision.reason, seq)
                 continue
             segment = decision.segment
+            if _suppress_candidate_echo(runtime, segment):
+                continue
             await runtime.send_json({"type": "transcript", "payload": segment.model_dump()})
             await handle_dialogue_segment(
                 segment,
@@ -1777,6 +1905,8 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
                     await _send_asr_warning(sender, decision.reason, seq)
                     continue
                 segment = decision.segment
+                if _suppress_candidate_echo(runtime, segment):
+                    continue
                 await runtime.send_json({"type": "transcript", "payload": segment.model_dump()})
                 await handle_dialogue_segment(
                     segment,
@@ -1833,6 +1963,8 @@ async def ws_interview(websocket: WebSocket, interview_id: str):
                     await _send_asr_warning(sender, decision.reason, seq)
                     continue
                 segment = decision.segment
+                if _suppress_candidate_echo(runtime, segment):
+                    continue
                 await runtime.send_json({"type": "transcript", "payload": segment.model_dump()})
                 await handle_dialogue_segment(
                     segment,

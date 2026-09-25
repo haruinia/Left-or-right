@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>面试评估报告 · {{ candidate_name }}</title>
+  <style>
+    :root {
+      --ink: #111827;
+      --muted: #6b7280;
+      --faint: #9ca3af;
+      --line: #e5e7eb;
+      --primary: #1e3a8a;
+      --primary-dark: #0f172a;
+      --teal: #1e3a8a;
+      --teal-deep: #1e3a8a;
+      --teal-soft: #eef2ff;
+      --red: #dc2626;
+      --red-soft: #fef2f2;
+      --green: #16a34a;
+      --green-soft: #f0fdf4;
+      --amber: #d97706;
+      --amber-soft: #fffbeb;
+      --paper: #ffffff;
+      --page-bg: #f5f7fb;
+    }
+    @page { size: A4; margin: 16mm 13mm; }
+    {% if cjk_font_uri %}
+    /* 把 PDF 用中文字体显式绑定到具体字体文件（url，由后端按平台探测注入），绕过 Pango 对 CJK
+       默认 fallback 到 PingFang（macOS 可变字体，WeasyPrint 子集化会损坏字形）的行为。
+       src 只放 url：一旦混入 local()，WeasyPrint 会优先选系统 PingFang 而非该文件，导致字形损坏。
+       浏览器看 HTML 时若无法加载 file:// 字体，会退回 body 末尾的 sans-serif（系统中文字体），不影响。 */
+    @font-face {
+      font-family: 'ReportCJK';
+      src: url('{{ cjk_font_uri }}');
+    }
+    {% endif %}
+    * { box-sizing: border-box; }
+    html { background: var(--page-bg); }
+    body {
+      margin: 0 auto;
+      max-width: 820px;
+      background: var(--paper);
+      padding: 40px 44px 36px;
+      color: var(--ink);
+      /* 只用 'ReportCJK'（其 @font-face 已含 url + local 兜底）；不要再列裸中文字体名，
+         否则 WeasyPrint 会对 CJK 字符优先选系统 PingFang，导致 PDF 字形损坏。 */
+      font-family: 'ReportCJK', sans-serif;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    /* ===== 简历式报头 ===== */
+    .resume-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 24px;
+      margin: -40px -44px 6px;
+      padding: 30px 44px 24px;
+      background: linear-gradient(115deg, var(--primary-dark) 0%, var(--primary) 70%, #312e81 100%);
+      color: #fff;
+      border-radius: 0 0 18px 18px;
+    }
+    .candidate-name { font-size: 30px; font-weight: 800; line-height: 1.2; letter-spacing: 2px; }
+    .head-meta { margin-top: 8px; color: rgba(255, 255, 255, 0.75); font-size: 12px; }
+    .head-meta span {
+      display: inline-block;
+      margin: 4px 10px 0 0;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      white-space: nowrap;
+    }
+    .head-meta b { color: #fff; font-weight: 650; }
+    .score-stamp {
+      flex: 0 0 auto;
+      text-align: center;
+      border-radius: 14px;
+      padding: 12px 24px;
+      background: #fff;
+      color: var(--primary);
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+    }
+    .score-stamp .num { font-size: 34px; font-weight: 800; line-height: 1.1; }
+    .of { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 2px; }
+    .score-stamp .label { font-size: 11px; color: var(--muted); }
+    .score-stamp .verdict { margin-top: 2px; font-size: 14px; font-weight: 800; }
+    .score-stamp.tone-green .verdict { color: var(--green); }
+    .score-stamp.tone-amber .verdict { color: var(--amber); }
+    .score-stamp.tone-red .verdict { color: var(--red); }
+    .pass-tag {
+      display: inline-block;
+      margin-top: 6px;
+      border-radius: 999px;
+      padding: 2px 12px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .pass-tag.ok { background: var(--green-soft); color: var(--green); }
+    .pass-tag.fail { background: var(--red-soft); color: var(--red); }
+    .aigc-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-weight: 700;
+      margin: 14px 0 0;
+    }
+    .aigc-banner.ok {
+      background: var(--green-soft);
+      color: var(--green);
+      border-left: 4px solid var(--green);
+    }
+    .aigc-banner.bad {
+      background: var(--red-soft);
+      color: var(--red);
+      border-left: 4px solid var(--red);
+    }
+    .aigc-banner .sub { font-weight: 500; font-size: 12px; opacity: 0.85; }
+
+    .doc-subtitle {
+      display: flex;
+      justify-content: space-between;
+      color: var(--faint);
+      font-size: 11px;
+      margin-bottom: 22px;
+    }
+
+    .fallback {
+      border-left: 4px solid #f79009;
+      background: var(--amber-soft);
+      color: var(--amber);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px;
+      font-weight: 700;
+      margin: 0 0 18px;
+    }
+
+    /* ===== 章节 ===== */
+    section { margin: 0 0 24px; page-break-inside: avoid; }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 3px;
+      color: var(--primary);
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 6px;
+    }
+    h2 .en { color: var(--faint); font-weight: 500; letter-spacing: 0; font-size: 11px; margin-left: 8px; }
+    p { margin: 6px 0; }
+    .lede { font-size: 13.5px; }
+    .small { color: var(--muted); font-size: 11.5px; }
+
+    /* ===== 能力评估：分数条 ===== */
+    .dim-grid { display: flex; gap: 24px; align-items: flex-start; }
+    .dim-bars { flex: 1 1 auto; min-width: 0; }
+    .dim-row { margin: 0 0 12px; }
+    .dim-row .dim-top { display: flex; justify-content: space-between; align-items: baseline; }
+    .dim-row .name { font-weight: 700; }
+    .dim-row .meta { color: var(--muted); font-size: 11px; }
+    .dim-row .value { font-weight: 800; color: var(--teal-deep); font-size: 14px; }
+    .bar { height: 8px; border-radius: 99px; background: #edf0f5; margin-top: 4px; overflow: hidden; }
+    .bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary) 0%, #3b82f6 100%); }
+    .bar i.low { background: var(--red); }
+    .bar i.mid { background: var(--amber); }
+    .dim-row .evidence { margin-top: 4px; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .radar-box { flex: 0 0 250px; text-align: center; }
+    .radar-box img { width: 100%; }
+
+    /* ===== 亮点 / 风险 ===== */
+    .two-col { display: flex; gap: 20px; }
+    .two-col > div { flex: 1 1 0; min-width: 0; }
+    .point { display: flex; gap: 8px; margin: 7px 0; line-height: 1.6; }
+    .point::before { content: "●"; font-size: 9px; line-height: 2.2; }
+    .point.good::before { color: var(--green); }
+    .point.bad::before { color: var(--red); }
+    .point.bad { color: var(--red); font-weight: 600; }
+
+    /* ===== 徽章与胶囊 ===== */
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 3px 12px;
+      font-size: 11.5px;
+      color: var(--muted);
+      background: #fafbfd;
+    }
+    .chip b { color: var(--ink); }
+    .badge {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 1px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .badge.green { background: var(--green-soft); color: var(--green); }
+    .badge.red { background: var(--red-soft); color: var(--red); }
+    .badge.amber { background: var(--amber-soft); color: var(--amber); }
+    .badge.gray { background: #f1f3f7; color: var(--muted); }
+
+    /* ===== 追问链卡片 ===== */
+    .chain-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin: 0 0 12px;
+      background: #fcfdfe;
+    }
+    .chain-card .chain-top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; margin-bottom: 6px; }
+    .chain-card .topic { font-weight: 700; }
+    .chain-card .origin { color: var(--faint); font-size: 11px; margin-left: 8px; }
+    .chain-step { margin: 6px 0 0; padding-left: 14px; border-left: 2px solid var(--line); }
+    .chain-step .q { color: var(--teal-deep); font-weight: 650; }
+    .chain-step .a { color: var(--ink); }
+    .chain-step .j { font-size: 11px; }
+
+    /* ===== 对话式问答 ===== */
+    .qa-item { margin: 0 0 14px; page-break-inside: avoid; }
+    .qa-item .q-line { font-weight: 700; color: var(--teal-deep); }
+    .qa-item .q-line .idx {
+      display: inline-block;
+      min-width: 20px;
+      text-align: center;
+      background: var(--teal-soft);
+      color: var(--teal-deep);
+      border-radius: 6px;
+      margin-right: 6px;
+      font-size: 11px;
+      padding: 0 5px;
+    }
+    .qa-item .a-line { margin-top: 2px; padding-left: 30px; }
+    .qa-item .meta-line { padding-left: 30px; color: var(--faint); font-size: 11px; }
+
+    /* ===== 表格（检测/转写附录）===== */
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    td, th { border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-weight: 700; white-space: nowrap; border-bottom: 2px solid var(--line); }
+    .num-cell { text-align: right; white-space: nowrap; }
+    .flagged td { background: var(--red-soft); color: var(--red); font-weight: 700; }
+    .speaker-i { color: var(--teal-deep); font-weight: 700; white-space: nowrap; }
+    .speaker-c { color: var(--ink); font-weight: 700; white-space: nowrap; }
+
+    footer {
+      margin-top: 30px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+      color: var(--faint);
+      font-size: 10.5px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <header class="resume-head">
+    <div>
+      <div class="candidate-name">{{ candidate_name }}</div>
+      <div class="head-meta">
+        <span>应聘岗位 <b>{{ job_title }}</b></span>
+        <span>面试序号 <b>{{ report_number }}</b></span>
+        <span>面试日期 <b>{{ interview_date }}</b></span>
+      </div>
+    </div>
+    <div class="score-stamp tone-{{ recommendation_tone }}">
+      <div class="num">{{ score.total_score }}<span class="of">/100</span></div>
+      <div class="label">综合得分</div>
+      <div class="verdict">{{ recommendation_label }}</div>
+      <span class="pass-tag {{ 'ok' if pass_verdict == '合格' else 'fail' }}">{{ pass_verdict }}</span>
+    </div>
+  </header>
+  <div class="doc-subtitle">
+    <span>水货杀手 · 面试评估报告</span>
+    <span>分析方式：{{ analysis_mode_label }} · 编号 {{ interview_id }}</span>
+  </div>
+
+  {% if analysis_mode == "fallback" %}
+  <p class="fallback">本报告由确定性规则生成（未启用大模型分析），分数仅供链路验证，不可用于招聘决策。</p>
+  {% endif %}
+
+  <div class="aigc-banner {{ 'bad' if aigc_flagged_count else 'ok' }}">
+    {% if aigc_flagged_count %}
+    AIGC 检测：{{ aigc_total }} 轮回答中有 {{ aigc_flagged_count }} 轮疑似 AI 生成或背稿，请重点复核。
+    {% else %}
+    AIGC 检测：{{ aigc_total }} 轮回答未发现明显 AI 生成或背稿痕迹。
+    {% endif %}
+    <span class="sub">{{ "大模型评判 + 规则检测" if aigc_llm_reviewed else "规则检测" }}</span>
+  </div>
+
+  <section>
+    <h2>总评<span class="en">SUMMARY</span></h2>
+    <p class="lede">{{ summary }}</p>
+    <div class="chips" style="margin-top: 10px;">
+      <span class="chip">系统建议 <b>{{ question_adoption.suggested_unique_count }}</b> 题</span>
+      <span class="chip">采纳 <b>{{ question_adoption.adopted_suggested_count }}</b> 题</span>
+      <span class="chip">面试官自定义 <b>{{ question_adoption.custom_question_count }}</b> 题</span>
+      <span class="chip">采纳率 <b>{{ "%.1f"|format(question_adoption.adoption_rate * 100) }}%</b></span>
+      <span class="chip">提问策略 <b>{{ steering_label }}</b></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>能力评估<span class="en">COMPETENCY</span></h2>
+    <div class="dim-grid">
+      <div class="dim-bars">
+        {% for d in score.dimensions %}
+        <div class="dim-row">
+          <div class="dim-top">
+            <span class="name">{{ d.dimension }}<span class="meta">　权重 {{ d.weight }}</span></span>
+            <span class="value">{{ d.score }}<span class="of">/100</span></span>
+          </div>
+          <div class="bar"><i class="{{ 'low' if d.score < 40 else 'mid' if d.score < 70 else '' }}" style="width: {{ d.score }}%"></i></div>
+          {% if d.evidence %}
+          <div class="evidence">证据：{% for e in d.evidence %}「{{ e.excerpt }}」{% if not loop.last %}　{% endif %}{% endfor %}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% if radar_chart_uri %}
+      <div class="radar-box">
+        <img src="{{ radar_chart_uri }}" alt="维度雷达图">
+        <div class="small">D1–D{{ score.dimensions | length }} 对应上方维度顺序</div>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section>
+    <h2>亮点与风险<span class="en">HIGHLIGHTS &amp; RISKS</span></h2>
+    <div class="two-col">
+      <div>
+        {% if strengths %}
+        {% for item in strengths %}<div class="point good">{{ item }}</div>{% endfor %}
+        {% else %}
+        <div class="point">暂无明确高可信亮点，建议结合追问继续观察。</div>
+        {% endif %}
+      </div>
+      <div>
+        {% if risk_highlights %}
+        {% for note in risk_highlights %}<div class="point bad">{{ note }}</div>{% endfor %}
+        {% else %}
+        <div class="point good">未发现高置信风险点。</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>追问验证<span class="en">PROBE CHAINS</span></h2>
+    {% if probe_chains %}
+    {% for chain in probe_chains %}
+    <div class="chain-card">
+      <div class="chain-top">
+        <span class="topic">{{ chain.topic }}<span class="origin">{{ chain.origin_label }}</span></span>
+        <span class="badge {{ chain.verdict_tone }}">{{ chain.verdict_label }}{% if chain.crack_depth %} · 第 {{ chain.crack_depth }} 层{% endif %}</span>
+      </div>
+      {% for link in chain.links %}
+      <div class="chain-step">
+        <div class="q">问：{{ link.probe_question }}</div>
+        <div class="a">答：{{ link.answer_excerpt }}</div>
+        <div class="j"><span class="badge {{ 'green' if link.credibility_after == 'solid' else 'amber' if link.credibility_after == 'vague' else 'red' }}">{{ link.credibility_label }}</span></div>
+      </div>
+      {% else %}
+      <div class="small">该主题未进入追问。</div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="small">暂无追问链。</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>复盘：记忆对照<span class="en">MEMORY REVIEW</span></h2>
+    {% if memory_review %}
+    <p class="small">以下为本场回答与面试官本地项目库、历史面试记忆的逐轮对照，仅作复核线索。</p>
+    <table>
+      <tr><th>轮次</th><th>命中记忆</th><th>对照结论</th><th>说明</th></tr>
+      {% for item in memory_review %}
+      <tr>
+        <td>{{ item.turn_id }}</td>
+        <td>{{ item.memory_subject }}</td>
+        <td>{{ item.verdict }}</td>
+        <td>{{ item.note }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="small">本场没有记忆命中（记忆层未开启或没有相关项目/历史记录）。</p>
+    {% endif %}
+  </section>
+
+  <section>
+    <h2>问答记录<span class="en">Q &amp; A</span></h2>
+    {% for turn in transcript %}
+    <div class="qa-item">
+      <div class="q-line"><span class="idx">{{ loop.index }}</span>{{ turn.question }}</div>
+      <div class="a-line">{{ turn.answer }}</div>
+      <div class="meta-line">{{ question_source_labels.get(turn.question_source, turn.question_source) }}{% if turn.probe_target %} · 追问目标：{{ turn.probe_target }}{% endif %}</div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>背稿与模板化检测<span class="en">AIGC CHECK</span></h2>
+    <table>
+      <tr><th>轮次</th><th>模式</th><th>AI 概率</th><th>背稿分</th><th>模板相似度</th><th>状态</th><th>大模型判断依据</th></tr>
+      {% for item in aigc_rows %}
+      <tr class="{{ 'flagged' if item.flagged else '' }}">
+        <td>第 {{ loop.index }} 轮</td>
+        <td>{{ item.mode_label }}</td>
+        <td class="num-cell">{{ item.ai_generated_prob }}</td>
+        <td class="num-cell">{{ item.rehearsal_score }}</td>
+        <td class="num-cell">{{ item.template_similarity }}</td>
+        <td>{{ "疑似注水/模板化" if item.flagged else "未命中" }}</td>
+        <td>{{ item.llm_reason or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+
+  {% if candidate_resume_text %}
+  <section>
+    <h2>简历摘要<span class="en">RESUME</span></h2>
+    <p class="small">{{ candidate_resume_text }}</p>
+  </section>
+  {% endif %}
+
+  <section>
+    <h2>完整转写<span class="en">TRANSCRIPT</span></h2>
+    {% if utterances %}
+    <table>
+      <tr><th>#</th><th>说话人</th><th>内容</th><th>时间</th></tr>
+      {% for utterance in utterances %}
+      <tr>
+        <td class="num-cell">{{ loop.index }}</td>
+        <td class="{{ 'speaker-i' if utterance.speaker == 'interviewer' else 'speaker-c' }}">{{ speaker_labels.get(utterance.speaker, utterance.speaker) }}</td>
+        <td>{{ utterance.text }}</td>
+        <td class="small num-cell">{{ "%.1f"|format(utterance.start_ms / 1000) }}s – {{ "%.1f"|format(utterance.end_ms / 1000) }}s</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="small">暂无完整双向转写。</p>
+    {% endif %}
+  </section>
+
+  <footer>
+    本报告由「水货杀手」自动生成 · 每项评分均绑定原始回答证据 · 注水风险请结合上下文人工复核
+  </footer>
+</body>
+</html>

@@ -306,9 +306,7 @@ def test_gateway_report_pdf_falls_back_to_artifact_store_when_local_file_missing
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
-    assert response.headers["content-disposition"] == (
-        f'attachment; filename="{interview["id"]}.pdf"'
-    )
+    assert response.headers["content-disposition"] == "attachment; filename*=UTF-8''demo.pdf"
     assert response.content == b"%PDF remote"
 
 
@@ -799,7 +797,6 @@ def test_gateway_serves_demo_ui(tmp_path: Path, monkeypatch) -> None:
     assert "preparingInterview" in bundle
     assert "正在创建实时面试，请稍候" in bundle
     assert "当前已有面试，请重置后再创建新的面试" in bundle
-
 
 def test_gateway_health_identifies_service(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
@@ -1425,7 +1422,8 @@ def test_gateway_report_build_rejects_mismatched_inputs(
     assert rejected_total.status_code == 409
     assert "score total_score must match dimension scores and weights" in rejected_total.text
 
-    mismatched_recommendation = {**score, "recommendation": "no"}
+    flipped_recommendation = "no" if score["recommendation"] != "no" else "strong_yes"
+    mismatched_recommendation = {**score, "recommendation": flipped_recommendation}
     rejected_recommendation = client.post(
         "/api/report/build",
         json={
@@ -3049,12 +3047,13 @@ def test_gateway_websocket_ignores_non_final_and_interviewer_segments(
         assert transcript["payload"]["end_ms"] == 600
         assert transcript["payload"]["confidence"] == 0.6
 
+        interviewer_audio = base64.b64encode("请讲一个你亲手做过的例子。".encode("utf-8")).decode("ascii")
         websocket.send_json(
             {
                 "type": "audio_chunk",
                 "session_id": interview["id"],
                 "seq": 3,
-                "audio": audio,
+                "audio": interviewer_audio,
                 "speaker": "interviewer",
                 "is_final": True,
             }

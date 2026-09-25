@@ -9,7 +9,7 @@ import httpx
 from pydantic import BaseModel
 
 from libs.common.config import get_settings
-from libs.common.observability import SlidingWindowRateLimiter
+from libs.common.observability import SlidingWindowRateLimiter, log_event
 
 T = TypeVar("T", bound=BaseModel)
 _llm_rate_limiter = SlidingWindowRateLimiter(requests_per_minute=60)
@@ -65,6 +65,7 @@ class LLMClient:
                 return _parse_json_response(response.json(), schema)
             except Exception as exc:
                 last_error = exc
+                _log_llm_failure(schema, attempt, max_attempts, exc)
                 if attempt == max_attempts - 1:
                     if raise_on_error:
                         raise RuntimeError(_safe_error_message(last_error)) from exc
@@ -118,6 +119,7 @@ class LLMClient:
                 return _parse_json_response(response.json(), schema), False
             except Exception as exc:
                 last_error = exc
+                _log_llm_failure(schema, attempt, max_attempts, exc)
                 if attempt == max_attempts - 1:
                     if raise_on_error:
                         raise RuntimeError(_safe_error_message(last_error)) from exc
@@ -266,6 +268,16 @@ def _extract_path(payload: Any, path: str) -> Any:
         else:
             raise KeyError(path)
     return value
+
+
+def _log_llm_failure(schema: type, attempt: int, max_attempts: int, error: Exception) -> None:
+    log_event(
+        "llm.call.failed",
+        schema=schema.__name__,
+        attempt=attempt + 1,
+        max_attempts=max_attempts,
+        error=_safe_error_message(error),
+    )
 
 
 def _safe_error_message(error: Exception | None) -> str:

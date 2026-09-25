@@ -106,10 +106,13 @@ def test_offline_interview_chain(tmp_path: Path, monkeypatch) -> None:
     assert report.aigc_results
     assert report.transcript
     assert report.transcript[0].answer == "我主要负责整体架构设计并推动项目落地最终取得显著提升"
-    assert (tmp_path / "reports" / f"{interview.id}.report.json").exists()
-    assert (tmp_path / "reports" / f"{interview.id}.html").exists()
-    assert (tmp_path / "reports" / f"{interview.id}.pdf").exists()
-    assert (tmp_path / "reports" / f"{interview.id}.transcript.json").exists()
+    assert (tmp_path / "reports" / "001-Ada.report.json").exists()
+    assert (tmp_path / "reports" / "001-Ada.html").exists()
+    assert (tmp_path / "reports" / "001-Ada.transcript.json").exists()
+    pdf_name = Path(report.pdf_path or "").name
+    assert pdf_name.startswith(("合格-Ada-", "不合格-Ada-"))
+    assert pdf_name.endswith(f"{report.score.total_score}.pdf")
+    assert (tmp_path / "reports" / pdf_name).exists()
     report_json = loads(Path(report.json_path or "").read_text(encoding="utf-8"))
     html = Path(report.html_path or "").read_text(encoding="utf-8")
     pdf_bytes = Path(report.pdf_path or "").read_bytes()
@@ -401,11 +404,12 @@ def test_report_artifact_uris_use_object_storage_when_configured(
     report = end_interview(interview.id)
 
     assert report.artifact_uris == {
-        "html": f"s3://reports-bucket/reports/{interview.id}.html",
-        "pdf": f"s3://reports-bucket/reports/{interview.id}.pdf",
-        "transcript": f"s3://reports-bucket/reports/{interview.id}.transcript.json",
-        "json": f"s3://reports-bucket/reports/{interview.id}.report.json",
+        "html": "s3://reports-bucket/reports/001-Lin.html",
+        "pdf": f"s3://reports-bucket/reports/{Path(report.pdf_path or '').name}",
+        "transcript": "s3://reports-bucket/reports/001-Lin.transcript.json",
+        "json": "s3://reports-bucket/reports/001-Lin.report.json",
     }
+    assert Path(report.pdf_path or "").name.startswith(("合格-Lin-", "不合格-Lin-"))
     assert Path(report.json_path or "").exists()
     assert Path(report.html_path or "").exists()
     assert Path(report.pdf_path or "").exists()
@@ -524,7 +528,7 @@ def test_score_interview_uses_prompt_and_recomputes_total(monkeypatch) -> None:
     model = generate_competency_model("job-local", "Backend", "Python FastAPI")
     turn = QATurn(
         question="讲项目",
-        answer="我负责 FastAPI 接口优化，延迟降低 30%。",
+        answer="我负责 FastAPI 接口优化，延迟降低 30%。具体做法是把序列化改成 orjson 并加连接池预热，因为压测发现冷启动是主要瓶颈，我写了基准脚本对比指标口径，期间排查过一次连接泄漏故障，复盘后把泄漏检测指标加进了告警面板。",
         answer_start_ms=100,
         answer_end_ms=1200,
     )
@@ -654,7 +658,7 @@ def test_report_includes_question_adoption_stats(tmp_path: Path, monkeypatch) ->
     assert report.question_adoption.custom_question_count == 1
     assert report.question_adoption.adoption_rate == 0.5
     assert report.question_adoption.steering_focus == "resume_drill"
-    assert "问题采纳统计" in html
+    assert "采纳率" in html
     report_json = loads(Path(report.json_path or "").read_text(encoding="utf-8"))
     assert report_json["question_adoption"]["adoption_rate"] == 0.5
 
@@ -721,13 +725,16 @@ def test_report_pdf_fallback_contains_auditable_summary(tmp_path: Path, monkeypa
 
     report, _ = build_report(ctx, score, aigc)
 
+    def pdf_hex(text: str) -> bytes:
+        return text.encode("utf-16-be").hex().upper().encode("ascii")
+
     pdf_bytes = Path(report.pdf_path or "").read_bytes()
     assert pdf_bytes.startswith(b"%PDF")
-    assert b"Total score: 80.0" in pdf_bytes
-    assert b"Recommendation: yes" in pdf_bytes
-    assert b"Backend Depth" in pdf_bytes
-    assert b"Transcript:" in pdf_bytes
-    assert b"Built FastAPI retry logic and JSON" in pdf_bytes
+    assert pdf_hex("综合得分：80.0（满分 100）") in pdf_bytes
+    assert pdf_hex("录用建议：推荐") in pdf_bytes
+    assert pdf_hex("Backend Depth") in pdf_bytes
+    assert pdf_hex("完整转写：") in pdf_bytes
+    assert pdf_hex("Built FastAPI retry logic and JSON") in pdf_bytes
 
 
 def test_report_pdf_fallback_preserves_chinese_text(tmp_path: Path, monkeypatch) -> None:
@@ -988,13 +995,13 @@ def test_score_interview_preserves_deterministic_consistency_risk(monkeypatch) -
     model = generate_competency_model("job-local", "Backend", "Python FastAPI")
     turn = QATurn(
         question="讲项目",
-        answer="我负责 FastAPI 接口优化，延迟降低 30%。",
+        answer="我负责 FastAPI 接口优化，延迟降低 30%。具体做法是把序列化改成 orjson 并加连接池预热，因为压测发现冷启动是主要瓶颈，我写了基准脚本对比指标口径，期间排查过一次连接泄漏故障，复盘后把泄漏检测指标加进了告警面板。",
         answer_start_ms=100,
         answer_end_ms=1200,
     )
     follow_up = QATurn(
         question="复盘成果",
-        answer="我后来又说团队负责 FastAPI 接口优化，延迟降低 20%。",
+        answer="我后来又说团队负责 FastAPI 接口优化，延迟降低 20%。具体经过是复盘时核对了压测报告和线上指标口径，因为统计窗口不同结论有出入，我重新跑了基准脚本核实数据，并把两次口径差异写进了复盘记录和告警阈值说明。",
         answer_start_ms=1300,
         answer_end_ms=1900,
     )
@@ -1055,13 +1062,13 @@ def test_score_interview_merges_deterministic_and_llm_risk_notes(monkeypatch) ->
     model = generate_competency_model("job-local", "Backend", "Python FastAPI")
     turn = QATurn(
         question="讲项目",
-        answer="我负责 FastAPI 接口优化，延迟降低 30%。",
+        answer="我负责 FastAPI 接口优化，延迟降低 30%。具体做法是把序列化改成 orjson 并加连接池预热，因为压测发现冷启动是主要瓶颈，我写了基准脚本对比指标口径，期间排查过一次连接泄漏故障，复盘后把泄漏检测指标加进了告警面板。",
         answer_start_ms=100,
         answer_end_ms=1200,
     )
     follow_up = QATurn(
         question="复盘成果",
-        answer="我后来又说团队负责 FastAPI 接口优化，延迟降低 20%。",
+        answer="我后来又说团队负责 FastAPI 接口优化，延迟降低 20%。具体经过是复盘时核对了压测报告和线上指标口径，因为统计窗口不同结论有出入，我重新跑了基准脚本核实数据，并把两次口径差异写进了复盘记录和告警阈值说明。",
         answer_start_ms=1300,
         answer_end_ms=1900,
     )
@@ -1122,7 +1129,7 @@ def test_score_interview_preserves_deterministic_aigc_risk(monkeypatch) -> None:
     model = generate_competency_model("job-local", "Backend", "Python FastAPI")
     turn = QATurn(
         question="讲项目",
-        answer="我负责 FastAPI 接口优化，延迟降低 30%。",
+        answer="我负责 FastAPI 接口优化，延迟降低 30%。具体做法是把序列化改成 orjson 并加连接池预热，因为压测发现冷启动是主要瓶颈，我写了基准脚本对比指标口径，期间排查过一次连接泄漏故障，复盘后把泄漏检测指标加进了告警面板。",
         answer_start_ms=100,
         answer_end_ms=1200,
     )

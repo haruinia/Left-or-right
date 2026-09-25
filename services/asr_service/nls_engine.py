@@ -169,6 +169,20 @@ class AliyunNLSSession:
         )
 
     def _start_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "format": self.settings.aliyun_nls_format,
+            "sample_rate": self.settings.aliyun_nls_sample_rate,
+            "enable_intermediate_result": True,
+            "enable_punctuation_prediction": True,
+            "enable_inverse_text_normalization": True,
+        }
+        # 可选热词表 / 定制模型：提高专业术语、人名等的识别率（需预先创建并配置其 ID）。
+        vocabulary_id = self.settings.aliyun_nls_vocabulary_id.strip()
+        if vocabulary_id:
+            payload["vocabulary_id"] = vocabulary_id
+        customization_id = self.settings.aliyun_nls_customization_id.strip()
+        if customization_id:
+            payload["customization_id"] = customization_id
         return {
             "header": {
                 "appkey": self.settings.aliyun_nls_app_key,
@@ -177,13 +191,7 @@ class AliyunNLSSession:
                 "task_id": self.task_id,
                 "message_id": uuid4().hex,
             },
-            "payload": {
-                "format": self.settings.aliyun_nls_format,
-                "sample_rate": self.settings.aliyun_nls_sample_rate,
-                "enable_intermediate_result": True,
-                "enable_punctuation_prediction": True,
-                "enable_inverse_text_normalization": True,
-            },
+            "payload": payload,
         }
 
     def _stop_payload(self) -> dict[str, Any]:

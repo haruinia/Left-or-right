@@ -55,12 +55,18 @@ class Settings(BaseSettings):
     aliyun_asr_sample_rate: int = Field(default=16000, gt=0)
     aliyun_asr_format: str = "pcm"
     aliyun_asr_language_hints: str = "zh,en"
+    # DashScope Paraformer 热词表 ID：预先创建的热词表，提高专业术语/人名识别率。
+    aliyun_asr_vocabulary_id: str = ""
     aliyun_asr_endpoint: str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
     aliyun_nls_app_key: str = ""
     aliyun_nls_token: str = ""
     aliyun_nls_endpoint: str = "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1"
     aliyun_nls_sample_rate: int = Field(default=16000, gt=0)
     aliyun_nls_format: str = "pcm"
+    # NLS 热词表 ID / 定制模型 ID：提高专业术语、人名等的识别率。
+    # 热词表需先创建（智能语音交互控制台「热词」，或用 scripts/create_nls_vocabulary.py），填入返回的 ID。
+    aliyun_nls_vocabulary_id: str = ""
+    aliyun_nls_customization_id: str = ""
     aliyun_ak_id: str = ""
     aliyun_ak_secret: str = ""
     aliyun_nls_token_endpoint: str = "https://nls-meta.cn-shanghai.aliyuncs.com/"

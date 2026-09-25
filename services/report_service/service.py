@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 from contextlib import redirect_stderr, redirect_stdout
 from io import BytesIO, StringIO
 from pathlib import Path
+from urllib.parse import quote
 
 from jinja2 import Template
 
 from libs.common.config import get_settings
+from libs.common.observability import log_event
 from libs.common.storage import get_artifact_store
 from libs.common.textsim import normalize_text
 from libs.schemas import (
@@ -22,184 +29,78 @@ from libs.schemas import (
 )
 
 
-REPORT_TEMPLATE = Template(
-    """
-    <!doctype html>
-    <html lang="zh-CN">
-    <head>
-      <meta charset="utf-8">
-      <title>水货杀手面试报告</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 32px; color: #172033; }
-        h1, h2 { margin: 0 0 12px; }
-        section { margin: 24px 0; }
-        table { border-collapse: collapse; width: 100%; }
-        td, th { border: 1px solid #d9dee8; padding: 8px; text-align: left; }
-        .risk { color: #b42318; font-weight: 700; }
-        .flagged { background: #fff1f0; color: #912018; font-weight: 700; }
-        .highlight { background: #ecfdf3; color: #05603a; font-weight: 700; }
-        .fallback { border: 1px solid #f79009; background: #fffaeb; color: #93370d; padding: 10px 12px; font-weight: 700; }
-      </style>
-    </head>
-    <body>
-      <h1>水货杀手面试报告</h1>
-      {% if analysis_mode == "fallback" %}
-      <p class="fallback">本报告由确定性规则生成（未启用大模型分析），分数仅供链路验证，不可用于招聘决策。</p>
-      {% endif %}
-      <p>总分：<strong>{{ score.total_score }}</strong> ｜ 建议：<strong>{{ score.recommendation }}</strong></p>
-      <section>
-        <h2>总评</h2>
-        <p>{{ summary }}</p>
-      </section>
-      <section>
-        <h2>问题采纳统计</h2>
-        <p>
-          系统建议 {{ question_adoption.suggested_unique_count }} 题｜
-          采纳 {{ question_adoption.adopted_suggested_count }} 题｜
-          自定义 {{ question_adoption.custom_question_count }} 题｜
-          采纳率 {{ "%.1f"|format(question_adoption.adoption_rate * 100) }}%
-        </p>
-        <p>当前策略：{{ question_adoption.steering_focus }}</p>
-      </section>
-      {% if candidate_resume_text %}
-      <section>
-        <h2>简历摘要</h2>
-        <p>{{ candidate_resume_text }}</p>
-      </section>
-      {% endif %}
-      <section>
-        <h2>亮点</h2>
-        {% if strengths %}
-        <ul>
-          {% for item in strengths %}
-          <li class="highlight">{{ item }}</li>
-          {% endfor %}
-        </ul>
-        {% else %}
-        <p>暂无明确高可信亮点，建议结合追问继续观察。</p>
-        {% endif %}
-      </section>
-      <section>
-        <h2>维度得分</h2>
-        {% if radar_chart_uri %}
-        <img src="{{ radar_chart_uri }}" alt="维度雷达图" style="max-width: 520px; width: 100%; margin: 8px 0 18px;">
-        {% endif %}
-        <table>
-          <tr><th>编号</th><th>维度</th><th>分数</th><th>权重</th><th>证据</th></tr>
-          {% for d in score.dimensions %}
-          <tr>
-            <td>D{{ loop.index }}</td>
-            <td>{{ d.dimension }}</td>
-            <td>{{ d.score }}</td>
-            <td>{{ d.weight }}</td>
-            <td>{% for e in d.evidence %}{{ e.excerpt }}<br>{% endfor %}</td>
-          </tr>
-          {% endfor %}
-        </table>
-      </section>
-      <section>
-        <h2>风险点</h2>
-        {% for note in risk_highlights %}<p class="risk">{{ note }}</p>{% endfor %}
-      </section>
-      <section>
-        <h2>追问链</h2>
-      {% if probe_chains %}
-        <table>
-          <tr><th>主题</th><th>来源</th><th>层数</th><th>判定</th><th>关键链路</th></tr>
-          {% for chain in probe_chains %}
-          <tr>
-            <td>{{ chain.topic }}</td>
-            <td>{{ chain.origin }}</td>
-            <td>{{ chain.links | length }}</td>
-            <td>{{ chain.verdict }}{% if chain.crack_depth %} · 第 {{ chain.crack_depth }} 层{% endif %}</td>
-            <td>
-              {% for link in chain.links %}
-              {{ loop.index }}. Q：{{ link.probe_question }}<br>
-              A：{{ link.answer_excerpt }}<br>
-              判定：{{ link.credibility_after }}<br>
-              {% endfor %}
-            </td>
-          </tr>
-          {% endfor %}
-        </table>
-        {% else %}
-        <p>暂无追问链。</p>
-        {% endif %}
-      </section>
-      <section>
-        <h2>复盘：记忆对照</h2>
-        {% if memory_review %}
-        <p>以下为本场回答与面试官本地项目库、历史面试记忆的逐轮对照，仅作复核线索。</p>
-        <table>
-          <tr><th>轮次</th><th>命中记忆</th><th>对照结论</th><th>说明</th></tr>
-          {% for item in memory_review %}
-          <tr class="{{ 'flagged' if item.verdict == 'conflicted' else '' }}">
-            <td>{{ item.turn_id }}</td>
-            <td>{{ item.memory_subject }}</td>
-            <td>{{ item.verdict }}</td>
-            <td>{{ item.note }}</td>
-          </tr>
-          {% endfor %}
-        </table>
-        {% else %}
-        <p>本场没有记忆命中（记忆层未开启或没有相关项目/历史记录）。</p>
-        {% endif %}
-      </section>
-      <section>
-        <h2>背稿与模板化检测</h2>
-        <table>
-          <tr><th>Turn ID</th><th>模式</th><th>背稿分</th><th>模板相似度</th><th>命中模板</th><th>状态</th></tr>
-          {% for item in aigc_results %}
-          <tr class="{{ 'flagged' if item.flagged else '' }}">
-            <td>{{ item.turn_id }}</td>
-            <td>{{ item.mode }}</td>
-            <td>{{ item.rehearsal_score }}</td>
-            <td>{{ item.template_similarity }}</td>
-            <td>{{ item.matched_template or "" }}</td>
-            <td>{{ "疑似注水/模板化" if item.flagged else "未命中" }}</td>
-          </tr>
-          {% endfor %}
-        </table>
-      </section>
-      <section>
-        <h2>完整转写</h2>
-        {% if utterances %}
-        <table>
-          <tr><th>序号</th><th>说话人</th><th>内容</th><th>时间</th><th>句子数</th></tr>
-          {% for utterance in utterances %}
-          <tr>
-            <td>{{ loop.index }}</td>
-            <td>{{ utterance.speaker }}</td>
-            <td>{{ utterance.text }}</td>
-            <td>{{ utterance.start_ms }}ms - {{ utterance.end_ms }}ms</td>
-            <td>{{ utterance.sentence_count }}</td>
-          </tr>
-          {% endfor %}
-        </table>
-        {% else %}
-        <p>暂无完整双向转写。</p>
-        {% endif %}
-      </section>
-      <section>
-        <h2>问答轮次</h2>
-        <table>
-          <tr><th>序号</th><th>来源</th><th>问题</th><th>回答</th><th>时间</th><th>追问目标</th></tr>
-          {% for turn in transcript %}
-          <tr>
-            <td>{{ loop.index }}</td>
-            <td>{{ turn.question_source }}</td>
-            <td>{{ turn.question }}</td>
-            <td>{{ turn.answer }}</td>
-            <td>{{ turn.answer_start_ms }}ms - {{ turn.answer_end_ms }}ms</td>
-            <td>{{ turn.probe_target or "" }}</td>
-          </tr>
-          {% endfor %}
-        </table>
-      </section>
-    </body>
-    </html>
-    """
-)
+TEMPLATE_PATH = Path(__file__).resolve().parent / "templates" / "report.html.j2"
+REPORT_TEMPLATE = Template(TEMPLATE_PATH.read_text(encoding="utf-8"))
+
+RECOMMENDATION_LABELS = {
+    "strong_yes": "强烈推荐",
+    "yes": "推荐",
+    "hold": "待定",
+    "no": "不推荐",
+}
+RECOMMENDATION_TONES = {
+    "strong_yes": "green",
+    "yes": "green",
+    "hold": "amber",
+    "no": "red",
+}
+ANALYSIS_MODE_LABELS = {"llm": "大模型 + 规则校验", "fallback": "确定性规则兜底"}
+SPEAKER_LABELS = {"interviewer": "面试官", "candidate": "候选人", "unknown": "未知"}
+QUESTION_SOURCE_LABELS = {"interviewer": "面试官提问", "ai_probe": "AI 追问"}
+CHAIN_ORIGIN_LABELS = {
+    "resume_claim": "简历声明",
+    "answer_claim": "回答声明",
+    "competency_gap": "覆盖缺口",
+}
+CHAIN_VERDICT_LABELS = {
+    "cracked": "追问露馅",
+    "held_up": "经受住追问",
+    "unresolved": "未定",
+}
+CHAIN_VERDICT_TONES = {"cracked": "red", "held_up": "green", "unresolved": "gray"}
+CREDIBILITY_LABELS = {"solid": "可信", "vague": "含糊", "suspicious": "可疑"}
+AIGC_MODE_LABELS = {"voice": "语音", "text": "文字"}
+STEERING_LABELS = {
+    "balanced": "均衡",
+    "resume_drill": "深挖简历",
+    "jd_professional": "JD 专业题",
+}
+
+
+def _candidate_display_name(ctx: InterviewContext) -> str:
+    return ctx.candidate_name.strip() or "候选人"
+
+
+def _pass_verdict(score: InterviewScore) -> str:
+    return "合格" if score.recommendation in {"strong_yes", "yes"} else "不合格"
+
+
+def _safe_filename_text(value: str) -> str:
+    return "".join(
+        char if char.isalnum() or "一" <= char <= "鿿" or char in ".-" else "-" for char in value
+    ).strip("-")
+
+
+def _pdf_filename(ctx: InterviewContext, score: InterviewScore) -> str:
+    """PDF 命名规则：合格/不合格 + 姓名 + 分数。"""
+    name = _safe_filename_text(_candidate_display_name(ctx)) or "候选人"
+    return f"{_pass_verdict(score)}-{name}-{score.total_score}.pdf"
+
+
+def _report_number(ctx: InterviewContext) -> str:
+    return f"{ctx.interview_seq:03d}" if ctx.interview_seq > 0 else ctx.session_id[:8]
+
+
+def _report_basename(ctx: InterviewContext) -> str:
+    """报告产物命名原则：面试序号 + 面试者姓名（旧数据无序号/姓名时退回 session_id）。"""
+    name = ctx.candidate_name.strip()
+    if ctx.interview_seq > 0 and name:
+        safe_name = "".join(
+            char if char.isalnum() or "一" <= char <= "鿿" else "-" for char in name
+        ).strip("-")
+        if safe_name:
+            return f"{ctx.interview_seq:03d}-{safe_name}"
+    return ctx.session_id
 
 
 def _strengths(score: InterviewScore) -> list[str]:
@@ -269,12 +170,18 @@ def _probe_chain_rows(ctx: InterviewContext) -> list[dict]:
     rows: list[dict] = []
     for chain in ctx.probe_chains:
         payload = chain.model_dump()
+        payload["origin_label"] = CHAIN_ORIGIN_LABELS.get(chain.origin, chain.origin)
+        payload["verdict_label"] = CHAIN_VERDICT_LABELS.get(chain.verdict, chain.verdict)
+        payload["verdict_tone"] = CHAIN_VERDICT_TONES.get(chain.verdict, "gray")
         payload["links"] = [
             {
                 **link.model_dump(),
+                "credibility_label": CREDIBILITY_LABELS.get(
+                    link.credibility_after, link.credibility_after
+                ),
                 "answer_excerpt": turns_by_id.get(link.answer_turn_id).answer[:160]
                 if link.answer_turn_id in turns_by_id
-                else "(未找到关联回答)",
+                else "（未找到关联回答）",
             }
             for link in chain.links
         ]
@@ -328,6 +235,16 @@ def _chain_verdict_by_turn(ctx: InterviewContext) -> dict[str, str]:
     return verdicts
 
 
+def _aigc_rows(aigc: list[AIGCResult]) -> list[dict]:
+    return [
+        {
+            **item.model_dump(),
+            "mode_label": AIGC_MODE_LABELS.get(item.mode, item.mode),
+        }
+        for item in aigc
+    ]
+
+
 def _question_adoption_stats(ctx: InterviewContext) -> QuestionAdoptionStats:
     suggested_keys = list(dict.fromkeys(ctx.suggested_question_keys))
     for turn in ctx.turns:
@@ -350,15 +267,141 @@ def _question_adoption_stats(ctx: InterviewContext) -> QuestionAdoptionStats:
     )
 
 
-def _write_pdf(html: str, pdf_path: Path, fallback_lines: list[str]) -> None:
+# 中文字体文件候选（按优先级）。WeasyPrint 对 macOS 的 PingFang（可变字体）子集化会损坏字形，
+# 故显式绑定到「能被正确子集化」的字体文件，绕过 fontconfig 对 CJK 的默认 fallback。
+_CJK_FONT_CANDIDATES = (
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",                # macOS 首选
+    "/System/Library/Fonts/STHeiti Medium.ttc",                  # macOS 兜底
+    "/System/Library/Fonts/Supplemental/Songti.ttc",             # macOS 兜底
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",    # Debian/Ubuntu fonts-noto-cjk
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-VF.otf.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",         # 其他发行版
+    "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+)
+
+
+def _resolve_cjk_font_uri() -> str:
+    """探测本机可用的中文字体文件，返回 file:// URI 供模板 @font-face 直接绑定。
+
+    找不到时返回空串：模板会退回 fontconfig 默认匹配（Linux 容器装了 Noto 即可正常，
+    macOS 则可能回退到子集化有缺陷的 PingFang，但至少英文与版式正常）。
+    """
+    env_override = os.environ.get("REPORT_CJK_FONT_PATH", "").strip()
+    candidates = (env_override, *_CJK_FONT_CANDIDATES) if env_override else _CJK_FONT_CANDIDATES
+    for path in candidates:
+        if path and Path(path).is_file():
+            return "file://" + quote(path)
+    return ""
+
+
+# 浏览器引擎候选路径：优先用 Chrome/Chromium 无头模式渲染 PDF，效果与网页所见完全一致。
+_CHROME_CANDIDATES = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+)
+
+
+def _find_chrome_binary() -> str | None:
+    override = os.environ.get("CHROME_BIN", "").strip()
+    if override and Path(override).exists():
+        return override
+    for path in _CHROME_CANDIDATES:
+        if Path(path).exists():
+            return path
+    for name in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def _render_pdf_with_chrome(html_path: Path, pdf_path: Path) -> bool:
+    """用 Chrome/Chromium 无头模式把 HTML 原样渲染成 PDF（与浏览器所见一致，最美观）。
+
+    成功返回 True；找不到浏览器或渲染失败返回 False，由调用方回退到 WeasyPrint。
+    用独立临时 profile 避免与用户正在运行的 Chrome 冲突。
+    """
+    chrome = _find_chrome_binary()
+    if chrome is None:
+        return False
+    try:
+        with tempfile.TemporaryDirectory(prefix="chrome_pdf_") as workdir:
+            # Chrome 的 --print-to-pdf 写含中文（如「水货杀手」）的目标路径会失败，
+            # 故先渲染到纯 ASCII 的临时目录，再用 Python 移动到目标路径。
+            # 不用 check=True：headless Chrome 即便渲染成功也常因 GPU/沙箱警告返回非 0 退出码，
+            # 以「是否产出有效 PDF 文件」判定成功。
+            tmp_pdf = Path(workdir) / "report.pdf"
+            subprocess.run(
+                [
+                    chrome,
+                    "--headless=new",
+                    "--disable-gpu",
+                    "--no-sandbox",
+                    f"--user-data-dir={workdir}/profile",
+                    "--no-pdf-header-footer",
+                    f"--print-to-pdf={tmp_pdf}",
+                    html_path.resolve().as_uri(),
+                ],
+                timeout=60,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if tmp_pdf.exists() and tmp_pdf.stat().st_size > 1024:
+                shutil.move(str(tmp_pdf), str(pdf_path))
+                return True
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return False
+
+
+def _ensure_weasyprint_lib_path() -> None:
+    """macOS 下让 WeasyPrint 找到 Homebrew 安装的 Pango/GObject/Cairo 等原生库。
+
+    Homebrew 把库装在 /opt/homebrew/lib（Apple Silicon）或 /usr/local/lib（Intel），
+    但 Python 的 dlopen 默认不搜索这些目录。在 import weasyprint 触发 dlopen 之前，
+    把存在的目录补进 DYLD_FALLBACK_LIBRARY_PATH，使本地开发也能渲染完整版式 PDF。
+    """
+    if sys.platform != "darwin":
+        return
+    existing = os.environ.get("DYLD_FALLBACK_LIBRARY_PATH", "")
+    parts = [segment for segment in existing.split(":") if segment]
+    changed = False
+    for candidate in ("/opt/homebrew/lib", "/usr/local/lib"):
+        if os.path.isdir(candidate) and candidate not in parts:
+            parts.append(candidate)
+            changed = True
+    if changed:
+        os.environ["DYLD_FALLBACK_LIBRARY_PATH"] = ":".join(parts)
+
+
+def _write_pdf(
+    html: str, pdf_path: Path, fallback_lines: list[str], base_url: str, html_path: Path
+) -> None:
+    # 可选浏览器引擎渲染（与网页所见完全一致，最美观）：设 REPORT_PDF_ENGINE=chrome 启用。
+    # 默认关闭——macOS 上 headless Chrome 经 Python 子进程调用会 hang（无 GUI session 时
+    # 等待 mach port 不退出），仅在确认可用的环境（如装了 Chrome 的 Linux 容器）显式开启。
+    if os.environ.get("REPORT_PDF_ENGINE", "").strip() == "chrome" and _render_pdf_with_chrome(
+        html_path, pdf_path
+    ):
+        return
+    # 次选 WeasyPrint：用内存 html + 显式 base_url（正确编码含中文路径），才能 fetch @font-face
+    # 的 file:// 中文字体；否则会回退到系统默认 CJK 字体（macOS 的 PingFang 子集化会损坏字形）。
+    _ensure_weasyprint_lib_path()
     try:
         with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
             from weasyprint import HTML
 
-            HTML(string=html).write_pdf(pdf_path)
+            HTML(string=html, base_url=base_url).write_pdf(pdf_path)
         return
-    except Exception:
-        # Local fallback for machines without WeasyPrint's native Pango/GObject stack.
+    except Exception as exc:
+        # 最终兜底：缺浏览器又缺 WeasyPrint 原生栈时，输出可审计的文本 PDF，并记录可见告警。
+        log_event(
+            "report.pdf.rich_render_unavailable",
+            error=f"{type(exc).__name__}: {exc}"[:200],
+            hint="安装 Chrome/Chromium，或 macOS 执行 `brew install pango gdk-pixbuf libffi`",
+        )
         _write_text_fallback_pdf(fallback_lines, pdf_path)
 
 
@@ -458,16 +501,33 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
     ordered_utterances = _ordered_utterances(ctx)
     question_adoption = _question_adoption_stats(ctx)
     memory_review = _memory_review(ctx)
+    recommendation_label = RECOMMENDATION_LABELS.get(score.recommendation, score.recommendation)
+    candidate_name = _candidate_display_name(ctx)
     summary = (
-        f"候选人在本场面试中获得 {score.total_score} 分，系统建议为 {score.recommendation}。"
+        f"候选人{candidate_name}在本场面试中获得 {score.total_score} 分，"
+        f"系统建议为「{recommendation_label}」。"
         "报告中的每项评分均绑定原始回答证据，注水风险需由面试官结合上下文复核。"
     )
+    aigc_flagged_count = sum(1 for item in aigc if item.flagged)
+    aigc_llm_reviewed = any(item.llm_reason for item in aigc)
     html = REPORT_TEMPLATE.render(
+        interview_id=ctx.session_id,
+        candidate_name=candidate_name,
+        pass_verdict=_pass_verdict(score),
+        aigc_flagged_count=aigc_flagged_count,
+        aigc_total=len(aigc),
+        aigc_llm_reviewed=aigc_llm_reviewed,
+        report_number=_report_number(ctx),
+        job_title=ctx.competency_model.job_title,
+        interview_date=(ctx.ended_at or ctx.started_at).strftime("%Y-%m-%d"),
         score=score,
         analysis_mode=score.analysis_mode,
+        analysis_mode_label=ANALYSIS_MODE_LABELS.get(score.analysis_mode, score.analysis_mode),
+        recommendation_label=recommendation_label,
+        recommendation_tone=RECOMMENDATION_TONES.get(score.recommendation, "gray"),
         summary=summary,
         strengths=_strengths(score),
-        aigc_results=aigc,
+        aigc_rows=_aigc_rows(aigc),
         risk_highlights=_risk_highlights(score, ctx.flags),
         probe_chains=_probe_chain_rows(ctx),
         transcript=ctx.turns,
@@ -475,14 +535,22 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
         candidate_resume_text=ctx.candidate_resume_text,
         question_adoption=question_adoption,
         memory_review=memory_review,
+        steering_label=STEERING_LABELS.get(
+            question_adoption.steering_focus, question_adoption.steering_focus
+        ),
+        speaker_labels=SPEAKER_LABELS,
+        question_source_labels=QUESTION_SOURCE_LABELS,
         radar_chart_uri=_radar_chart_uri(score),
+        cjk_font_uri=_resolve_cjk_font_uri(),
     )
     settings = get_settings()
     settings.report_dir.mkdir(parents=True, exist_ok=True)
-    json_path = Path(settings.report_dir / f"{ctx.session_id}.report.json")
-    html_path = Path(settings.report_dir / f"{ctx.session_id}.html")
-    pdf_path = Path(settings.report_dir / f"{ctx.session_id}.pdf")
-    transcript_path = Path(settings.report_dir / f"{ctx.session_id}.transcript.json")
+    basename = _report_basename(ctx)
+    pdf_filename = _pdf_filename(ctx, score)
+    json_path = Path(settings.report_dir / f"{basename}.report.json")
+    html_path = Path(settings.report_dir / f"{basename}.html")
+    pdf_path = Path(settings.report_dir / pdf_filename)
+    transcript_path = Path(settings.report_dir / f"{basename}.transcript.json")
     html_path.write_text(html, encoding="utf-8")
     transcript_path.write_text(
         json.dumps(
@@ -500,24 +568,30 @@ def build_report(ctx: InterviewContext, score: InterviewScore, aigc: list[AIGCRe
         ),
         encoding="utf-8",
     )
-    _write_pdf(html, pdf_path, _fallback_pdf_lines(ctx, score, aigc, summary))
+    _write_pdf(
+        html,
+        pdf_path,
+        _fallback_pdf_lines(ctx, score, aigc, summary),
+        base_url=html_path.parent.resolve().as_uri() + "/",
+        html_path=html_path,
+    )
     artifact_store = get_artifact_store()
     html_artifact = artifact_store.put_file(
-        f"reports/{ctx.session_id}.html",
+        f"reports/{basename}.html",
         html_path,
         "text/html; charset=utf-8",
     )
     pdf_artifact = artifact_store.put_file(
-        f"reports/{ctx.session_id}.pdf",
+        f"reports/{pdf_filename}",
         pdf_path,
         "application/pdf",
     )
     transcript_artifact = artifact_store.put_file(
-        f"reports/{ctx.session_id}.transcript.json",
+        f"reports/{basename}.transcript.json",
         transcript_path,
         "application/json; charset=utf-8",
     )
-    json_artifact_name = f"reports/{ctx.session_id}.report.json"
+    json_artifact_name = f"reports/{basename}.report.json"
     report = Report(
         interview_id=ctx.session_id,
         score=score,
@@ -558,57 +632,61 @@ def _fallback_pdf_lines(
     summary: str,
 ) -> list[str]:
     lines = [
-        "Shuihuo Killer Interview Report",
-        f"Interview: {ctx.session_id}",
-        f"Total score: {score.total_score}",
-        f"Recommendation: {score.recommendation}",
-        f"Analysis mode: {score.analysis_mode}",
+        "水货杀手 · 面试评估报告",
+        f"候选人：{_candidate_display_name(ctx)}（面试序号 {_report_number(ctx)}）",
+        f"应聘岗位：{ctx.competency_model.job_title}",
+        f"综合得分：{score.total_score}（满分 100）",
+        f"录用建议：{RECOMMENDATION_LABELS.get(score.recommendation, score.recommendation)}",
+        f"分析方式：{ANALYSIS_MODE_LABELS.get(score.analysis_mode, score.analysis_mode)}",
     ]
     question_adoption = _question_adoption_stats(ctx)
     lines.append(
-        "Question adoption: "
-        f"suggested={question_adoption.suggested_unique_count}, "
-        f"adopted={question_adoption.adopted_suggested_count}, "
-        f"custom={question_adoption.custom_question_count}, "
-        f"rate={question_adoption.adoption_rate:.1%}"
+        "问题采纳统计："
+        f"系统建议 {question_adoption.suggested_unique_count} 题，"
+        f"采纳 {question_adoption.adopted_suggested_count} 题，"
+        f"自定义 {question_adoption.custom_question_count} 题，"
+        f"采纳率 {question_adoption.adoption_rate:.1%}"
     )
     if score.analysis_mode == "fallback":
         lines.append(
             "本报告由确定性规则生成（未启用大模型分析），分数仅供链路验证，不可用于招聘决策。"
         )
-    lines.extend([f"Summary: {summary}", "Dimension scores:"])
+    lines.extend([f"总评：{summary}", "维度得分："])
     for dimension in score.dimensions:
         evidence = dimension.evidence[0].excerpt if dimension.evidence else ""
         lines.append(
-            f"- {dimension.dimension}: score={dimension.score}, weight={dimension.weight}, "
-            f"evidence={evidence}"
+            f"- {dimension.dimension}：{dimension.score} 分（权重 {dimension.weight}），"
+            f"证据：「{evidence}」"
         )
-    lines.append("Risk notes:")
+    lines.append("风险点：")
     risk_highlights = _risk_highlights(score, ctx.flags)
     if risk_highlights:
         lines.extend(f"- {note}" for note in risk_highlights)
     else:
-        lines.append("- None")
-    lines.append("Rehearsal/template checks:")
-    for result in aigc:
+        lines.append("- 未发现高置信风险点")
+    lines.append("背稿与模板化检测：")
+    for index, result in enumerate(aigc, start=1):
         lines.append(
-            f"- turn={result.turn_id}, rehearsal={result.rehearsal_score}, "
-            f"template_similarity={result.template_similarity}, flagged={result.flagged}"
+            f"- 第 {index} 轮（{AIGC_MODE_LABELS.get(result.mode, result.mode)}）："
+            f"背稿分 {result.rehearsal_score}，模板相似度 {result.template_similarity}，"
+            f"{'疑似注水/模板化' if result.flagged else '未命中'}"
         )
-    lines.append("Probe chains:")
+    lines.append("追问链：")
     if ctx.probe_chains:
         for chain in ctx.probe_chains:
-            lines.append(
-                f"- {chain.topic}: verdict={chain.verdict}, depth={len(chain.links)}, "
-                f"crack_depth={chain.crack_depth or ''}"
-            )
+            verdict = CHAIN_VERDICT_LABELS.get(chain.verdict, chain.verdict)
+            crack = f"，第 {chain.crack_depth} 层露馅" if chain.crack_depth else ""
+            lines.append(f"- {chain.topic}：{verdict}，共 {len(chain.links)} 层{crack}")
     else:
-        lines.append("- None")
-    lines.append("Transcript:")
+        lines.append("- 暂无追问链")
+    lines.append("完整转写：")
     for index, utterance in enumerate(_ordered_utterances(ctx), start=1):
-        lines.append(f"- U{index} [{utterance.speaker}] {utterance.text}")
+        speaker = SPEAKER_LABELS.get(utterance.speaker, utterance.speaker)
+        lines.append(f"- {index}. [{speaker}] {utterance.text}")
+    lines.append("问答轮次：")
     for index, turn in enumerate(ctx.turns, start=1):
-        lines.append(f"- T{index} [{turn.question_source}] Q={turn.question} A={turn.answer}")
+        source = QUESTION_SOURCE_LABELS.get(turn.question_source, turn.question_source)
+        lines.append(f"- 第 {index} 轮（{source}）问：{turn.question} 答：{turn.answer}")
     return lines
 
 

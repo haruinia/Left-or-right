@@ -13,6 +13,7 @@ RUN apt-get update \
         libpango-1.0-0 \
         libpangocairo-1.0-0 \
         shared-mime-info \
+        fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./

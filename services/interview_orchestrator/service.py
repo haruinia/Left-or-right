@@ -25,7 +25,7 @@ from libs.schemas import (
     Utterance,
     new_id,
 )
-from services.aigc_detect_service.service import detect_interview
+from services.aigc_detect_service.service import detect_interview, llm_review_aigc
 from services.interview_orchestrator.consistency import detect_claim_conflicts, extract_fact_claim
 from services.jd_kb_service.service import get_job
 from services.probe_service.service import assess_credibility
@@ -150,11 +150,16 @@ def create_interview(payload: InterviewCreate) -> InterviewRecord:
         if not has_active_consent(payload.candidate_id, "behavior_signal"):
             raise PermissionError("behavior signal requires explicit candidate consent")
     interview_id = new_id()
+    with connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS total FROM interviews").fetchone()
+    interview_seq = int(row["total"]) + 1
     ctx = InterviewContext(
         session_id=interview_id,
         job_id=payload.job_id,
         candidate_id=payload.candidate_id,
         competency_model=job.competency_model,
+        candidate_name=candidate.name,
+        interview_seq=interview_seq,
         candidate_resume_text=candidate.resume_text,
         probe_chains=_preopen_resume_chains(interview_id, candidate.resume_text),
     )
@@ -751,6 +756,7 @@ def run_offline_scoring_task(interview_id: str):
         {"interview_id": interview_id, "turn_count": len(record.context.turns)},
     )
     aigc = detect_interview(record.context.turns, probe_chains=record.context.probe_chains)
+    aigc = llm_review_aigc(record.context.turns, aigc)
     score = score_interview(record.context, aigc)
     report, html = build_report(record.context, score, aigc)
     record.status = InterviewStatus.reported

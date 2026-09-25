@@ -281,6 +281,8 @@ class InterviewContext(BaseModel):
     job_id: str
     candidate_id: str
     competency_model: CompetencyModel
+    candidate_name: str = ""
+    interview_seq: int = Field(default=0, ge=0)
     candidate_resume_text: str = ""
     utterances: list[Utterance] = Field(default_factory=list)
     turns: list[QATurn] = Field(default_factory=list)
@@ -597,6 +599,7 @@ class AIGCResult(BaseModel):
     mode: Literal["voice", "written"] = "voice"
     matched_template: str | None = None
     flagged: bool = False
+    llm_reason: str | None = None
 
     @field_validator("turn_id")
     @classmethod

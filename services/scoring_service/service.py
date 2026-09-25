@@ -7,6 +7,57 @@ from libs.common.config import get_settings
 from libs.common.prompts import load_prompt
 from libs.llm_client import LLMMessage, get_llm_client
 from libs.schemas import AIGCResult, DimensionScore, EvidenceRef, InterviewContext, InterviewScore, QATurn
+from services.probe_service.service import DETAIL_MARKERS, assess_credibility, has_concrete_content
+
+# 一句包含指标/方法的中文技术回答约 40 字即有实质，远低于啰嗦套话。
+# 因此实质判定以「可信度信号 + 信息密度」为主，长度只做下限闸门，不线性惩罚简洁。
+SUBSTANCE_FULL_ANSWER_CHARS = 45
+SUBSTANCE_DETAIL_BONUS_CHARS = 15  # 每个细节标记（指标、因果、故障…）等效增加的「实质字符」credit
+SUBSTANCE_AIGC_FLAGGED_FACTOR = 0.2  # 被判定疑似 AI/背稿的回答，内容非本人产出，实质分大幅折损
+SUBSTANCE_SCORE_FLOOR = 15.0
+SUBSTANCE_RISK_THRESHOLD = 0.35
+CREDIBILITY_SUBSTANCE_FACTORS = {"solid": 1.0, "vague": 0.55, "suspicious": 0.25}
+
+
+def _answer_substance_factor(
+    ctx: InterviewContext,
+    aigc_results: list[AIGCResult] | None = None,
+) -> float:
+    """回答实质程度 0..1。
+
+    设计原则：
+    - 主信号是可信度等级（solid/vague/suspicious），反映回答里是否有可验证细节；
+    - 长度只做「下限闸门」——纯寒暄/一句话趋近 0，但简洁而信息密的专家回答不被长度拖累，
+      细节标记（指标、因果、故障、取舍…）按 SUBSTANCE_DETAIL_BONUS_CHARS 折算成等效字符；
+    - 被 AIGC 判定疑似 AI 生成/背稿、且通篇无具体内容（无数字/技术名词/细节）的回答，
+      内容非本人产出，实质分按 0.2 重度折损，使作弊空话即便又长又顺也拿不到高分；
+    - 被标记但仍含具体内容的回答可能是误报（候选人确实讲了细节），不做实质封杀，
+      仅由确定性 risk_penalty 温和扣分，避免冤杀真专家。
+    """
+    if not ctx.turns:
+        return 0.0
+    flagged_turn_ids = {item.turn_id for item in (aigc_results or []) if item.flagged}
+    factors: list[float] = []
+    for turn in ctx.turns:
+        answer = turn.answer.strip()
+        level_factor = CREDIBILITY_SUBSTANCE_FACTORS[assess_credibility(answer).level]
+        detail_hits = sum(marker in answer.lower() for marker in DETAIL_MARKERS)
+        effective_len = len(answer) + detail_hits * SUBSTANCE_DETAIL_BONUS_CHARS
+        length_factor = min(1.0, effective_len / SUBSTANCE_FULL_ANSWER_CHARS)
+        turn_factor = level_factor * length_factor
+        if turn.turn_id in flagged_turn_ids and not has_concrete_content(answer):
+            turn_factor *= SUBSTANCE_AIGC_FLAGGED_FACTOR
+        factors.append(turn_factor)
+    return round(sum(factors) / len(factors), 4)
+
+
+def _substance_cap(
+    ctx: InterviewContext,
+    aigc_results: list[AIGCResult] | None = None,
+) -> float:
+    """所有正权重维度分数的确定性上限，保证垃圾/作弊回答拿不到高分。"""
+    factor = _answer_substance_factor(ctx, aigc_results)
+    return round(SUBSTANCE_SCORE_FLOOR + (100.0 - SUBSTANCE_SCORE_FLOOR) * factor, 2)
 
 
 def _evidence_for_dimension(ctx: InterviewContext, dimension: str) -> list[EvidenceRef]:
@@ -79,6 +130,10 @@ def fallback_score_interview(
             depth = chain.crack_depth or len(chain.links)
             risk_notes.append(f"声明「{chain.topic}」在第 {depth} 层追问露馅。")
     held_up_bonus = min(9.0, settings.chain_held_up_bonus * len(held_up_chains))
+    substance_factor = _answer_substance_factor(ctx, aigc_results)
+    substance_cap = _substance_cap(ctx, aigc_results)
+    if substance_factor < SUBSTANCE_RISK_THRESHOLD:
+        risk_notes.append("回答缺乏实质内容（过短或空泛），分数已按内容质量封顶，建议人工复核。")
 
     dimensions: list[DimensionScore] = []
     for item in ctx.competency_model.items:
@@ -92,6 +147,8 @@ def fallback_score_interview(
         elif item.name == "沟通与逻辑":
             avg_len = sum(len(turn.answer) for turn in ctx.turns) / max(1, len(ctx.turns))
             base += 5.0 if avg_len > 80 else -8.0
+        if item.weight > 0:
+            base = min(base, substance_cap)
         dimensions.append(
             DimensionScore(
                 dimension=item.name,
@@ -102,20 +159,12 @@ def fallback_score_interview(
         )
 
     total = _compute_total_score(dimensions)
-    if total >= 88:
-        recommendation = "strong_yes"
-    elif total >= 75:
-        recommendation = "yes"
-    elif total >= 60:
-        recommendation = "hold"
-    else:
-        recommendation = "no"
     return InterviewScore(
         session_id=ctx.session_id,
         dimensions=dimensions,
         total_score=total,
         risk_notes=risk_notes,
-        recommendation=recommendation,
+        recommendation=_recommendation(total),
         analysis_mode="fallback",
     )
 
@@ -137,11 +186,12 @@ def score_interview(ctx: InterviewContext, aigc_results: list[AIGCResult]) -> In
     else:
         draft = client.complete_json_sync(messages, InterviewScore, fallback)
         used_fallback = draft == fallback
-    return _normalize_score(ctx, draft, fallback, used_fallback=used_fallback)
+    return _normalize_score(ctx, draft, fallback, aigc_results, used_fallback=used_fallback)
 
 
 def _scoring_payload(ctx: InterviewContext, aigc_results: list[AIGCResult]) -> str:
     payload = {
+        "session_id": ctx.session_id,
         "job_id": ctx.job_id,
         "candidate_id": ctx.candidate_id,
         "candidate_resume_text": ctx.candidate_resume_text,
@@ -183,6 +233,7 @@ def _normalize_score(
     ctx: InterviewContext,
     draft: InterviewScore,
     fallback: InterviewScore,
+    aigc_results: list[AIGCResult] | None = None,
     *,
     used_fallback: bool = False,
 ) -> InterviewScore:
@@ -191,6 +242,7 @@ def _normalize_score(
     deterministic_risk_present = bool(fallback.risk_notes)
     has_cracked_chain = any(chain.verdict == "cracked" for chain in ctx.probe_chains)
     has_held_up_chain = any(chain.verdict == "held_up" for chain in ctx.probe_chains)
+    substance_cap = _substance_cap(ctx, aigc_results)
     normalized_dimensions: list[DimensionScore] = []
     for item in ctx.competency_model.items:
         draft_dimension = next(
@@ -204,17 +256,20 @@ def _normalize_score(
         if not evidence:
             evidence = fallback_by_dimension[item.name].evidence
         fallback_dimension = fallback_by_dimension[item.name]
+        score = _normalize_dimension_score(
+            item.name,
+            draft_dimension,
+            fallback_dimension,
+            deterministic_risk_present=deterministic_risk_present,
+            has_cracked_chain=has_cracked_chain,
+            has_held_up_chain=has_held_up_chain,
+        )
+        if item.weight > 0:
+            score = min(score, substance_cap)
         normalized_dimensions.append(
             DimensionScore(
                 dimension=item.name,
-                score=_normalize_dimension_score(
-                    item.name,
-                    draft_dimension,
-                    fallback_dimension,
-                    deterministic_risk_present=deterministic_risk_present,
-                    has_cracked_chain=has_cracked_chain,
-                    has_held_up_chain=has_held_up_chain,
-                ),
+                score=score,
                 weight=item.weight,
                 evidence=evidence,
             )

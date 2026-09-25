@@ -348,6 +348,14 @@ def create_job(payload: JobCreate) -> JobRecord:
     return record
 
 
+def update_job_title(job_id: str, title: str) -> JobRecord:
+    clean_title = title.strip()
+    if clean_title:
+        with connect() as conn:
+            conn.execute("UPDATE jobs SET title = ? WHERE id = ?", (clean_title, job_id))
+    return get_job(job_id)
+
+
 def get_job(job_id: str) -> JobRecord:
     init_db()
     with connect() as conn:

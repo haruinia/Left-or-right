@@ -19,6 +19,9 @@ except ImportError:  # pragma: no cover - dependency fallback for partially sync
 
 LOGGER_NAME = "shuihuo"
 logger = logging.getLogger(LOGGER_NAME)
+if not logger.handlers:
+    logger.addHandler(logging.StreamHandler())
+logger.setLevel(logging.INFO)
 TRACEPARENT_RE = re.compile(
     r"^(?P<version>[0-9a-f]{2})-"
     r"(?P<trace_id>[0-9a-f]{32})-"

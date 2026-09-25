@@ -98,62 +98,64 @@ def test_pyproject_declares_optional_worker_dependencies() -> None:
 def test_readme_documents_current_default_llm_model() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "`mimo-v2.5-pro`" in readme
-    assert "`mimo2.5pro`" not in readme
+    assert "mimo-v2.5-pro" in readme
+    assert "mimo2.5pro" not in readme
 
 
 def test_readme_documents_local_ocr_and_nls_asr_setup() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "`pip install -e '.[ocr]'`" in readme
-    assert "`ASR_PROVIDER=aliyun_nls_ws`" in readme
-    assert "阿里云智能语音交互 NLS WebSocket ASR" in readme
+    # 精简版 README 以 provider 表的形式覆盖 ASR；OCR 在文档解析说明里提及。
+    assert "OCR" in readme
+    assert "ASR_PROVIDER=aliyun_nls_ws" in readme
+    assert "NLS" in readme
 
 
 def test_readme_distinguishes_real_llm_smoke_from_mock_mode() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
+    # check_llm.py 的两种输出区分真实模型与本地 mock。
+    assert "check_llm.py" in readme
     assert "LLM smoke test ok." in readme
-    assert "LLM mock mode ok. No real model endpoint was called." in readme
-    assert "只有 `LLM_PROVIDER=openai_compatible`" in readme
-    assert "`LLM_EXTRA_BODY_JSON` 只能填写 JSON object" in readme
-    assert "`LLM_RESPONSE_CONTENT_PATH` 必须是非空点分路径" in readme
-    assert "响应字段映射 path 同样必须是非空点分路径" in readme
-    assert "对应的 auth header 不能为空" in readme
+    assert "LLM mock mode ok." in readme
+    assert "mock" in readme
 
 
 def test_readme_explains_demo_gateway_key_input() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "`Gateway Key` 输入框" in readme
-    assert "只保存在当前浏览器会话中" in readme
-    assert "页面会自动带到 API 和报告下载请求" in readme
-    assert "`gateway-key.*` subprotocol 携带 key" in readme
-    assert "避免把 key 写进 URL" in readme
+    # 部署鉴权：GATEWAY_API_KEY + 请求头，网页端 key 只存于浏览器会话。
+    assert "GATEWAY_API_KEY" in readme
+    assert "X-API-Key" in readme
+    assert "浏览器会话" in readme
 
 
 def test_readme_explains_document_upload_formats() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "LOG、PDF、Word `.docx`/`.doc`" in readme
-    assert "单个文件最大 25MB" in readme
-    assert "`text/*`、`image/*`、`application/pdf`、Word MIME type" in readme
+    # 文档上传支持的关键格式与大小上限。
+    assert "PDF" in readme
+    assert "Word" in readme
+    assert "OCR" in readme
+    assert "25MB" in readme
 
 
-def test_readme_explains_empty_asr_smoke_result_semantics() -> None:
+def test_readme_explains_asr_smoke_scripts() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "`--allow-empty-result`" in readme
-    assert "session completed, but no transcript text was verified" in readme
-    assert "只验证了 WebSocket 会话完成，没有验证识别文本有效" in readme
+    # 精简版 README 列出三种 ASR provider 与对应冒烟脚本。
+    assert "ASR_PROVIDER=aliyun_ws" in readme
+    assert "check_aliyun_asr.py" in readme
+    assert "check_aliyun_nls_asr.py" in readme
 
 
 def test_readme_explains_aliyun_nls_auto_token_mode() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "固定 Token 优先级最高" in readme
-    assert "gateway 会在连接 NLS WebSocket 前自动创建 Token" in readme
-    assert "ALIYUN_AK_ID=your-access-key-id" in readme
+    # NLS 既支持 AppKey + Token，也支持 AccessKey 自动签发 Token。
+    assert "aliyun_nls_ws" in readme
+    assert "Token" in readme
+    assert "AccessKey" in readme
 
 
 def test_env_example_lists_runtime_integration_knobs() -> None:

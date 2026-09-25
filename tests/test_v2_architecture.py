@@ -491,13 +491,21 @@ def test_probe_fallback_is_emitted_without_waiting_for_llm(tmp_path, monkeypatch
 def test_each_cracked_chain_applies_exact_project_authenticity_penalty() -> None:
     first = QATurn(
         question="你负责什么？",
-        answer="我负责限流模块和故障降级。",
+        answer=(
+            "我具体写了限流模块和故障降级开关，因为下游容量固定，我用压测确定了阈值口径，"
+            "上线后网关超时率指标从 2.1% 降到 0.4%，期间排查过一次令牌桶时钟漂移故障并补了监控告警，"
+            "复盘后我把时钟源切换逻辑写进了部署检查清单，并加了漂移指标的告警阈值。"
+        ),
         answer_start_ms=0,
         answer_end_ms=1000,
     )
     second = QATurn(
         question="请继续说明。",
-        answer="我补充了压测指标和回滚方案。",
+        answer=(
+            "我补充了压测指标口径和回滚方案：压测覆盖峰值三倍流量，回滚靠配置开关在 30 秒内生效，"
+            "因为之前一次发布故障让我们意识到必须先验证降级路径，我具体写了回滚演练脚本并记录了指标，"
+            "每次发布前演练一遍，演练结果和指标截图归档到发布单里供复盘使用。"
+        ),
         answer_start_ms=1500,
         answer_end_ms=2500,
     )
@@ -555,13 +563,21 @@ def test_each_cracked_chain_applies_exact_project_authenticity_penalty() -> None
 def test_held_up_chain_bonus_cannot_be_erased_by_llm_draft(monkeypatch) -> None:
     first = QATurn(
         question="具体模块是什么？",
-        answer="我实现了令牌桶限流，并补充了压测和回滚开关。",
+        answer=(
+            "我具体实现了令牌桶限流模块，因为突发流量会击穿下游，我用压测确定了桶容量和补充速率口径，"
+            "上线后限流误杀率指标稳定在 0.2% 以下，期间排查过一次时钟回拨导致的令牌溢出故障，"
+            "修复方案是改用单调时钟并补了溢出计数指标的告警，复盘记录我写进了团队故障库。"
+        ),
         answer_start_ms=0,
         answer_end_ms=1000,
     )
     second = QATurn(
         question="为什么这样设计？",
-        answer="因为下游容量固定，我用压测数据确定阈值，并验证了故障降级。",
+        answer=(
+            "因为下游容量固定，我用压测数据确定阈值并验证了故障降级路径：具体做法是先在影子流量验证，"
+            "再灰度放量，关键指标是降级开关生效时间 30 秒以内，失败时我写了自动回滚脚本兜底，"
+            "灰度期间我每天核对限流命中率和误杀率指标，确认口径一致后才放到全量。"
+        ),
         answer_start_ms=1500,
         answer_end_ms=2600,
     )
