@@ -2137,6 +2137,7 @@ body.settings-page {
 .liuwa-shortcut-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .liuwa-shortcut-grid > span { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .liuwa-shortcut-note { margin: 4px 0 12px; line-height: 1.6; }
+.liuwa-carried { margin: 0; color: var(--muted); font-size: 12px; }
 .liuwa-hotkey-warning { margin: 10px 0 0; color: #922f35; line-height: 1.6; }
 .liuwa-shortcuts kbd.is-conflict { color: #922f35; border-color: currentColor; }
 

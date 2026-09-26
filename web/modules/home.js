@@ -117,14 +117,18 @@ function authHeaders(headers = {}) {
   return state.gatewayApiKey ? { ...headers, "X-API-Key": state.gatewayApiKey } : headers;
 }
 
-function appendUserTurn(images, text) {
+function appendUserTurn(images, text, carriedCount = 0) {
   const article = document.createElement("article");
   article.className = "liuwa-turn is-user";
   const gallery = images
     .map((url) => `<img src="${escapeHtml(url)}" alt="截图" />`)
     .join("");
+  const carried = carriedCount
+    ? `<p class="liuwa-carried">附上本题 ${carriedCount} 张截图</p>`
+    : "";
   article.innerHTML = `
     ${gallery ? `<div class="liuwa-gallery">${gallery}</div>` : ""}
+    ${carried}
     ${text ? `<p>${escapeHtml(text)}</p>` : ""}
   `;
   thread.append(article);
@@ -182,7 +186,7 @@ async function sendChat() {
   setStatus("正在分析题目…");
   note.disabled = true;
   shots.querySelectorAll("button").forEach((button) => { button.disabled = true; });
-  const userTurn = appendUserTurn(unsent, text);
+  const userTurn = appendUserTurn(unsent, text, images.length - unsent.length);
   const streamNode = appendAssistantTurn();
   const assistantTurn = streamNode.parentElement;
   syncEmpty();
