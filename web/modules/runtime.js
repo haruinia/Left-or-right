@@ -107,6 +107,14 @@ function applyRuntimeConfig(config) {
   if (llmModel && document.activeElement !== llmModel) {
     llmModel.value = config.llm_model || "";
   }
+  const llmBaseUrl = document.querySelector("#llmBaseUrl");
+  if (llmBaseUrl && document.activeElement !== llmBaseUrl) {
+    llmBaseUrl.value = config.llm_base_url || "";
+  }
+  const llmApiKey = document.querySelector("#llmApiKey");
+  if (llmApiKey) {
+    llmApiKey.placeholder = config.llm_api_key_configured ? "已配置，留空保持不变" : "尚未配置";
+  }
   const originInput = document.querySelector("#gatewayOrigin");
   if (originInput && document.activeElement !== originInput) {
     originInput.value = state.apiOrigin;

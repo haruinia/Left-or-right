@@ -15,6 +15,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from pydantic import BaseModel
 from starlette.datastructures import Headers
 
 from libs.common.config import get_settings
@@ -488,6 +489,62 @@ def metrics() -> str:
 @app.get("/api/config/status", response_model=RuntimeStatus)
 def config_status() -> RuntimeStatus:
     return get_runtime_status()
+
+
+class LlmConfigUpdate(BaseModel):
+    llm_model: str
+    llm_base_url: str
+    llm_api_key: str = ""
+
+
+@app.post("/api/config/llm", response_model=RuntimeStatus)
+def update_llm_config(payload: LlmConfigUpdate) -> RuntimeStatus:
+    """保存设置页提交的模型接入配置：立即生效，并写回 .env 以便重启后保留。"""
+    model = payload.llm_model.strip()
+    base_url = payload.llm_base_url.strip()
+    if not model:
+        raise HTTPException(status_code=422, detail="模型名不能为空")
+    if not base_url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="接口地址必须以 http:// 或 https:// 开头")
+    settings = get_settings()
+    settings.llm_provider = "openai_compatible"
+    settings.llm_model = model
+    settings.llm_base_url = base_url.rstrip("/")
+    new_api_key = payload.llm_api_key.strip()
+    if new_api_key:
+        settings.llm_api_key = new_api_key
+    _persist_llm_env(
+        llm_model=settings.llm_model,
+        llm_base_url=settings.llm_base_url,
+        llm_api_key=new_api_key,
+    )
+    return get_runtime_status()
+
+
+def _persist_llm_env(*, llm_model: str, llm_base_url: str, llm_api_key: str) -> None:
+    updates = {
+        "LLM_PROVIDER": "openai_compatible",
+        "LLM_MODEL": llm_model,
+        "LLM_BASE_URL": llm_base_url,
+    }
+    if llm_api_key:
+        updates["LLM_API_KEY"] = llm_api_key
+    path = Path(".env")
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    replaced: set[str] = set()
+    output: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        key = stripped.split("=", 1)[0].strip() if "=" in stripped and not stripped.startswith("#") else None
+        if key in updates:
+            output.append(f"{key}={updates[key]}")
+            replaced.add(key)
+        else:
+            output.append(line)
+    for key, value in updates.items():
+        if key not in replaced:
+            output.append(f"{key}={value}")
+    path.write_text("\n".join(output) + "\n", encoding="utf-8")
 
 
 @app.post("/api/config/llm/check")

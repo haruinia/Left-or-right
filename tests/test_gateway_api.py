@@ -907,6 +907,63 @@ def test_gateway_config_status_hides_secrets(tmp_path: Path, monkeypatch) -> Non
     assert "super-secret" not in response.text
 
 
+def test_gateway_update_llm_config_persists_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    client = _client(tmp_path, monkeypatch)
+
+    response = client.post(
+        "/api/config/llm",
+        json={
+            "llm_model": "my-model",
+            "llm_base_url": "https://api.example.com/v1/",
+            "llm_api_key": "sk-live-1234",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["llm_provider"] == "openai_compatible"
+    assert payload["llm_model"] == "my-model"
+    assert payload["llm_base_url"] == "https://api.example.com/v1"
+    assert payload["llm_api_key_configured"] is True
+    assert payload["llm_base_url_configured"] is True
+
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "LLM_PROVIDER=openai_compatible" in env_text
+    assert "LLM_MODEL=my-model" in env_text
+    assert "LLM_BASE_URL=https://api.example.com/v1" in env_text
+    assert "LLM_API_KEY=sk-live-1234" in env_text
+
+    keep_response = client.post(
+        "/api/config/llm",
+        json={"llm_model": "other-model", "llm_base_url": "https://api.example.com/v1"},
+    )
+    assert keep_response.status_code == 200
+    assert keep_response.json()["llm_api_key_configured"] is True
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "LLM_MODEL=other-model" in env_text
+    assert "LLM_API_KEY=sk-live-1234" in env_text
+
+    status = client.get("/api/config/status")
+    assert status.json()["llm_model"] == "other-model"
+
+
+def test_gateway_update_llm_config_rejects_invalid_input(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    client = _client(tmp_path, monkeypatch)
+
+    missing_model = client.post(
+        "/api/config/llm", json={"llm_model": " ", "llm_base_url": "https://api.example.com"}
+    )
+    assert missing_model.status_code == 422
+
+    bad_url = client.post(
+        "/api/config/llm", json={"llm_model": "m", "llm_base_url": "api.example.com"}
+    )
+    assert bad_url.status_code == 422
+    assert not (tmp_path / ".env").exists()
+
+
 def test_gateway_llm_check_reports_mock_mode(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
 

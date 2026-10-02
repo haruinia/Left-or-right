@@ -24,6 +24,7 @@ class RuntimeStatus(BaseModel):
     otel_service_name: str
     llm_provider: str
     llm_model: str
+    llm_base_url: str
     llm_base_url_configured: bool
     llm_api_path: str
     llm_api_key_configured: bool
@@ -108,6 +109,7 @@ def get_runtime_status() -> RuntimeStatus:
         otel_service_name=settings.otel_service_name,
         llm_provider=settings.llm_provider,
         llm_model=settings.llm_model,
+        llm_base_url=settings.llm_base_url,
         llm_base_url_configured=bool(settings.llm_base_url),
         llm_api_path=settings.llm_api_path,
         llm_api_key_configured=bool(settings.llm_api_key),

@@ -70,7 +70,7 @@
 
       <section class="panel settings-card">
         <h2>大模型接入</h2>
-        <p class="small">截图由本地服务转发给当前模型。下面是服务连接信息，模型配置沿用服务端配置。</p>
+        <p class="small">截图由本地服务转发给当前模型。填写 OpenAI 兼容的模型信息，保存后立即生效并写入 .env（重启服务不丢失）。</p>
         <label>
           本地服务地址
           <input
@@ -100,21 +100,45 @@
           <input
             id="llmModel"
             type="text"
-            readonly
             autocomplete="off"
             spellcheck="false"
-            placeholder="连接后显示网关当前模型"
-            aria-label="当前模型"
+            placeholder="例如 deepseek-chat"
+            aria-label="模型名"
+          />
+        </label>
+        <label>
+          模型接口地址（OpenAI 兼容）
+          <input
+            id="llmBaseUrl"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="https://api.deepseek.com/v1"
+            aria-label="模型接口地址"
+          />
+        </label>
+        <label>
+          模型 API Key（留空表示不修改）
+          <input
+            id="llmApiKey"
+            type="password"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            placeholder="已配置则留空即可"
+            aria-label="模型 API Key"
           />
         </label>
         <p class="small" id="connectedModel">等待读取模型配置</p>
-        <p class="small">服务地址与访问密钥只用于当前浏览器会话；桌面应用仍使用启动时的连接配置。</p>
+        <p class="small">服务地址与访问密钥只用于当前浏览器会话；模型鉴权方式（LLM_AUTH_HEADER）等高级选项仍在 .env 中维护。</p>
         <p class="small">本地 Codex：待接入。接入后继续使用同一个截图提问入口。</p>
         <div class="settings-status-row">
           <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
           <span class="status-pill" id="modelStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>模型检查中</span></span>
         </div>
         <div class="settings-actions">
+          <button type="button" id="saveLlmConfig" title="保存模型配置到本地服务，立即生效并写入 .env">保存模型</button>
           <button type="button" id="saveGatewayKey" title="保存当前浏览器会话使用的 Gateway Key">保存接入</button>
           <button class="secondary" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
           <button class="secondary" type="button" id="checkModel" title="调用真实模型检查连接">检查模型</button>

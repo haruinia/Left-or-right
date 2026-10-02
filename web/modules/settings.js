@@ -175,6 +175,35 @@ document.querySelector("#studySettingsForm")?.addEventListener("input", () => {
   if (settingsLoaded) saveState.textContent = "有未保存的修改";
 });
 document.querySelector("#loadSampleSettings")?.addEventListener("click", loadSampleSettings);
+async function saveLlmConfig() {
+  const button = document.querySelector("#saveLlmConfig");
+  const model = document.querySelector("#llmModel")?.value.trim() ?? "";
+  const baseUrl = document.querySelector("#llmBaseUrl")?.value.trim() ?? "";
+  const apiKey = document.querySelector("#llmApiKey")?.value ?? "";
+  if (!model || !baseUrl) {
+    saveState.textContent = "请先填写模型名和模型接口地址。";
+    return;
+  }
+  if (button) button.disabled = true;
+  try {
+    const status = await postJson("/api/config/llm", {
+      llm_model: model,
+      llm_base_url: baseUrl,
+      llm_api_key: apiKey,
+    });
+    const keyInput = document.querySelector("#llmApiKey");
+    if (keyInput) keyInput.value = "";
+    saveState.textContent = "模型配置已保存并生效。";
+    appendEvent("模型配置", `已保存并生效：${escapeHtml(status.llm_provider)} · ${escapeHtml(status.llm_model)}`, "green");
+    checkRuntime();
+  } catch (error) {
+    saveState.textContent = "模型配置保存失败。";
+    appendEvent("模型配置", `保存失败：${escapeHtml(error.message || error)}`, "red");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+document.querySelector("#saveLlmConfig")?.addEventListener("click", saveLlmConfig);
 async function saveConnection() {
   const origin = document.querySelector("#gatewayOrigin");
   if (!origin.reportValidity()) return;
