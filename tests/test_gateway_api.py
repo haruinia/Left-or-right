@@ -398,8 +398,8 @@ def test_gateway_serves_demo_ui(tmp_path: Path, monkeypatch) -> None:
     assert "selectedProbeChainId" in bundle
     assert "chain_id: state.selectedProbeChainId" in bundle
     assert "asr_warning" in bundle
-    assert "开始麦克风" in bundle
-    assert "停止麦克风" in bundle
+    assert "开始采集" in bundle
+    assert "停止采集" in bundle
     assert "重连通道" in bundle
     assert "刷新状态" in bundle
     assert 'id="runtimeStatus" role="status" aria-live="polite"' in bundle
@@ -504,8 +504,11 @@ def test_gateway_serves_demo_ui(tmp_path: Path, monkeypatch) -> None:
     assert "NLS Token 创建失败" in bundle
     assert "ASR WebSocket 依赖缺失" in bundle
     assert "ASR 没有返回识别文本" in bundle
-    assert "每 250ms 发送低音量保活音频" in bundle
-    assert "避免 ASR 空闲断开" in bundle
+    assert "发送低音量保活" in bundle
+    assert "findLoopbackDevice" in bundle
+    assert "micDualCapture" in bundle
+    assert "blackhole" in bundle
+    assert "双声道" in bundle
     assert "原始原因" in bundle
     assert "先创建实时面试" in bundle
     assert "实时通道连接中" in bundle
@@ -560,7 +563,7 @@ def test_gateway_serves_demo_ui(tmp_path: Path, monkeypatch) -> None:
     assert "建议至少 ${answerMinChars} 字" in bundle
     assert 'answerText.addEventListener("input", updateTextCounters)' in bundle
     assert ".control-hint.warn" in bundle
-    assert "实时通道已连接。可以发送文字回答" in bundle
+    assert "建议用 BlackHole/Loopback 分开你和会议声" in bundle
     assert "实时通道未连接。请点击重连通道" in bundle
     assert "liveChannelReadyForInput" in bundle
     assert "实时通道未连接，请点击重连通道。" in bundle
@@ -865,6 +868,10 @@ def test_gateway_config_status_hides_secrets(tmp_path: Path, monkeypatch) -> Non
     assert payload["aliyun_nls_endpoint_configured"] is True
     assert payload["aliyun_nls_sample_rate"] == 16000
     assert payload["aliyun_nls_format"] == "pcm"
+    assert payload["sherpa_asr_model_dir"].endswith("sherpa-onnx-streaming-paraformer-bilingual-zh-en")
+    assert payload["sherpa_asr_model_ready"] is False
+    assert payload["sherpa_asr_sample_rate"] == 16000
+    assert payload["sherpa_asr_provider"] == "cpu"
     assert payload["probe_min_answer_chars"] == 20
     assert payload["probe_min_interval_ms"] == 1000
     assert payload["probe_require_topic_match"] is True
@@ -973,6 +980,18 @@ def test_gateway_llm_check_sanitizes_upstream_error(tmp_path: Path, monkeypatch)
 
     assert response.status_code == 200
     assert response.json() == {"ok": False, "mode": "error", "message": "HTTP 401"}
+
+
+def test_gateway_asr_check_reports_sherpa_missing_model(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ASR_PROVIDER", "sherpa_onnx")
+    monkeypatch.setenv("SHERPA_ASR_MODEL_DIR", str(tmp_path / "missing-model"))
+    client = _client(tmp_path, monkeypatch)
+    response = client.post("/api/config/asr/check")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["mode"] in {"incomplete", "missing_dependency"}
+    assert "sherpa" in payload["message"].lower() or "本地" in payload["message"]
 
 
 def test_gateway_asr_check_reports_stub_mode(tmp_path: Path, monkeypatch) -> None:

@@ -143,10 +143,13 @@ def test_readme_explains_document_upload_formats() -> None:
 def test_readme_explains_asr_smoke_scripts() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    # 精简版 README 列出三种 ASR provider 与对应冒烟脚本。
+    # 精简版 README 列出 ASR provider 与对应冒烟脚本。
+    assert "ASR_PROVIDER=sherpa_onnx" in readme
     assert "ASR_PROVIDER=aliyun_ws" in readme
+    assert "download_sherpa_asr_model.py" in readme
     assert "check_aliyun_asr.py" in readme
     assert "check_aliyun_nls_asr.py" in readme
+    assert "BlackHole" in readme
 
 
 def test_readme_explains_aliyun_nls_auto_token_mode() -> None:

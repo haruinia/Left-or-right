@@ -144,6 +144,13 @@ def test_settings_accepts_aliyun_ws_asr_provider() -> None:
     assert settings.aliyun_asr_format == "pcm"
 
 
+def test_settings_accepts_sherpa_onnx_asr_provider_defaults() -> None:
+    settings = Settings(asr_provider="sherpa_onnx")
+    assert settings.asr_provider == "sherpa_onnx"
+    assert "paraformer" in settings.sherpa_asr_model_dir
+    assert settings.sherpa_asr_provider == "cpu"
+
+
 def test_settings_accepts_aliyun_nls_ws_asr_provider() -> None:
     settings = Settings(
         asr_provider="aliyun_nls_ws",

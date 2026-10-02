@@ -7,6 +7,15 @@ from pydantic import BaseModel
 from libs.common.config import get_settings
 
 
+def _sherpa_model_ready(settings) -> bool:
+    try:
+        from services.asr_service.sherpa_engine import sherpa_model_ready
+
+        return sherpa_model_ready(settings)
+    except Exception:
+        return False
+
+
 class RuntimeStatus(BaseModel):
     app_env: str
     gateway_auth_enabled: bool
@@ -47,6 +56,10 @@ class RuntimeStatus(BaseModel):
     aliyun_nls_endpoint_configured: bool
     aliyun_nls_sample_rate: int
     aliyun_nls_format: str
+    sherpa_asr_model_dir: str
+    sherpa_asr_model_ready: bool
+    sherpa_asr_sample_rate: int
+    sherpa_asr_provider: str
     probe_min_answer_chars: int
     probe_min_interval_ms: int
     probe_require_topic_match: bool
@@ -129,6 +142,10 @@ def get_runtime_status() -> RuntimeStatus:
         aliyun_nls_endpoint_configured=bool(settings.aliyun_nls_endpoint),
         aliyun_nls_sample_rate=settings.aliyun_nls_sample_rate,
         aliyun_nls_format=settings.aliyun_nls_format,
+        sherpa_asr_model_dir=settings.sherpa_asr_model_dir,
+        sherpa_asr_model_ready=_sherpa_model_ready(settings),
+        sherpa_asr_sample_rate=settings.sherpa_asr_sample_rate,
+        sherpa_asr_provider=settings.sherpa_asr_provider,
         probe_min_answer_chars=settings.probe_min_answer_chars,
         probe_min_interval_ms=settings.probe_min_interval_ms,
         probe_require_topic_match=settings.probe_require_topic_match,

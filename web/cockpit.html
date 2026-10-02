@@ -259,12 +259,12 @@
             <span class="small text-counter" id="answerCharCount" role="status" aria-live="polite">回答 0 字</span>
             <div class="composer-actions live-toolbar" id="liveDock">
               <div class="composer-options live-controls">
-                <div class="speaker-switch" role="group" aria-label="当前麦克风说话人" title="切换快捷键：⌘\ / Ctrl+\">
+                <div class="speaker-switch" role="group" aria-label="当前麦克风说话人" title="双声道开启后会自动区分；单麦时可用 ⌘\ / Ctrl+\ 切换">
                   <button type="button" id="speakerCandidate" class="active">候选人发言</button>
                   <button type="button" id="speakerInterviewer">面试官发言</button>
                 </div>
-                <button class="secondary" type="button" id="startMic" aria-describedby="controlHint" disabled>开始麦克风</button>
-                <button class="secondary" type="button" id="stopMic" aria-describedby="controlHint" disabled>停止麦克风</button>
+                <button class="secondary" type="button" id="startMic" aria-describedby="controlHint" disabled>开始采集</button>
+                <button class="secondary" type="button" id="stopMic" aria-describedby="controlHint" disabled>停止采集</button>
               </div>
               <button type="submit" class="primary send-message" id="sendAnswer" aria-describedby="controlHint" disabled>发送</button>
               <span class="status-pill" id="micStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>麦克风未开启</span></span>

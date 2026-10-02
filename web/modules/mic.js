@@ -1,6 +1,6 @@
 import { micStatus } from './dom.js';
 import { eventQuestionMeta, sendLiveSocketPayload } from './live.js';
-import { micChunkSamples, micSampleRate, micVoiceRmsThreshold, state } from './state.js';
+import { loopbackDeviceHints, micChunkSamples, micSampleRate, micVoiceRmsThreshold, state } from './state.js';
 import { appendEvent, escapeHtml, setControls, setPill } from './ui.js';
 
 function downsampleBuffer(buffer, inputRate, outputRate) {
@@ -34,59 +34,6 @@ function samplesToBase64Pcm16(samples) {
   return btoa(binary);
 }
 
-function appendMicSamples(samples) {
-  for (let index = 0; index < samples.length; index += 1) {
-    state.micSamples.push(samples[index]);
-  }
-  while (state.micSamples.length >= micChunkSamples) {
-    sendMicSamples(state.micSamples.splice(0, micChunkSamples));
-  }
-}
-
-function sendMicSamples(samples) {
-  if (!state.socket || state.socket.readyState !== WebSocket.OPEN || samples.length === 0) return;
-  if (!state.micSpeechStarted) {
-    if (!hasVoiceEnergy(samples)) {
-      if (!state.micWaitingForVoiceNotice) {
-	              appendEvent(
-	                "麦克风",
-	                "已开启采集，等待检测到当前角色声音；期间会每 250ms 发送低音量保活音频，避免 ASR 空闲断开。"
-	              );
-        setPill(micStatus, "等待声音输入", "live");
-        state.micWaitingForVoiceNotice = true;
-      }
-    } else {
-      state.micSpeechStarted = true;
-      state.micWaitingForVoiceNotice = false;
-      appendEvent("麦克风", "检测到声音，开始发送 ASR 音频。");
-    }
-  }
-  const startMs = Math.round((state.micSentSamples / micSampleRate) * 1000);
-  const endMs = Math.round(((state.micSentSamples + samples.length) / micSampleRate) * 1000);
-  const payload = {
-    type: "audio_chunk",
-	          session_id: state.interview.id,
-	          seq: state.seq,
-	          audio: samplesToBase64Pcm16(samples),
-	          speaker: state.currentSpeaker,
-	          channel: state.currentSpeaker,
-	          format: "pcm16",
-    sample_rate_hz: micSampleRate,
-    channels: 1,
-    start_ms: startMs,
-    end_ms: endMs,
-    is_final: true,
-    confidence: 0.95,
-    ...eventQuestionMeta(),
-  };
-  if (!sendLiveSocketPayload(payload, "麦克风")) {
-    stopMicCapture({ flush: false });
-    return;
-  }
-  state.seq += 1;
-  state.micSentSamples += samples.length;
-}
-
 function hasVoiceEnergy(samples) {
   let sum = 0;
   for (let index = 0; index < samples.length; index += 1) {
@@ -117,6 +64,171 @@ function stopMediaStream(stream) {
   if (stream) stream.getTracks().forEach((track) => track.stop());
 }
 
+function normalizeDeviceLabel(label) {
+  return String(label || "").trim().toLowerCase();
+}
+
+function isLoopbackDevice(device) {
+  const label = normalizeDeviceLabel(device && device.label);
+  if (!label) return false;
+  return loopbackDeviceHints.some((hint) => label.includes(hint));
+}
+
+async function findLoopbackDevice() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return null;
+  // A short permission prompt makes device labels available on Chromium.
+  let probe = null;
+  try {
+    probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    probe = null;
+  }
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices.find((device) => device.kind === "audioinput" && isLoopbackDevice(device)) || null;
+  } finally {
+    stopMediaStream(probe);
+  }
+}
+
+async function openMicStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+  });
+}
+
+async function openLoopbackStream(device) {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      deviceId: { exact: device.deviceId },
+      channelCount: 1,
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    },
+  });
+}
+
+async function openDisplaySystemAudioStream() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    return null;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        suppressLocalAudioPlayback: true,
+      },
+      systemAudio: "include",
+      preferCurrentTab: false,
+    });
+    const audioTracks = stream.getAudioTracks();
+    stream.getVideoTracks().forEach((track) => track.stop());
+    if (!audioTracks.length) {
+      stopMediaStream(stream);
+      return null;
+    }
+    return new MediaStream(audioTracks);
+  } catch {
+    return null;
+  }
+}
+
+function appendChannelSamples(channel, samples) {
+  for (let index = 0; index < samples.length; index += 1) {
+    channel.samples.push(samples[index]);
+  }
+  while (channel.samples.length >= micChunkSamples) {
+    sendChannelSamples(channel, channel.samples.splice(0, micChunkSamples));
+  }
+}
+
+function sendChannelSamples(channel, samples) {
+  if (!state.socket || state.socket.readyState !== WebSocket.OPEN || samples.length === 0) return;
+  if (!channel.speechStarted) {
+    if (!hasVoiceEnergy(samples)) {
+      if (!channel.waitingNotice) {
+        appendEvent(
+          channel.key === "loopback" ? "会议声" : "麦克风",
+          channel.key === "loopback"
+            ? "会议声通道已开启，等待对方说话；期间会发送低音量保活。"
+            : "麦克风已开启，等待你说话；期间会发送低音量保活。"
+        );
+        channel.waitingNotice = true;
+      }
+    } else {
+      channel.speechStarted = true;
+      channel.waitingNotice = false;
+      appendEvent(
+        channel.key === "loopback" ? "会议声" : "麦克风",
+        channel.key === "loopback" ? "检测到会议声音，开始转写对方发言。" : "检测到你的声音，开始转写。"
+      );
+    }
+  }
+  const startMs = Math.round((channel.sentSamples / micSampleRate) * 1000);
+  const endMs = Math.round(((channel.sentSamples + samples.length) / micSampleRate) * 1000);
+  const speaker = state.micDualCapture ? channel.speaker : state.currentSpeaker;
+  const payload = {
+    type: "audio_chunk",
+    session_id: state.interview.id,
+    seq: state.seq,
+    audio: samplesToBase64Pcm16(samples),
+    speaker,
+    channel: state.micDualCapture ? channel.key : speaker,
+    format: "pcm16",
+    sample_rate_hz: micSampleRate,
+    channels: 1,
+    start_ms: startMs,
+    end_ms: endMs,
+    is_final: true,
+    confidence: 0.95,
+    ...eventQuestionMeta(),
+  };
+  if (!sendLiveSocketPayload(payload, channel.key === "loopback" ? "会议声" : "麦克风")) {
+    stopMicCapture({ flush: false });
+    return;
+  }
+  state.seq += 1;
+  channel.sentSamples += samples.length;
+}
+
+function wireCaptureChannel({ key, speaker, stream }) {
+  const AudioContextCtor = audioContextConstructor();
+  const context = new AudioContextCtor();
+  const source = context.createMediaStreamSource(stream);
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  const channel = {
+    key,
+    speaker,
+    stream,
+    context,
+    source,
+    processor,
+    samples: [],
+    sentSamples: 0,
+    speechStarted: false,
+    waitingNotice: false,
+  };
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    const output = event.outputBuffer.getChannelData(0);
+    output.fill(0);
+    appendChannelSamples(channel, downsampleBuffer(input, context.sampleRate, micSampleRate));
+  };
+  source.connect(processor);
+  processor.connect(context.destination);
+  state.micChannels.push(channel);
+  return channel;
+}
+
 async function startMicCapture() {
   if (state.interviewEnded) {
     appendEvent("麦克风", "面试已结束，请重置后创建新的面试。", "red");
@@ -133,6 +245,7 @@ async function startMicCapture() {
   const micStartToken = nextMicStartToken();
   state.micStarting = true;
   state.micError = "";
+  state.micDualCapture = false;
   setControls();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     state.micError = "麦克风不可用";
@@ -141,32 +254,61 @@ async function startMicCapture() {
     setControls();
     return;
   }
-  const AudioContextCtor = audioContextConstructor();
-  if (!AudioContextCtor) {
+  if (!audioContextConstructor()) {
     state.micError = "音频采集不可用";
-    appendEvent("麦克风", "当前浏览器不支持 Web Audio，无法采集和转换麦克风音频。", "red");
+    appendEvent("麦克风", "当前浏览器不支持 Web Audio，无法采集和转换音频。", "red");
     state.micStarting = false;
     setControls();
     return;
   }
+  let micStream = null;
+  let meetingStream = null;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    micStream = await openMicStream();
     if (!micStartStillCurrent(micStartToken)) {
-      stopMediaStream(stream);
+      stopMediaStream(micStream);
       appendEvent("麦克风", "麦克风启动已取消：实时通道已断开或面试已重置。", "red");
       return;
     }
-    state.micStream = stream;
-    state.micContext = new AudioContextCtor();
-    state.micSource = state.micContext.createMediaStreamSource(state.micStream);
-    state.micProcessor = state.micContext.createScriptProcessor(4096, 1, 1);
+    const loopback = await findLoopbackDevice();
+    if (loopback) {
+      meetingStream = await openLoopbackStream(loopback);
+      appendEvent(
+        "双声道",
+        `已接上虚拟声卡「${escapeHtml(loopback.label || "loopback")}」：麦克风=你，会议声=对方。`
+      );
+    } else {
+      meetingStream = await openDisplaySystemAudioStream();
+      if (meetingStream) {
+        appendEvent("双声道", "已用屏幕共享采集系统音频：麦克风=你，会议声=对方。");
+      }
+    }
+    if (!micStartStillCurrent(micStartToken)) {
+      stopMediaStream(micStream);
+      stopMediaStream(meetingStream);
+      appendEvent("麦克风", "麦克风启动已取消：实时通道已断开或面试已重置。", "red");
+      return;
+    }
+
+    state.micChannels = [];
+    wireCaptureChannel({ key: "mic", speaker: "interviewer", stream: micStream });
+    if (meetingStream) {
+      wireCaptureChannel({ key: "loopback", speaker: "candidate", stream: meetingStream });
+      state.micDualCapture = true;
+      state.currentSpeaker = "interviewer";
+    } else {
+      state.micDualCapture = false;
+      appendEvent(
+        "双声道",
+        "未找到会议声输入。macOS 可装 BlackHole/Loopback，把会议输出打到虚拟声卡后再点开始；当前仍可用手动切换说话人。"
+      );
+    }
+
+    // Keep legacy single-path fields in sync for status helpers that still check them.
+    state.micStream = micStream;
+    state.micContext = state.micChannels[0]?.context || null;
+    state.micSource = state.micChannels[0]?.source || null;
+    state.micProcessor = state.micChannels[0]?.processor || null;
     state.micSamples = [];
     state.micSentSamples = 0;
     state.micSpeechStarted = false;
@@ -174,26 +316,25 @@ async function startMicCapture() {
     state.micError = "";
     state.micStarting = false;
     state.micRecording = true;
-    state.micProcessor.onaudioprocess = (event) => {
-      const input = event.inputBuffer.getChannelData(0);
-      const output = event.outputBuffer.getChannelData(0);
-      output.fill(0);
-      appendMicSamples(downsampleBuffer(input, state.micContext.sampleRate, micSampleRate));
-    };
-    state.micSource.connect(state.micProcessor);
-    state.micProcessor.connect(state.micContext.destination);
-    // Labelling is a manual switch, and mislabelling silently poisons the
-    // transcript, the probe trigger and the report, so it is stated every time
-    // capture starts rather than left to the small pill in the toolbar.
-    appendEvent(
-      "麦克风",
-      state.currentSpeaker === "interviewer"
-        ? "麦克风已开启，当前音频会标记为<strong>面试官</strong>发言；候选人开口前请切回候选人。"
-        : "麦克风已开启，当前音频会标记为<strong>候选人</strong>发言；自己提问时请切到面试官。"
-    );
+
+    if (state.micDualCapture) {
+      appendEvent(
+        "麦克风",
+        "双声道已开启：你的麦克风记为<strong>面试官</strong>，会议扬声器记为<strong>候选人</strong>。"
+      );
+    } else {
+      appendEvent(
+        "麦克风",
+        state.currentSpeaker === "interviewer"
+          ? "麦克风已开启，当前音频会标记为<strong>面试官</strong>发言；候选人开口前请切回候选人。"
+          : "麦克风已开启，当前音频会标记为<strong>候选人</strong>发言；自己提问时请切到面试官。"
+      );
+    }
     setControls();
   } catch (error) {
     if (!micStartStillCurrent(micStartToken)) return;
+    stopMediaStream(micStream);
+    stopMediaStream(meetingStream);
     const reason = micErrorMessage(error);
     state.micError = reason;
     appendEvent("麦克风", escapeHtml(reason), "red");
@@ -217,6 +358,9 @@ function micErrorMessage(error) {
   if (name === "NotReadableError" || name === "TrackStartError") {
     return "麦克风被其他程序占用，或系统暂时无法读取。";
   }
+  if (name === "OverconstrainedError") {
+    return "虚拟声卡不可用：请确认 BlackHole/Loopback 仍在线，或改用屏幕共享系统声音。";
+  }
   return `麦克风启动失败：${error}`;
 }
 
@@ -225,23 +369,28 @@ function stopMicCapture(options = {}) {
     nextMicStartToken();
     state.micStarting = false;
   }
-  if (!state.micRecording && !state.micStream && !state.micContext) {
+  const channels = state.micChannels || [];
+  if (!state.micRecording && !channels.length && !state.micStream && !state.micContext) {
     setControls();
     return;
   }
-  if (options.flush !== false && state.micSamples.length > 0) {
-    sendMicSamples(state.micSamples.splice(0, state.micSamples.length));
+  for (const channel of channels) {
+    if (options.flush !== false && channel.samples.length > 0) {
+      sendChannelSamples(channel, channel.samples.splice(0, channel.samples.length));
+    }
+    if (channel.processor) {
+      channel.processor.disconnect();
+      channel.processor.onaudioprocess = null;
+    }
+    if (channel.source) channel.source.disconnect();
+    stopMediaStream(channel.stream);
+    if (channel.context && channel.context.state !== "closed") {
+      channel.context.close().catch(() => {});
+    }
   }
+  state.micChannels = [];
+  state.micDualCapture = false;
   state.micRecording = false;
-  if (state.micProcessor) {
-    state.micProcessor.disconnect();
-    state.micProcessor.onaudioprocess = null;
-  }
-  if (state.micSource) state.micSource.disconnect();
-  if (state.micStream) stopMediaStream(state.micStream);
-  if (state.micContext && state.micContext.state !== "closed") {
-    state.micContext.close().catch(() => {});
-  }
   state.micStream = null;
   state.micContext = null;
   state.micSource = null;
@@ -252,12 +401,27 @@ function stopMicCapture(options = {}) {
   setControls();
 }
 
+// Compatibility wrappers used by older single-path helpers/tests.
+function appendMicSamples(samples) {
+  const channel = state.micChannels[0];
+  if (!channel) return;
+  appendChannelSamples(channel, samples);
+}
+
+function sendMicSamples(samples) {
+  const channel = state.micChannels[0];
+  if (!channel) return;
+  sendChannelSamples(channel, samples);
+}
+
 
 export {
   appendMicSamples,
   audioContextConstructor,
   downsampleBuffer,
+  findLoopbackDevice,
   hasVoiceEnergy,
+  isLoopbackDevice,
   micErrorMessage,
   micStartStillCurrent,
   nextMicStartToken,

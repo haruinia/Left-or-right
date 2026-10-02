@@ -151,7 +151,7 @@ FALSE_FINALITY_VALUES = {
 }
 TRUE_FINALITY_VALUES = {"1", "true", "yes", "on", "final", "finalized", "complete", "completed"}
 ALIYUN_AUDIO_CONTEXT_LIMIT = 200
-STREAMING_ASR_PROVIDERS = {"aliyun_ws", "aliyun_nls_ws"}
+STREAMING_ASR_PROVIDERS = {"aliyun_ws", "aliyun_nls_ws", "sherpa_onnx"}
 LOCAL_DEV_ORIGIN_REGEX = r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
 
 
@@ -696,6 +696,32 @@ async def check_asr_readiness() -> dict[str, str | bool]:
             "ok": False,
             "mode": "incomplete",
             "message": "阿里云 NLS ASR 缺少 Token，请配置固定 Token 或 AK 自动 Token。",
+        }
+    if status.asr_provider == "sherpa_onnx":
+        try:
+            import sherpa_onnx  # noqa: F401
+        except ImportError:
+            return {
+                "ok": False,
+                "mode": "missing_dependency",
+                "message": '本地 ASR 依赖缺失，请执行：pip install -e ".[sherpa]"',
+            }
+        if not status.sherpa_asr_model_ready:
+            return {
+                "ok": False,
+                "mode": "incomplete",
+                "message": (
+                    "本地 sherpa-onnx 模型未就绪。"
+                    "请运行：python scripts/download_sherpa_asr_model.py"
+                ),
+            }
+        return {
+            "ok": True,
+            "mode": "configured",
+            "message": (
+                f"本地 sherpa-onnx ASR 就绪（{status.sherpa_asr_provider} / "
+                f"{status.sherpa_asr_sample_rate} Hz）。"
+            ),
         }
     return {"ok": False, "mode": "unknown", "message": "ASR provider 状态未知。"}
 

@@ -410,6 +410,10 @@ def get_asr_engine() -> ASREngine:
         from services.asr_service.nls_engine import AliyunNLSWSASREngine
 
         return AliyunNLSWSASREngine()
+    if settings.asr_provider == "sherpa_onnx":
+        from services.asr_service.sherpa_engine import SherpaOnnxASREngine
+
+        return SherpaOnnxASREngine()
     if settings.asr_provider == "http":
         return HTTPASREngine()
     return StubASREngine()

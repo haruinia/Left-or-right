@@ -32,9 +32,18 @@ function syncSpeakerControls() {
   speakerInterviewer.classList.toggle("active", state.currentSpeaker === "interviewer");
   speakerCandidate.setAttribute("aria-pressed", state.currentSpeaker === "candidate");
   speakerInterviewer.setAttribute("aria-pressed", state.currentSpeaker === "interviewer");
+  const dual = Boolean(state.micDualCapture && state.micRecording);
+  speakerCandidate.hidden = dual;
+  speakerInterviewer.hidden = dual;
+  const group = speakerCandidate.closest(".speaker-switch");
+  if (group) group.hidden = dual;
 }
 
 function setCurrentSpeaker(speaker) {
+  if (state.micDualCapture && state.micRecording) {
+    appendEvent("说话人", "双声道采集中会自动区分：麦克风=面试官，会议声=候选人。");
+    return;
+  }
   const next = speaker === "interviewer" ? "interviewer" : "candidate";
   const changedMidCapture = state.micRecording && next !== state.currentSpeaker;
   state.currentSpeaker = next;
@@ -201,8 +210,10 @@ function setControls() {
   reconnectSocket.disabled = !state.interview || connected || connecting || state.interviewEnded;
   manualProbe.disabled = !textReady;
   endInterview.disabled = !active;
-  speakerCandidate.disabled = !state.interview || state.interviewEnded || state.endingInterview;
-  speakerInterviewer.disabled = !state.interview || state.interviewEnded || state.endingInterview;
+  speakerCandidate.disabled =
+    !state.interview || state.interviewEnded || state.endingInterview || state.micDualCapture;
+  speakerInterviewer.disabled =
+    !state.interview || state.interviewEnded || state.endingInterview || state.micDualCapture;
   loadSampleButton.disabled =
     state.documentParsingCount > 0 || state.preparingInterview || Boolean(state.interview);
   prepareInterview.disabled =
@@ -238,7 +249,11 @@ function setControls() {
   } else if (state.micRecording) {
     setPill(
       micStatus,
-      state.currentSpeaker === "interviewer" ? "采集中 · 记为面试官" : "采集中 · 记为候选人",
+      state.micDualCapture
+        ? "双声道 · 麦=我 / 会议=对方"
+        : state.currentSpeaker === "interviewer"
+          ? "采集中 · 记为面试官"
+          : "采集中 · 记为候选人",
       "live"
     );
   } else if (connecting) {
@@ -328,12 +343,18 @@ function controlHintText(connected, connecting) {
   if (state.interviewEnded) return "面试已结束。请重置后创建新的面试。";
   if (state.endingInterview) return "正在结束面试并生成评分报告，请等待结果。";
   if (state.micStarting) return "麦克风启动中。请在浏览器权限弹窗中允许麦克风，并等待初始化完成。";
-  if (state.micRecording) return "麦克风采集中。可以停止麦克风，或结束面试生成评分报告。";
+  if (state.micRecording) {
+    return state.micDualCapture
+      ? "双声道采集中：麦克风是你，会议扬声器是对方。无需手动切换说话人。"
+      : "麦克风采集中。可以停止麦克风，或结束面试生成评分报告。";
+  }
   if (state.micError) return `${state.micError} 可以修复后再次点击开始麦克风。`;
   if (connected && !textTurnReady()) {
     return "实时通道已连接。请填写当前问题和候选人回答后发送文字回答，或直接开始麦克风。";
   }
-  if (connected) return "实时通道已连接。可以发送文字回答，或点击开始麦克风进行语音转写。";
+  if (connected) {
+    return "实时通道已连接。建议用 BlackHole/Loopback 分开你和会议声；也可先单麦并手动切换说话人。";
+  }
   if (connecting) return "实时通道连接中，请稍候。连接成功后按钮会自动启用。";
   if (state.interview) return "实时通道未连接。请点击重连通道，或重置后重新创建面试。";
   return "请先创建实时面试并等待实时通道连接。";

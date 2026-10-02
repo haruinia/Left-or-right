@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     memory_repo_max_repos: int = Field(default=20, ge=1)
     memory_recall_limit: int = Field(default=3, ge=1, le=20)
     memory_recall_min_score: float = Field(default=0.12, ge=0.0, le=1.0)
-    asr_provider: Literal["stub", "http", "aliyun_ws", "aliyun_nls_ws"] = "stub"
+    asr_provider: Literal["stub", "http", "aliyun_ws", "aliyun_nls_ws", "sherpa_onnx"] = "stub"
     asr_base_url: str = ""
     asr_api_path: str = "/transcribe"
     asr_api_key: str = ""
@@ -71,6 +71,17 @@ class Settings(BaseSettings):
     aliyun_ak_secret: str = ""
     aliyun_nls_token_endpoint: str = "https://nls-meta.cn-shanghai.aliyuncs.com/"
     aliyun_nls_token_region: str = "cn-shanghai"
+    # Local streaming ASR via sherpa-onnx (optional extra: pip install -e ".[sherpa]").
+    sherpa_asr_model_dir: str = "models/sherpa-onnx-streaming-paraformer-bilingual-zh-en"
+    sherpa_asr_sample_rate: int = Field(default=16000, gt=0)
+    sherpa_asr_num_threads: int = Field(default=2, ge=1, le=16)
+    sherpa_asr_provider: str = "cpu"
+    sherpa_asr_use_int8: bool = True
+    # Endpoint rule2 is the practical sentence end when speech has been heard.
+    # 0.8s is snappier than the sherpa default 1.2s for interview turn-taking.
+    sherpa_asr_rule1_min_trailing_silence: float = Field(default=2.4, ge=0.0)
+    sherpa_asr_rule2_min_trailing_silence: float = Field(default=0.8, ge=0.0)
+    sherpa_asr_rule3_min_utterance_length: float = Field(default=20.0, ge=0.0)
     speaker_mode: Literal["manual", "dual_channel", "http_diarization"] = "manual"
     dialogue_silence_close_ms: int = Field(default=2500, ge=0)
     probe_min_answer_chars: int = Field(default=20, ge=0)
@@ -156,6 +167,8 @@ class Settings(BaseSettings):
             raise ValueError("ASR_AUTH_HEADER is required when ASR_API_KEY is configured")
         if self.asr_provider == "aliyun_ws" and not self.aliyun_asr_api_key.strip():
             raise ValueError("ASR_PROVIDER=aliyun_ws requires ALIYUN_ASR_API_KEY")
+        if self.asr_provider == "sherpa_onnx" and not self.sherpa_asr_model_dir.strip():
+            raise ValueError("ASR_PROVIDER=sherpa_onnx requires SHERPA_ASR_MODEL_DIR")
         if self.asr_provider == "aliyun_nls_ws":
             if not self.aliyun_nls_app_key.strip():
                 raise ValueError("ASR_PROVIDER=aliyun_nls_ws requires ALIYUN_NLS_APP_KEY")

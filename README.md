@@ -145,17 +145,29 @@ python scripts/check_llm.py
 
 ### 实时语音（ASR）
 
-默认 `ASR_PROVIDER=stub` 只验证链路。要真实转写，三选一：
+默认 `ASR_PROVIDER=stub` 只验证链路。要真实转写：
 
 | Provider | 适用 |
 |---|---|
+| `ASR_PROVIDER=sherpa_onnx` | **推荐本地实时**：sherpa-onnx 流式 Paraformer，无云端往返 |
 | `ASR_PROVIDER=http` | 任意 OpenAI 风格的 HTTP ASR 服务，响应字段路径可配 |
 | `ASR_PROVIDER=aliyun_ws` | 阿里云 DashScope Paraformer 实时 WebSocket（需百炼 API Key） |
 | `ASR_PROVIDER=aliyun_nls_ws` | 阿里云智能语音交互 NLS WebSocket（用 AppKey + Token，或 AccessKey 自动签发 Token） |
 
+本地 sherpa 一次性准备：
+
+```bash
+pip install -e ".[sherpa]"
+python scripts/download_sherpa_asr_model.py
+export ASR_PROVIDER=sherpa_onnx
+python scripts/run_gateway.py
+```
+
 对应冒烟脚本：`scripts/check_aliyun_asr.py`、`scripts/check_aliyun_nls_asr.py`、`scripts/create_aliyun_nls_token.py`。
 
-> 实时接口不返回说话人分离，演示环境用「面试官 / 候选人」按钮或双设备角色链接区分；如需真实声纹分离，配置 `SPEAKER_DIARIZATION_PROVIDER=http`。
+> **人声分离**：点「开始采集」时，若检测到 BlackHole / Loopback 等虚拟声卡，会自动双声道——麦克风记为面试官（你），会议扬声器记为候选人（对方）。没有虚拟声卡时，也可在屏幕共享里勾选系统声音；否则退回单麦，并可用手动切换说话人。实时接口本身不做声纹分离。
+
+> 如需 HTTP 声纹分离服务，配置 `SPEAKER_DIARIZATION_PROVIDER=http`。
 
 ---
 
