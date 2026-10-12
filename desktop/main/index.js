@@ -17,6 +17,9 @@ let failedHotkeys = [];
 let currentBindings = BINDINGS;
 let lastHealthy = false;
 let permissionPaneOpened = false;
+let lastScreenshotTime = 0;
+
+let screenshotDebounce = null;
 
 const SCREEN_RECORDING_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
 
@@ -115,6 +118,13 @@ function restoreWindow(wasVisible) {
 }
 
 async function attachScreenshot({ interactive }) {
+  const now = Date.now();
+  if (now - lastScreenshotTime < 500) {
+    sendCaptureError("截图间隔太短，请稍后再试");
+    return;
+  }
+  lastScreenshotTime = now;
+
   const wasVisible = await hideWindowForCapture();
   try {
     const shot = await captureScreenshot({ interactive });
@@ -172,17 +182,7 @@ function buildTray(gatewayHealthy = lastHealthy) {
       { label: '紧凑/展开', click: () => toggleCompact(win) },
       { type: 'separator' },
       { label: '共享保护：已开启（仅 macOS 生效）', enabled: false },
-      ...(() => {
-        if (process.platform !== 'darwin') return [{ label: '截图：仅 macOS', enabled: false }];
-        const status = screenAccessStatus();
-        if (status === 'denied') {
-          return [{ label: '截图：缺少屏幕录制权限，点击去授权', click: () => openScreenRecordingSettings() }];
-        }
-        return [{
-          label: status === 'granted' ? '截图：可用' : '截图：以实际截图结果为准',
-          enabled: false,
-        }];
-      })(),
+      ...buildPermissionsMenu(),
       ...hotkeyItems,
       { type: 'separator' },
       { label: '打开设置', click: () => shell.openExternal(`${config.gatewayUrl}/settings`) },
@@ -244,7 +244,9 @@ app.whenReady().then(async () => {
   refreshUiHotkeys();
   setInterval(refreshUiHotkeys, 4000);
 
-  // The embedded cockpit captures the interviewer's mic for live transcription.
+  win.on('focus', () => {
+    buildTray();
+  });
   const { session } = require('electron');
   const { RENDERER_INDEX } = require('./window');
   const rendererUrl = pathToFileURL(RENDERER_INDEX).href;

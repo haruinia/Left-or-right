@@ -326,6 +326,23 @@ function applyHotkeyHints(cfg) {
   warning.textContent = warning.hidden ? "" : "部分按键被系统或其他应用占用，请到设置更换。";
 }
 
+function cycleTheme() {
+  const themes = ["light", "dark", "transparent-white", "transparent-black"];
+  const current = document.documentElement.dataset.theme || "light";
+  const nextIndex = (themes.indexOf(current) + 1) % themes.length;
+  const nextTheme = themes[nextIndex];
+  document.documentElement.dataset.theme = nextTheme;
+  if (window.cockpit?.setConfig) window.cockpit.setConfig({ theme: nextTheme });
+}
+
+function applyTheme(cfg) {
+  const theme = cfg.theme || "light";
+  document.documentElement.dataset.theme = theme;
+  document.querySelector("#liuwaTheme").textContent = theme === "light" ? "浅色" :
+    theme === "dark" ? "深色" :
+    theme === "transparent-white" ? "透明白字" : "透明黑字";
+}
+
 function wireDesktop(cockpit) {
   document.documentElement.classList.add("liuwa-host");
   document.body.classList.add("liuwa-shell");
@@ -333,6 +350,7 @@ function wireDesktop(cockpit) {
   cockpit.onHotkeys?.(applyHotkeyHints);
   cockpit.onNewQuestion?.(newQuestion);
   cockpit.onClearShots?.(clearShots);
+  cockpit.onTheme?.(applyTheme);
   if (typeof cockpit.onCapture === "function") {
     cockpit.onCapture((payload) => {
       if (!payload || !payload.data) return;
@@ -362,10 +380,13 @@ function wireDesktop(cockpit) {
   if (typeof cockpit.getConfig === "function") {
     cockpit.getConfig().then((cfg) => {
       applyHotkeyHints(cfg || {});
+      applyTheme(cfg || {});
       if (cfg && cfg.gatewayApiKey) state.gatewayApiKey = cfg.gatewayApiKey;
     });
   }
 }
+
+window.cycleTheme = cycleTheme;
 
 shots?.addEventListener("click", (event) => {
   const id = event.target.closest("[data-remove]")?.dataset.remove;

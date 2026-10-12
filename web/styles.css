@@ -1924,20 +1924,23 @@ body.settings-page {
   font-family: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
 }
 
-.liuwa-orb {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 12px;
-  width: min(440px, calc(100% - 24px));
-  height: min(720px, calc(100dvh - 24px));
-  margin: 12px auto;
-  padding: 16px 16px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.32);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), 0 16px 56px rgba(38, 56, 76, 0.08);
-  backdrop-filter: blur(22px) saturate(115%);
-  -webkit-backdrop-filter: blur(22px) saturate(115%);
+html.transparent-black {
+  --bg: transparent;
+  color: #000;
+  text-shadow: 0 0 1px rgba(255,255,255,0.15);
+}
+
+html.transparent-white {
+  --bg: transparent;
+  color: #fff;
+  text-shadow: 0 0 1px rgba(0,0,0,0.15);
+}
+
+.transparent .liuwa-orb {
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .liuwa-brand {
