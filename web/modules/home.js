@@ -64,10 +64,7 @@ function renderPending() {
   syncEmpty();
 }
 
-function addShot(dataUrl) {
-  if (streaming) {
-    setStatus("请等本次回答结束后再添加截图。");
-    return;
+  if (streaming || document.body.classList.contains("is-busy")) {
   }
   if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) {
     setStatus("请选择 PNG、JPEG、WebP 或 GIF 图片。");
