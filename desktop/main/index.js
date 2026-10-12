@@ -52,7 +52,7 @@ function hotkeyHandlers() {
     moveRight: () => moveWindow(win, 32, 0),
 
     captureRegion: () => attachScreenshot({ interactive: true }),
-    captureScreen: () => attachScreenshot({ interactive: false }),
+    captureScreen: () => attachScreenshot({ interactive: true }),
     sendChat: () => sendChat(),
     newQuestion: () => {
       if (win && !win.isDestroyed()) win.webContents.send('liuwa:new-question');
@@ -119,7 +119,7 @@ function restoreWindow(wasVisible) {
 
 async function attachScreenshot({ interactive }) {
   const now = Date.now();
-  if (now - lastScreenshotTime < 500) {
+  if (now - lastScreenshotTime < 800) {
     sendCaptureError("截图间隔太短，请稍后再试");
     return;
   }
