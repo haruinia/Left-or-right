@@ -2162,6 +2162,25 @@ body.settings-page {
   font-size: 12px;
 }
 
+.liuwa-stop {
+  justify-self: end;
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+}
+.liuwa-stop:hover { background: var(--accent); color: #fff; }
+
+.liuwa-turn.is-stopped p {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+
 html.liuwa-host,
 html.liuwa-host body,
 body.liuwa-shell {

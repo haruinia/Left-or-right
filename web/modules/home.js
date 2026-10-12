@@ -11,6 +11,17 @@ const hintCapture = document.querySelector("#hintCapture");
 const settingsLink = document.querySelector("#liuwaSettings");
 const presetNode = document.querySelector("#liuwaPreset");
 const modelNode = document.querySelector("#liuwaModel");
+const stopBtn = document.querySelector("#liuwaStop");
+
+// Follow-tail: only auto-scroll while the user is already near the bottom. Once they
+// scroll up to read, new tokens must not yank them back down (Gank's 24px rule).
+let stickBottom = true;
+thread?.addEventListener("scroll", () => {
+  stickBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 24;
+});
+function followTail() {
+  if (stickBottom && thread) thread.scrollTop = thread.scrollHeight;
+}
 
 const pending = [];
 const history = [];
@@ -145,7 +156,7 @@ function appendAssistantTurn() {
   return body;
 }
 
-async function readSse(response, onDelta) {
+async function readSse(response, onDelta, signal) {
   if (!response.body) {
     throw new Error("浏览器无法读取流式响应");
   }
@@ -153,22 +164,41 @@ async function readSse(response, onDelta) {
   const decoder = new TextDecoder();
   let buffer = "";
   let completed = false;
-  while (!completed) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const chunks = buffer.split("\n\n");
-    buffer = chunks.pop() || "";
-    for (const chunk of chunks) {
-      const line = chunk.split("\n").find((item) => item.startsWith("data:"));
-      if (!line) continue;
-      const payload = JSON.parse(line.slice(5).trim() || "{}");
-      if (payload.error) throw new Error(payload.error);
-      if (payload.delta) onDelta(payload.delta);
-      if (payload.done) completed = true;
+  try {
+    while (!completed) {
+      if (signal?.aborted) return;
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const chunks = buffer.split("\n\n");
+      buffer = chunks.pop() || "";
+      for (const chunk of chunks) {
+        const line = chunk.split("\n").find((item) => item.startsWith("data:"));
+        if (!line) continue;
+        const payload = JSON.parse(line.slice(5).trim() || "{}");
+        if (payload.error) throw new Error(payload.error);
+        if (payload.delta) onDelta(payload.delta);
+        if (payload.done) completed = true;
+      }
     }
+  } catch (error) {
+    // An abort surfaces as an AbortError here; keep whatever was decoded so far and
+    // let the caller decide whether to preserve it instead of dropping the turn.
+    if (signal?.aborted || error?.name === "AbortError") return;
+    throw error;
   }
   if (!completed) throw new Error("回答中断，请重新发送。");
+}
+
+let activeAbort = null;
+
+// Preserve whatever the model produced before a stop/error and mark the turn, so the
+// user can keep reading the partial answer and continue from it (Gank keeps partial
+// responses instead of dropping the whole turn).
+function finalizeStopped(streamNode, reply, assistantTurn) {
+  streamNode.textContent = reply + (reply && !/\n$/.test(reply) ? "\n" : "") + "（已中断）";
+  assistantTurn.classList.remove("is-stream");
+  assistantTurn.classList.add("is-stopped");
 }
 
 async function sendChat() {
@@ -182,21 +212,45 @@ async function sendChat() {
     return;
   }
   streaming = true;
+  activeAbort = new AbortController();
+  const timeoutGuard = setTimeout(() => activeAbort?.abort(), 180_000);
   document.body.classList.add("is-busy");
   setStatus("正在分析题目…");
   note.disabled = true;
   shots.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  if (stopBtn) stopBtn.hidden = false;
   const userTurn = appendUserTurn(unsent, text, images.length - unsent.length);
   const streamNode = appendAssistantTurn();
   const assistantTurn = streamNode.parentElement;
   syncEmpty();
-  thread.scrollTop = thread.scrollHeight;
+  stickBottom = true;
+  followTail();
   let reply = "";
+  let flushTimer = null;
+  const flush = () => {
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    streamNode.textContent = reply;
+    followTail();
+  };
+  const commitTurn = () => {
+    pending.forEach((shot) => { shot.sent = true; });
+    note.value = "";
+    renderPending();
+    history.push({ role: "user", text: text || "请继续讲解上一道截图题目" });
+    history.push({ role: "assistant", text: reply });
+  };
+  // Coalesce tokens: flush at a sentence boundary at once, otherwise on a 90ms timer.
+  // This keeps the cursor responsive without re-laying-out the whole bubble per token.
+  const onDelta = (delta) => {
+    reply += delta;
+    if (/[。！？!?；;]\s*$|\n$/.test(reply)) { flush(); return; }
+    if (!flushTimer) flushTimer = setTimeout(flush, 90);
+  };
   try {
     await ensureGateway();
     const response = await fetch(`${state.apiOrigin}/api/chat/stream`, {
       method: "POST",
-      signal: AbortSignal.timeout(180_000),
+      signal: activeAbort.signal,
       headers: authHeaders({
         "content-type": "application/json",
         accept: "text/event-stream",
@@ -218,30 +272,42 @@ async function sendChat() {
       }
       throw new Error(detail || `发送失败，请检查服务后重试（${response.status}）。`);
     }
-    await readSse(response, (delta) => {
-      reply += delta;
-      streamNode.textContent = reply;
-      thread.scrollTop = thread.scrollHeight;
-    });
+    await readSse(response, onDelta, activeAbort.signal);
+    flush();
     assistantTurn.classList.remove("is-stream");
-    pending.forEach((shot) => { shot.sent = true; });
-    note.value = "";
-    renderPending();
-    history.push({ role: "user", text: text || "请继续讲解上一道截图题目" });
-    history.push({ role: "assistant", text: reply });
+    commitTurn();
     setStatus(pending.length ? "这些截图会附在后续追问里，新对话时清掉。" : "");
   } catch (error) {
-    userTurn.remove();
-    assistantTurn.remove();
-    const message = error && error.message ? error.message : String(error);
-    setStatus(`${message} 图片和问题已保留，可再次发送。`);
+    clearTimeout(flushTimer);
+    flush();
+    const aborted = activeAbort?.signal.aborted || error?.name === "AbortError";
+    if (aborted && reply.trim()) {
+      // Keep the partial answer; user stopped deliberately, the question was real.
+      finalizeStopped(streamNode, reply, assistantTurn);
+      commitTurn();
+      setStatus("已停止，保留已生成的部分，可继续追问。");
+    } else {
+      // Nothing useful came back — drop the turn so it can be resent cleanly.
+      userTurn.remove();
+      assistantTurn.remove();
+      syncEmpty();
+      const message = aborted ? "已停止。" : (error && error.message ? error.message : String(error));
+      setStatus(aborted ? message : `${message} 图片和问题已保留，可再次发送。`);
+    }
   } finally {
     streaming = false;
+    clearTimeout(timeoutGuard);
+    activeAbort = null;
     document.body.classList.remove("is-busy");
     if (assistantTurn.isConnected) assistantTurn.classList.remove("is-stream");
+    if (stopBtn) stopBtn.hidden = true;
     note.disabled = false;
     renderPending();
   }
+}
+
+function stopChat() {
+  if (streaming && activeAbort) activeAbort.abort();
 }
 
 function applyHotkeyHints(cfg) {
@@ -304,6 +370,13 @@ function wireDesktop(cockpit) {
 shots?.addEventListener("click", (event) => {
   const id = event.target.closest("[data-remove]")?.dataset.remove;
   if (id && !streaming) removeShot(id);
+});
+
+stopBtn?.addEventListener("click", stopChat);
+stopBtn?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  stopChat();
 });
 
 note?.addEventListener("input", syncEmpty);
