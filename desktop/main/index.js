@@ -2,7 +2,7 @@
 
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
-const { app, ipcMain, Menu, Tray, nativeImage, shell, nativeTheme } = require('electron');
+const { app, ipcMain, Menu, Tray, nativeImage, shell, nativeTheme, systemPreferences } = require('electron');
 const { loadConfig } = require('./config');
 const { createWindow, moveWindow, toggleCompact, toggleVisible, beginHoldInteract, setClickThrough, isInteractive } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
@@ -16,6 +16,23 @@ let tray = null;
 let failedHotkeys = [];
 let currentBindings = BINDINGS;
 let lastHealthy = false;
+let permissionPaneOpened = false;
+
+const SCREEN_RECORDING_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
+
+function openScreenRecordingSettings() {
+  shell.openExternal(SCREEN_RECORDING_PANE).catch(() => {
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_PrivacyAccessibility');
+  });
+}
+
+function screenAccessStatus() {
+  try {
+    return systemPreferences.getMediaAccessStatus('screen');
+  } catch {
+    return 'unknown';
+  }
+}
 
 function hotkeyHandlers() {
   return {
@@ -108,7 +125,24 @@ async function attachScreenshot({ interactive }) {
     });
   } catch (error) {
     restoreWindow(wasVisible);
-    sendCaptureError(String(error.message || error));
+    const raw = String(error.message || error);
+    // Unpackaged builds often report 'not-determined' even when the host app is
+    // authorized, so only 'denied' is trusted on its own; the screencapture stderr
+    // message is the reliable missing-permission signal.
+    const permissionDenied =
+      raw.includes('could not create image') || screenAccessStatus() === 'denied';
+    if (permissionDenied) {
+      if (!permissionPaneOpened) {
+        permissionPaneOpened = true;
+        openScreenRecordingSettings();
+      }
+      sendCaptureError(
+        '缺少屏幕录制权限：已打开「系统设置 > 隐私与安全性 > 屏幕录制」，'
+        + '请给启动左右的应用（终端 / Qoder 等；打包安装后是「左右」本身）打开开关，再按一次截图。'
+      );
+      return;
+    }
+    sendCaptureError(raw);
   }
 }
 
@@ -138,10 +172,21 @@ function buildTray(gatewayHealthy = lastHealthy) {
       { label: '紧凑/展开', click: () => toggleCompact(win) },
       { type: 'separator' },
       { label: '共享保护：已开启（仅 macOS 生效）', enabled: false },
-      { label: `截图：${process.platform === 'darwin' ? '可用' : '仅 macOS'}`, enabled: false },
+      ...(() => {
+        if (process.platform !== 'darwin') return [{ label: '截图：仅 macOS', enabled: false }];
+        const status = screenAccessStatus();
+        if (status === 'denied') {
+          return [{ label: '截图：缺少屏幕录制权限，点击去授权', click: () => openScreenRecordingSettings() }];
+        }
+        return [{
+          label: status === 'granted' ? '截图：可用' : '截图：以实际截图结果为准',
+          enabled: false,
+        }];
+      })(),
       ...hotkeyItems,
       { type: 'separator' },
       { label: '打开设置', click: () => shell.openExternal(`${config.gatewayUrl}/settings`) },
+      { label: '打开屏幕录制权限设置', click: () => openScreenRecordingSettings() },
       { label: '退出', click: () => app.quit() },
     ]),
   );

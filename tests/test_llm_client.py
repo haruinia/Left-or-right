@@ -547,6 +547,37 @@ def test_stream_text_parses_openai_sse_deltas(monkeypatch) -> None:
     assert __import__("asyncio").run(collect()) == ["六", "娃"]
 
 
+def test_stream_text_surfaces_provider_error_body(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_MODEL", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test")
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_AUTH_HEADER", "Authorization")
+    monkeypatch.setenv("LLM_AUTH_SCHEME", "Bearer")
+    get_settings.cache_clear()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            400,
+            json={"error": {"message": "所选账号的上游服务不支持当前地区使用 API"}},
+        )
+
+    async def collect() -> str:
+        client = LLMClient(async_transport=httpx.MockTransport(handler))
+        pieces: list[str] = []
+        try:
+            async for delta in client.stream_text([LLMMessage(role="user", content="hi")]):
+                pieces.append(delta)
+        except RuntimeError as exc:
+            return str(exc)
+        raise AssertionError("stream_text should raise on HTTP error status")
+
+    message = __import__("asyncio").run(collect())
+    assert "HTTP 400" in message
+    assert "地区" in message
+    assert "read()" not in message
+
+
 def test_stream_text_mock_mode_does_not_call_http(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     get_settings.cache_clear()

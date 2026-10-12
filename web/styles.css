@@ -2061,6 +2061,19 @@ body.settings-page {
   color: var(--accent);
 }
 
+.liuwa-turn.is-stream p:empty::before {
+  content: "思考中···";
+  margin-right: 2px;
+  color: var(--accent);
+  letter-spacing: 2px;
+  animation: liuwa-thinking 1.2s ease-in-out infinite;
+}
+
+@keyframes liuwa-thinking {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
 .liuwa-turn.is-error p {
   background: var(--red-soft);
   color: var(--red);

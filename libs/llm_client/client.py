@@ -146,12 +146,17 @@ class LLMClient:
                 transport=self._async_transport,
             ) as client:
                 async with client.stream("POST", url, headers=headers, json=payload) as response:
-                    response.raise_for_status()
+                    if response.status_code >= 400:
+                        # Read the error body inside the stream context; accessing
+                        # `.text` afterwards would raise ResponseNotRead and mask
+                        # the real status from the upstream provider.
+                        body = (await response.aread()).decode("utf-8", errors="replace")
+                        raise RuntimeError(f"HTTP {response.status_code}: {body[:300]}")
                     async for line in response.aiter_lines():
                         delta = _parse_stream_line(line)
                         if delta:
                             yield delta
-        except httpx.HTTPStatusError as exc:
+        except httpx.HTTPError as exc:
             raise RuntimeError(_safe_error_message(exc)) from exc
 
 

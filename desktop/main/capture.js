@@ -7,7 +7,15 @@ const { execFile } = require('node:child_process');
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, (error) => (error ? reject(error) : resolve()));
+    // Include stderr: without screen-recording permission `screencapture` exits 0-less
+    // with "could not create image from display" only on stderr, which is the signal
+    // used upstream to explain the permission fix.
+    execFile(cmd, args, (error, _stdout, stderr) => {
+      if (!error) return resolve();
+      const detail = String(stderr || '').trim();
+      error.message = detail ? `${error.message}: ${detail}` : error.message;
+      reject(error);
+    });
   });
 }
 

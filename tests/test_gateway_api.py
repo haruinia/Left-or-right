@@ -834,6 +834,12 @@ def test_gateway_allows_local_dev_cors_origins(tmp_path: Path, monkeypatch) -> N
 
 def test_gateway_config_status_hides_secrets(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "super-secret")
+    # 模型就绪状态取决于本地是否已下载模型；把模型目录指到不存在的路径，保证
+    # ready=False 在任何机器上都成立（默认目录在本机可能已下载）。
+    monkeypatch.setenv(
+        "SHERPA_ASR_MODEL_DIR",
+        str(tmp_path / "sherpa-onnx-streaming-paraformer-bilingual-zh-en"),
+    )
     client = _client(tmp_path, monkeypatch)
     response = client.get("/api/config/status")
     assert response.status_code == 200
@@ -2476,6 +2482,9 @@ def test_gateway_aliyun_ws_matches_async_result_to_audio_context(
     ).json()
 
     with client.websocket_connect(f"/ws/interview/{interview['id']}") as websocket:
+        # 两个 chunk 必须留在同一采集通道（同 speaker）：FakeAliyunEngine 对不同
+        # stream_id 复用同一个 session/队列，若按 speaker 拆成两个通道，会有两个
+        # reader 抢同一队列，结果可能被面试官通道认领并误标 speaker，用例会挂起。
         websocket.send_json(
             {
                 "type": "audio_chunk",
@@ -2496,7 +2505,7 @@ def test_gateway_aliyun_ws_matches_async_result_to_audio_context(
                 "session_id": interview["id"],
                 "seq": 2,
                 "audio": base64.b64encode(b"interviewer-audio").decode("ascii"),
-                "speaker": "interviewer",
+                "speaker": "candidate",
                 "format": "pcm16",
                 "sample_rate_hz": 16000,
                 "channels": 1,
