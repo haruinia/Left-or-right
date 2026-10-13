@@ -64,7 +64,7 @@ function renderPending() {
   syncEmpty();
 }
 
-  if (streaming || document.body.classList.contains("is-busy")) {
+  if (streaming || document.body.classList.contains("is-busy") || document.body.classList.contains("is-stopped")) {
   }
   if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) {
     setStatus("请选择 PNG、JPEG、WebP 或 GIF 图片。");
@@ -199,6 +199,15 @@ function finalizeStopped(streamNode, reply, assistantTurn) {
 }
 
 async function sendChat() {
+  if (streaming && !activeAbort) {
+    streaming = false;
+  }
+  if (streaming && !activeAbort) {
+    streaming = false;
+  }
+  if (streaming && !activeAbort) {
+    streaming = false;
+  }
   if (streaming) return;
   const images = pending.map((shot) => shot.dataUrl);
   const unsent = pending.filter((shot) => !shot.sent).map((shot) => shot.dataUrl);
