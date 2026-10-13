@@ -182,7 +182,20 @@ function buildTray(gatewayHealthy = lastHealthy) {
       { label: '紧凑/展开', click: () => toggleCompact(win) },
       { type: 'separator' },
       { label: '共享保护：已开启（仅 macOS 生效）', enabled: false },
-      ...buildPermissionsMenu(),
+      ...(() => {
+        if (process.platform !== 'darwin') return [{ label: '截图：仅 macOS', enabled: false }];
+        const status = screenAccessStatus();
+        if (status === 'not-determined') {
+          systemPreferences.askForMediaAccess('screen').catch(() => {});
+        }
+        if (status === 'denied') {
+          return [{ label: '截图：缺少屏幕录制权限，点击去授权', click: () => openScreenRecordingSettings() }];
+        }
+        return [{
+          label: `屏幕录制: ${status === 'granted' ? '✅' : '❌'}`,
+          enabled: false,
+        }];
+      })(),
       ...hotkeyItems,
       { type: 'separator' },
       { label: '打开设置', click: () => shell.openExternal(`${config.gatewayUrl}/settings`) },
