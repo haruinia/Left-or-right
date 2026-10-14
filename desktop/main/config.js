@@ -8,6 +8,9 @@ const DEFAULTS = {
   gatewayApiKey: '',
   spawnBackend: true,
   pythonPath: '.venv/bin/python',
+  // 低调模式：隐藏 Dock 图标、通用化窗口标题、使用无辨识度托盘图标，
+  // 降低面试场景中的存在感（参考 Gank Interview 的 stealth build）。
+  stealth: false,
 };
 
 function repoRoot() {
@@ -30,7 +33,21 @@ function loadConfig() {
   if (process.env.SPAWN_BACKEND) merged.spawnBackend = process.env.SPAWN_BACKEND === 'true';
   merged.gatewayUrl = String(merged.gatewayUrl).replace(/\/+$/, '');
   merged.gatewayApiKey = String(merged.gatewayApiKey || '');
+  merged.stealth = Boolean(merged.stealth);
   return merged;
 }
 
-module.exports = { loadConfig, repoRoot, DEFAULTS };
+// 持久化运行时可改的配置（如低调模式开关）到 config.json。
+function saveConfig(patch) {
+  const file = path.join(__dirname, '..', 'config.json');
+  const current = readJson(file);
+  const next = { ...current, ...patch };
+  try {
+    fs.writeFileSync(file, JSON.stringify(next, null, 2) + '\n', 'utf8');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { loadConfig, saveConfig, repoRoot, DEFAULTS };

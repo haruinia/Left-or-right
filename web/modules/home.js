@@ -1,6 +1,23 @@
 import { formatAccelerator } from "./shortcuts.js";
 import { isExamSpecialty } from "./study-presets.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
+import {
+  saveSessionRecord,
+  listSessionRecords,
+  deleteSessionRecord,
+  exportSessionRecordsAsMarkdown,
+} from "./session-store.js";
+import {
+  importSessionRecords,
+  listKnowledgeItems,
+  listTags,
+  deleteKnowledgeItem,
+  markReviewed,
+  exportKnowledgeBaseAsMarkdown,
+  getKBStats,
+} from "./knowledge-base.js";
+import { saveFeedback } from "./feedback-store.js";
+import { renderMarkdown } from "./markdown.js";
 
 const thread = document.querySelector("#liuwaThread");
 const idle = document.querySelector("#liuwaIdle");
@@ -12,6 +29,20 @@ const settingsLink = document.querySelector("#liuwaSettings");
 const presetNode = document.querySelector("#liuwaPreset");
 const modelNode = document.querySelector("#liuwaModel");
 const stopBtn = document.querySelector("#liuwaStop");
+const historyBtn = document.querySelector("#liuwaHistory");
+const historyPanel = document.querySelector("#liuwaHistoryPanel");
+const historyList = document.querySelector("#liuwaHistoryList");
+const historyClose = document.querySelector("#liuwaHistoryClose");
+const historyExport = document.querySelector("#liuwaHistoryExport");
+const kbBtn = document.querySelector("#liuwaKB");
+const kbPanel = document.querySelector("#liuwaKBPanel");
+const kbList = document.querySelector("#liuwaKBList");
+const kbClose = document.querySelector("#liuwaKBClose");
+const kbExport = document.querySelector("#liuwaKBExport");
+const kbImport = document.querySelector("#liuwaKBImport");
+const kbTags = document.querySelector("#liuwaKBTags");
+const kbSearch = document.querySelector("#liuwaKBSearch");
+const kbStats = document.querySelector("#liuwaKBStats");
 
 // Follow-tail: only auto-scroll while the user is already near the bottom. Once they
 // scroll up to read, new tokens must not yank them back down (Gank's 24px rule).
@@ -64,7 +95,11 @@ function renderPending() {
   syncEmpty();
 }
 
-  if (streaming || document.body.classList.contains("is-busy") || document.body.classList.contains("is-stopped")) {
+function addShot(dataUrl) {
+  // 仅当真正在流式生成时才禁止添加截图；历史残留的 is-busy/is-stopped 样式不再阻塞。
+  if (streaming) {
+    setStatus("请等当前回答结束后再添加截图。");
+    return;
   }
   if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) {
     setStatus("请选择 PNG、JPEG、WebP 或 GIF 图片。");
@@ -146,11 +181,44 @@ function appendUserTurn(images, text, carriedCount = 0) {
 function appendAssistantTurn() {
   const article = document.createElement("article");
   article.className = "liuwa-turn is-assistant is-stream";
-  const body = document.createElement("p");
-  body.className = "liuwa-stream";
+  const body = document.createElement("div");
+  body.className = "liuwa-stream md";
   article.append(body);
   thread.append(article);
   return body;
+}
+
+// 为已完成的 AI 回答添加反馈按钮
+function addFeedbackButtons(assistantTurn, replyText) {
+  if (!assistantTurn || assistantTurn.querySelector(".liuwa-feedback")) return;
+  const footer = document.createElement("footer");
+  footer.className = "liuwa-feedback";
+  footer.innerHTML = `
+    <button type="button" class="liuwa-feedback-btn liuwa-feedback-up" data-feedback="up" aria-label="回答有用">👍 有用</button>
+    <button type="button" class="liuwa-feedback-btn liuwa-feedback-down" data-feedback="down" aria-label="回答无用">👎 无用</button>
+  `;
+  assistantTurn.append(footer);
+  footer.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-feedback]");
+    if (!btn) return;
+    const feedbackType = btn.dataset.feedback;
+    const userTurn = assistantTurn.previousElementSibling;
+    const questionText = userTurn?.querySelector("p")?.textContent || "";
+    saveFeedback({
+      answerText: replyText,
+      feedbackType,
+      questionText,
+      model: modelNode?.textContent?.replace("当前模型 · ", "") || "",
+      preset: presetNode?.textContent || "",
+    });
+    // 标记已反馈
+    footer.classList.add("is-voted");
+    footer.querySelectorAll(".liuwa-feedback-btn").forEach((b) => {
+      b.disabled = true;
+      if (b === btn) b.classList.add("is-active");
+    });
+    setStatus(feedbackType === "up" ? "感谢反馈！我们会继续保持。" : "感谢反馈！我们会改进回答质量。");
+  });
 }
 
 async function readSse(response, onDelta, signal) {
@@ -193,22 +261,83 @@ let activeAbort = null;
 // user can keep reading the partial answer and continue from it (Gank keeps partial
 // responses instead of dropping the whole turn).
 function finalizeStopped(streamNode, reply, assistantTurn) {
-  streamNode.textContent = reply + (reply && !/\n$/.test(reply) ? "\n" : "") + "（已中断）";
+  streamNode.innerHTML = renderMarkdown(reply + (reply && !/\n$/.test(reply) ? "\n" : "") + "（已中断）");
   assistantTurn.classList.remove("is-stream");
   assistantTurn.classList.add("is-stopped");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 判断错误是否可重试：网络错误、5xx 服务器错误、超时、限流
+function isRetryableError(error, status) {
+  if (error?.name === "AbortError") return false;
+  if (status === 401 || status === 403 || status === 413) return false;
+  if (status >= 500 && status < 600) return true;
+  if (status === 429) return true;
+  // 网络错误（无 status）
+  if (!status) return true;
+  return false;
+}
+
+// 指数退避重试：最多 3 次，间隔 1s/2s/4s
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  let lastError = null;
+  let lastStatus = 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      lastStatus = response.status;
+      const failure = await response.json().catch(() => ({}));
+      const detail = typeof failure.detail === "string" ? failure.detail : "";
+      // 客户端错误不重试
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("服务验证失败，请打开设置检查访问密钥。");
+      }
+      if (detail.includes("larger than") || response.status === 413) {
+        throw new Error("截图过大，请缩小截图范围或压缩图片后重试。");
+      }
+      // 服务器错误或限流，可重试
+      if (attempt < maxRetries && (response.status >= 500 || response.status === 429)) {
+        const delay = Math.pow(2, attempt) * 1000;
+        setStatus(`服务暂时不可用，${delay / 1000} 秒后重试（${attempt + 1}/${maxRetries}）…`);
+        await sleep(delay);
+        continue;
+      }
+      throw new Error(detail || `发送失败，请检查服务后重试（${response.status}）。`);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableError(error, lastStatus)) throw error;
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000;
+        setStatus(`网络异常，${delay / 1000} 秒后重试（${attempt + 1}/${maxRetries}）…`);
+        await sleep(delay);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError || new Error("发送失败，请检查网络后重试。");
+}
+
 async function sendChat() {
+  // 自愈：如果上一次流式状态残留（例如中断后 activeAbort 已置空），直接重置，避免「发送没动作」。
   if (streaming && !activeAbort) {
     streaming = false;
   }
-  if (streaming && !activeAbort) {
+  // 如果控制器已中止但标志未复位，也一并复位。
+  if (streaming && activeAbort && activeAbort.signal.aborted) {
     streaming = false;
+    activeAbort = null;
   }
-  if (streaming && !activeAbort) {
-    streaming = false;
+  // 兜底：清掉可能残留的忙/停止样式，保证 addShot 不会被永久卡住。
+  document.body.classList.remove("is-busy", "is-stopped");
+  if (streaming) {
+    setStatus("正在生成回答，请稍候或点击停止后再发送。");
+    return;
   }
-  if (streaming) return;
   const images = pending.map((shot) => shot.dataUrl);
   const unsent = pending.filter((shot) => !shot.sent).map((shot) => shot.dataUrl);
   const text = note ? note.value.trim() : "";
@@ -235,14 +364,19 @@ async function sendChat() {
   let flushTimer = null;
   const flush = () => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    streamNode.textContent = reply;
+    streamNode.innerHTML = renderMarkdown(reply);
     followTail();
   };
   const commitTurn = () => {
     pending.forEach((shot) => { shot.sent = true; });
     note.value = "";
     renderPending();
-    history.push({ role: "user", text: text || "请继续讲解上一道截图题目" });
+    history.push({
+      role: "user",
+      text: text || "请继续讲解上一道截图题目",
+      images: unsent.slice(0, 3), // 保存前 3 张缩略图
+      imageCount: unsent.length,
+    });
     history.push({ role: "assistant", text: reply });
   };
   // Coalesce tokens: flush at a sentence boundary at once, otherwise on a 90ms timer.
@@ -254,7 +388,7 @@ async function sendChat() {
   };
   try {
     await ensureGateway();
-    const response = await fetch(`${state.apiOrigin}/api/chat/stream`, {
+    const response = await fetchWithRetry(`${state.apiOrigin}/api/chat/stream`, {
       method: "POST",
       signal: activeAbort.signal,
       headers: authHeaders({
@@ -267,21 +401,11 @@ async function sendChat() {
         history: history.slice(-16).map((turn) => ({ ...turn, text: turn.text.slice(0, 8000) })),
       }),
     });
-    if (!response.ok) {
-      const failure = await response.json().catch(() => ({}));
-      const detail = typeof failure.detail === "string" ? failure.detail : "";
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("服务验证失败，请打开设置检查访问密钥。");
-      }
-      if (detail.includes("larger than") || response.status === 413) {
-        throw new Error("截图过大，请缩小截图范围或压缩图片后重试。");
-      }
-      throw new Error(detail || `发送失败，请检查服务后重试（${response.status}）。`);
-    }
     await readSse(response, onDelta, activeAbort.signal);
     flush();
     assistantTurn.classList.remove("is-stream");
     commitTurn();
+    addFeedbackButtons(assistantTurn, reply);
     setStatus(pending.length ? "这些截图会附在后续追问里，新对话时清掉。" : "");
   } catch (error) {
     clearTimeout(flushTimer);
@@ -291,6 +415,7 @@ async function sendChat() {
       // Keep the partial answer; user stopped deliberately, the question was real.
       finalizeStopped(streamNode, reply, assistantTurn);
       commitTurn();
+      addFeedbackButtons(assistantTurn, reply);
       setStatus("已停止，保留已生成的部分，可继续追问。");
     } else {
       // Nothing useful came back — drop the turn so it can be resent cleanly.
@@ -304,7 +429,7 @@ async function sendChat() {
     streaming = false;
     clearTimeout(timeoutGuard);
     activeAbort = null;
-    document.body.classList.remove("is-busy");
+    document.body.classList.remove("is-busy", "is-stopped");
     if (assistantTurn.isConnected) assistantTurn.classList.remove("is-stream");
     if (stopBtn) stopBtn.hidden = true;
     note.disabled = false;
@@ -344,7 +469,9 @@ function cycleTheme() {
 function applyTheme(cfg) {
   const theme = cfg.theme || "light";
   document.documentElement.dataset.theme = theme;
-  document.querySelector("#liuwaTheme").textContent = theme === "light" ? "浅色" :
+  const themeNode = document.querySelector("#liuwaTheme");
+  if (!themeNode) return;
+  themeNode.textContent = theme === "light" ? "浅色" :
     theme === "dark" ? "深色" :
     theme === "transparent-white" ? "透明白字" : "透明黑字";
 }
@@ -498,17 +625,228 @@ function clearShots() {
 
 function newQuestion() {
   if (streaming) return;
+  // 保存当前会话到历史记录（如果有内容）
+  if (history.length > 0) {
+    saveSessionRecord({
+      turns: history,
+      note: note.value.trim(),
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+    }).then((record) => {
+      if (record) {
+        setStatus(`已保存到历史记录（${record.turnCount} 轮），开始新对话。`);
+      }
+    });
+  }
   thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   history.length = 0;
   pending.length = 0;
   note.value = "";
-  setStatus("已开始新对话，上一轮对话和截图都已清掉。");
   renderPending();
 }
 window.addEventListener("focus", refreshContext);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshContext();
 });
+
+// 历史记录面板
+function toggleHistoryPanel(show) {
+  if (!historyPanel) return;
+  const shouldShow = show !== undefined ? show : historyPanel.hidden;
+  historyPanel.hidden = !shouldShow;
+  if (shouldShow) {
+    renderHistoryList();
+  }
+}
+
+function renderHistoryList() {
+  if (!historyList) return;
+  const records = listSessionRecords();
+  if (!records.length) {
+    historyList.innerHTML = '<p class="liuwa-history-empty">还没有保存的会话记录。点击「新对话」时会自动保存当前会话。</p>';
+    return;
+  }
+  historyList.innerHTML = records.map((record) => {
+    const date = new Date(record.startedAt).toLocaleString("zh-CN", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const preview = record.turns[0]?.text?.slice(0, 60) || record.note || "（无文字）";
+    return `
+      <article class="liuwa-history-item" data-id="${escapeHtml(record.id)}">
+        <header>
+          <time>${escapeHtml(date)}</time>
+          <span class="liuwa-history-count">${record.turnCount} 轮</span>
+        </header>
+        <p class="liuwa-history-preview">${escapeHtml(preview)}${preview.length >= 60 ? "…" : ""}</p>
+        <footer>
+          <button type="button" class="liuwa-history-view" data-view="${escapeHtml(record.id)}">查看</button>
+          <button type="button" class="liuwa-history-delete" data-delete="${escapeHtml(record.id)}">删除</button>
+        </footer>
+      </article>
+    `;
+  }).join("");
+}
+
+historyBtn?.addEventListener("click", () => toggleHistoryPanel());
+historyClose?.addEventListener("click", () => toggleHistoryPanel(false));
+historyExport?.addEventListener("click", () => exportSessionRecordsAsMarkdown());
+
+historyList?.addEventListener("click", (event) => {
+  const viewId = event.target.closest("[data-view]")?.dataset.view;
+  const deleteId = event.target.closest("[data-delete]")?.dataset.delete;
+  if (viewId) {
+    const record = listSessionRecords().find((r) => r.id === viewId);
+    if (record) {
+      // 在面板内展示完整记录
+      historyList.innerHTML = `
+        <article class="liuwa-history-detail">
+          <header>
+            <button type="button" class="liuwa-history-back" id="liuwaHistoryBack">← 返回列表</button>
+            <time>${new Date(record.startedAt).toLocaleString("zh-CN")}</time>
+          </header>
+          ${record.note ? `<p class="liuwa-history-note">备注：${escapeHtml(record.note)}</p>` : ""}
+          <div class="liuwa-history-turns">
+            ${record.turns.map((turn) => `
+              <div class="liuwa-history-turn is-${turn.role}">
+                <strong>${turn.role === "user" ? "问" : "答"}</strong>
+                ${turn.images && turn.images.length ? `
+                  <div class="liuwa-history-gallery">
+                    ${turn.images.map((img) => `<img src="${escapeHtml(img)}" alt="截图" />`).join("")}
+                  </div>
+                ` : ""}
+                <p>${escapeHtml(turn.text)}</p>
+                ${turn.imageCount ? `<span class="liuwa-history-images">（含 ${turn.imageCount} 张截图）</span>` : ""}
+              </div>
+            `).join("")}
+          </div>
+        </article>
+      `;
+      document.getElementById("liuwaHistoryBack")?.addEventListener("click", renderHistoryList);
+    }
+  }
+  if (deleteId) {
+    if (confirm("确定删除这条会话记录吗？")) {
+      deleteSessionRecord(deleteId);
+      renderHistoryList();
+      setStatus("已删除会话记录。");
+    }
+  }
+});
+
+// ===== 知识库面板 =====
+let currentKBTag = "";
+
+function toggleKBPanel(show) {
+  if (!kbPanel) return;
+  const shouldShow = show !== undefined ? show : kbPanel.hidden;
+  kbPanel.hidden = !shouldShow;
+  if (shouldShow) {
+    renderKBPanel();
+  }
+}
+
+function renderKBPanel() {
+  renderKBStats();
+  renderKBTags();
+  renderKBList();
+}
+
+function renderKBStats() {
+  if (!kbStats) return;
+  const stats = getKBStats();
+  kbStats.innerHTML = `
+    <span>共 ${stats.totalItems} 条</span>
+    <span>${stats.totalTags} 个标签</span>
+    <span>已复习 ${stats.reviewedItems} 条</span>
+  `;
+}
+
+function renderKBTags() {
+  if (!kbTags) return;
+  const tags = listTags();
+  kbTags.innerHTML = `
+    <button type="button" class="liuwa-kb-tag ${!currentKBTag ? "is-active" : ""}" data-tag="">全部</button>
+    ${tags.map(({ tag, count }) => `
+      <button type="button" class="liuwa-kb-tag ${currentKBTag === tag ? "is-active" : ""}" data-tag="${escapeHtml(tag)}">
+        ${escapeHtml(tag)} <span class="liuwa-kb-tag-count">${count}</span>
+      </button>
+    `).join("")}
+  `;
+}
+
+function renderKBList() {
+  if (!kbList) return;
+  const search = kbSearch?.value?.trim() || "";
+  const items = listKnowledgeItems({ tag: currentKBTag || undefined, search });
+  if (!items.length) {
+    kbList.innerHTML = '<p class="liuwa-kb-empty">知识库为空。从会话记录导入，或继续刷题自动积累。</p>';
+    return;
+  }
+  kbList.innerHTML = items.map((item) => `
+    <article class="liuwa-kb-item" data-id="${escapeHtml(item.id)}">
+      <header>
+        <div class="liuwa-kb-item-tags">
+          ${item.tags.map((t) => `<span class="liuwa-kb-tag-small">${escapeHtml(t)}</span>`).join("")}
+        </div>
+        <time>${new Date(item.createdAt).toLocaleDateString("zh-CN")}</time>
+      </header>
+      <p class="liuwa-kb-question">${escapeHtml(item.question.slice(0, 120))}${item.question.length > 120 ? "…" : ""}</p>
+      <details class="liuwa-kb-answer">
+        <summary>查看解答</summary>
+        <p>${escapeHtml(item.answer.slice(0, 500))}${item.answer.length > 500 ? "…" : ""}</p>
+      </details>
+      <footer>
+        <button type="button" class="liuwa-kb-review" data-review="${escapeHtml(item.id)}">复习 +1</button>
+        <button type="button" class="liuwa-kb-delete" data-delete-kb="${escapeHtml(item.id)}">删除</button>
+      </footer>
+    </article>
+  `).join("");
+}
+
+kbBtn?.addEventListener("click", () => toggleKBPanel());
+kbClose?.addEventListener("click", () => toggleKBPanel(false));
+kbExport?.addEventListener("click", () => exportKnowledgeBaseAsMarkdown());
+kbImport?.addEventListener("click", () => {
+  const records = listSessionRecords();
+  if (!records.length) {
+    setStatus("没有可导入的会话记录。");
+    return;
+  }
+  const imported = importSessionRecords(records);
+  setStatus(`已从会话记录导入 ${imported} 条知识。`);
+  renderKBPanel();
+});
+
+kbTags?.addEventListener("click", (event) => {
+  const tag = event.target.closest("[data-tag]")?.dataset.tag;
+  if (tag !== undefined) {
+    currentKBTag = tag;
+    renderKBTags();
+    renderKBList();
+  }
+});
+
+kbSearch?.addEventListener("input", () => renderKBList());
+
+kbList?.addEventListener("click", (event) => {
+  const reviewId = event.target.closest("[data-review]")?.dataset.review;
+  const deleteId = event.target.closest("[data-delete-kb]")?.dataset.deleteKb;
+  if (reviewId) {
+    markReviewed(reviewId);
+    renderKBStats();
+    setStatus("已标记复习。");
+  }
+  if (deleteId) {
+    if (confirm("确定删除这条知识吗？")) {
+      deleteKnowledgeItem(deleteId);
+      renderKBPanel();
+      setStatus("已删除知识条目。");
+    }
+  }
+});
+
 updateSettingsLink();
 syncEmpty();
 refreshContext();

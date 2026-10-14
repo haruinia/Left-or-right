@@ -66,7 +66,41 @@
         </section>
         <p class="liuwa-status" id="liuwaStatus" role="status"></p>
         <span role="button" tabindex="0" class="liuwa-stop" id="liuwaStop" aria-label="停止生成" hidden>停止生成</span>
+        <div class="liuwa-panel-btns">
+          <button type="button" class="liuwa-history-btn" id="liuwaHistory" aria-label="历史记录">历史记录</button>
+          <button type="button" class="liuwa-history-btn" id="liuwaKB" aria-label="知识库">知识库</button>
+        </div>
       </footer>
+
+      <!-- 历史记录面板 -->
+      <section class="liuwa-history-panel" id="liuwaHistoryPanel" hidden>
+        <header class="liuwa-history-header">
+          <h2>会话记录</h2>
+          <div class="liuwa-history-actions">
+            <button type="button" id="liuwaHistoryExport">导出 Markdown</button>
+            <button type="button" id="liuwaHistoryClose" aria-label="关闭">×</button>
+          </div>
+        </header>
+        <div class="liuwa-history-list" id="liuwaHistoryList"></div>
+      </section>
+
+      <!-- 知识库面板 -->
+      <section class="liuwa-history-panel" id="liuwaKBPanel" hidden>
+        <header class="liuwa-history-header">
+          <h2>知识库</h2>
+          <div class="liuwa-history-actions">
+            <button type="button" id="liuwaKBImport">从会话导入</button>
+            <button type="button" id="liuwaKBExport">导出 Markdown</button>
+            <button type="button" id="liuwaKBClose" aria-label="关闭">×</button>
+          </div>
+        </header>
+        <div class="liuwa-kb-stats" id="liuwaKBStats"></div>
+        <div class="liuwa-kb-filter">
+          <input type="search" id="liuwaKBSearch" placeholder="搜索问题、答案或标签…" />
+        </div>
+        <div class="liuwa-kb-tags" id="liuwaKBTags"></div>
+        <div class="liuwa-kb-list" id="liuwaKBList"></div>
+      </section>
     </main>
     <script type="module" src="modules/home.js"></script>
   </body>

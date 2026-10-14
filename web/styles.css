@@ -2051,26 +2051,108 @@ html.transparent-white {
   color: #fff;
 }
 
-.liuwa-turn.is-assistant p {
-  justify-self: start;
-  background: rgba(255, 255, 255, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+/* 回答卡片：参考 Gank 的白底卡片排版，独立 padding 和阴影，与白底对话区形成层次 */
+.liuwa-turn.is-assistant .liuwa-stream {
+  justify-self: stretch;
+  background: #ffffff;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
   color: var(--ink);
+  padding: 14px 16px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
 }
 
-.liuwa-turn.is-stream p::after {
+.liuwa-turn.is-stream .liuwa-stream::after {
   content: "▍";
   margin-left: 2px;
   color: var(--accent);
 }
 
-.liuwa-turn.is-stream p:empty::before {
+.liuwa-turn.is-stream .liuwa-stream:empty::before {
   content: "思考中···";
   margin-right: 2px;
   color: var(--accent);
   letter-spacing: 2px;
   animation: liuwa-thinking 1.2s ease-in-out infinite;
 }
+
+/* Markdown 排版（.md 容器） */
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+
+.md p { margin: 8px 0; }
+
+.md .md-heading {
+  margin: 14px 0 6px;
+  line-height: 1.4;
+  color: var(--ink);
+  font-weight: 600;
+}
+.md h2.md-heading { font-size: 16px; }
+.md h3.md-heading { font-size: 15px; }
+.md h4.md-heading,
+.md h5.md-heading { font-size: 14px; }
+
+.md ul,
+.md ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+.md li { margin: 3px 0; }
+.md li::marker { color: var(--accent); }
+
+.md blockquote {
+  margin: 8px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--ink);
+}
+
+.md hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 12px 0;
+}
+
+.md .md-inline-code {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.md .md-code {
+  margin: 8px 0;
+  padding: 12px 14px;
+  background: #16294f;
+  color: #e6edf7;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  position: relative;
+}
+.md .md-code code { background: none; padding: 0; }
+.md .md-code[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  font-size: 10px;
+  color: rgba(230, 237, 247, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.md strong { font-weight: 600; }
+.md del { color: var(--muted); }
 
 @keyframes liuwa-thinking {
   0%, 100% { opacity: 0.3; }
@@ -2179,9 +2261,48 @@ html.transparent-white {
 }
 .liuwa-stop:hover { background: var(--accent); color: #fff; }
 
-.liuwa-turn.is-stopped p {
-  border-color: var(--muted);
+.liuwa-turn.is-stopped .liuwa-stream {
+  border-style: dashed;
+  border-color: var(--faint);
+}
+
+/* 回答反馈按钮 */
+.liuwa-feedback {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.liuwa-feedback-btn {
+  border: 1px solid var(--line);
+  background: var(--panel);
   color: var(--muted);
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.liuwa-feedback-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.liuwa-feedback-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.liuwa-feedback-btn.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  opacity: 1;
+}
+
+.liuwa-feedback.is-voted .liuwa-feedback-btn:not(.is-active) {
+  opacity: 0.45;
 }
 
 html.liuwa-host,
@@ -2197,15 +2318,16 @@ html.liuwa-host {
   overflow: hidden;
   color-scheme: light;
   --bg: transparent;
-  --surface: rgba(255, 255, 255, 0.42);
-  --surface-2: rgba(255, 255, 255, 0.28);
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-2: rgba(255, 255, 255, 0.6);
   --ink: #192545;
   --muted: #3e4d6b;
   --faint: #5b6b88;
-  --line: rgba(255, 255, 255, 0.55);
+  --line: rgba(223, 230, 243, 0.9);
+  --line-soft: rgba(238, 242, 247, 0.9);
   --accent: #2461ef;
   --accent-hover: #1d4ed8;
-  --accent-soft: rgba(232, 239, 255, 0.55);
+  --accent-soft: #e8efff;
 }
 
 html.liuwa-host * {
@@ -2214,9 +2336,9 @@ html.liuwa-host * {
 }
 
 html.liuwa-host .liuwa-orb {
-  background: rgba(255, 255, 255, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.55);
-  box-shadow: 0 12px 36px rgba(24, 60, 121, 0.08);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 12px 36px rgba(24, 60, 121, 0.16);
 }
 
 body.liuwa-shell {
@@ -2317,5 +2439,398 @@ html:not(.liuwa-host) .liuwa-page {
 }
 
 .liuwa-shortcut-heading { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+
+/* 历史记录面板 */
+.liuwa-history-btn {
+  margin-top: 8px;
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 6px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out-strong);
+}
+.liuwa-history-btn:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.liuwa-history-panel {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+.liuwa-history-panel[hidden] {
+  display: none;
+}
+
+.liuwa-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.liuwa-history-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.liuwa-history-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.liuwa-history-actions button {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.liuwa-history-actions button:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.liuwa-history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.liuwa-history-empty {
+  margin: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.liuwa-history-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  background: var(--surface);
+  transition: box-shadow var(--dur-fast) var(--ease-out-strong);
+}
+.liuwa-history-item:hover {
+  box-shadow: var(--shadow);
+}
+.liuwa-history-item header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.liuwa-history-item time {
+  font-size: 12px;
+  color: var(--muted);
+}
+.liuwa-history-count {
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+.liuwa-history-preview {
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.liuwa-history-item footer {
+  display: flex;
+  gap: 8px;
+}
+.liuwa-history-item footer button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 11px;
+  cursor: pointer;
+}
+.liuwa-history-item footer button:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.liuwa-history-item footer .liuwa-history-delete:hover {
+  background: var(--red-soft);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* 历史详情 */
+.liuwa-history-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.liuwa-history-detail header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.liuwa-history-back {
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+}
+.liuwa-history-back:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.liuwa-history-note {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--amber-soft);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius);
+  font-size: 12px;
+  color: var(--amber);
+}
+.liuwa-history-turns {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.liuwa-history-turn {
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.liuwa-history-turn.is-user {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+.liuwa-history-turn.is-assistant {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.liuwa-history-turn strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.liuwa-history-turn p {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.liuwa-history-images {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.liuwa-history-gallery {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+.liuwa-history-gallery img {
+  max-width: 120px;
+  max-height: 90px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  object-fit: cover;
+}
+
+body.liuwa-shell .liuwa-history-panel {
+  border-radius: var(--radius-xl);
+}
+
+/* 面板按钮组 */
+.liuwa-panel-btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.liuwa-panel-btns .liuwa-history-btn {
+  flex: 1;
+  margin-top: 0;
+}
+
+/* 知识库面板 */
+.liuwa-kb-stats {
+  display: flex;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.liuwa-kb-filter {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.liuwa-kb-filter input {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: var(--surface);
+}
+.liuwa-kb-filter input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+
+.liuwa-kb-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.liuwa-kb-tag {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-out-strong);
+}
+.liuwa-kb-tag:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.liuwa-kb-tag.is-active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.liuwa-kb-tag-count {
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+.liuwa-kb-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.liuwa-kb-empty {
+  margin: 40px 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.liuwa-kb-item {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  background: var(--surface);
+}
+.liuwa-kb-item header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.liuwa-kb-item time {
+  font-size: 11px;
+  color: var(--muted);
+}
+.liuwa-kb-item-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.liuwa-kb-tag-small {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: var(--radius-full);
+}
+.liuwa-kb-question {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.liuwa-kb-answer {
+  margin-bottom: 10px;
+}
+.liuwa-kb-answer summary {
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.liuwa-kb-answer p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.liuwa-kb-item footer {
+  display: flex;
+  gap: 8px;
+}
+.liuwa-kb-item footer button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 11px;
+  cursor: pointer;
+}
+.liuwa-kb-item footer button:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.liuwa-kb-item footer .liuwa-kb-delete:hover {
+  background: var(--red-soft);
+  border-color: var(--red);
+  color: var(--red);
+}
 body.liuwa-compact .liuwa-dock { min-height: 0; overflow: auto; }
 .liuwa-page.liuwa-compact .liuwa-thread { display: none; }
