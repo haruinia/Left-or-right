@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>左右 · 桌面效果预览</title>
+    <style>
+      :root {
+        --ink: #1b2537;
+        --muted: #5a6980;
+        --line: #e3e8f0;
+        --accent: #2461ef;
+        --radius: 12px;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        font-family: "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(ellipse at 20% 20%, #8fb8d8 0%, transparent 55%),
+          radial-gradient(ellipse at 85% 75%, #9db8a8 0%, transparent 50%),
+          linear-gradient(160deg, #2c4a6e 0%, #4a6d94 40%, #6d8aa8 100%);
+        background-attachment: fixed;
+      }
+      .page {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 28px;
+        align-items: start;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 36px 28px 60px;
+      }
+      h1 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: 0.02em; }
+      .sub { margin: 0 0 24px; font-size: 13px; color: rgba(255,255,255,0.85); }
+      .stage-wrap { min-width: 0; }
+      .stage {
+        display: grid;
+        place-items: center;
+        min-height: 820px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 20px;
+        background:
+          linear-gradient(135deg, rgba(30,50,80,0.55), rgba(70,95,130,0.4)),
+          radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.12), transparent 60%);
+        box-shadow: 0 24px 60px rgba(10,25,50,0.35);
+        padding: 40px;
+      }
+      /* 模拟桌面悬浮窗：按 BrowserWindow 实际尺寸 */
+      .fake-desktop {
+        position: relative;
+        width: 460px;
+        height: 740px;
+        border-radius: 36px;
+        overflow: hidden;
+        box-shadow: 0 30px 80px rgba(8,22,46,0.45);
+        background: transparent;
+      }
+      .fake-desktop iframe {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        background: transparent;
+      }
+      .stage-note {
+        position: absolute;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 11px;
+        color: rgba(255,255,255,0.75);
+        letter-spacing: 0.06em;
+      }
+      /* 控制面板 */
+      .panel {
+        position: sticky;
+        top: 24px;
+        display: grid;
+        gap: 14px;
+        padding: 22px;
+        border: 1px solid rgba(255,255,255,0.5);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.92);
+        box-shadow: 0 18px 48px rgba(10,25,50,0.25);
+      }
+      .panel h2 { margin: 0; font-size: 15px; font-weight: 600; }
+      .panel .hint { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+      .ctl { display: grid; gap: 4px; }
+      .ctl label { font-size: 12px; color: var(--muted); }
+      .ctl output { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--accent); }
+      .ctl input[type="range"] { width: 100%; accent-color: var(--accent); }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        padding: 8px 14px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        color: var(--ink);
+        font-size: 12px;
+        cursor: pointer;
+      }
+      button:hover { border-color: var(--accent); color: var(--accent); }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.primary:hover { background: #1d4ed8; color: #fff; }
+      .presets { display: flex; gap: 6px; flex-wrap: wrap; }
+      .presets button { font-size: 11px; padding: 6px 10px; }
+      .state-log {
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #f4f7fb;
+        border: 1px solid var(--line);
+        font-size: 11px;
+        color: var(--muted);
+        font-family: "SF Mono", Menlo, monospace;
+        white-space: pre-wrap;
+        max-height: 120px;
+        overflow: auto;
+      }
+      @media (max-width: 980px) {
+        .page { grid-template-columns: 1fr; }
+        .stage { padding: 20px; min-height: auto; }
+        .fake-desktop { width: 100%; max-width: 460px; height: 700px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="stage-wrap">
+        <h1>左右 · 桌面悬浮窗预览</h1>
+        <p class="sub">按 Electron 实际窗口（440 × 720）1:1 复刻，壁纸背景模拟面试场景。左边是效果，右边实时调参。</p>
+        <div class="stage">
+          <div class="fake-desktop" id="fakeDesktop">
+            <iframe id="frame" title="左右悬浮窗预览" src="index.html"></iframe>
+          </div>
+          <span class="stage-note">悬浮窗 · 含截图 / 发送 / 新对话快捷键 · 矩形半圆</span>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <h2>实时调参</h2>
+        <p class="hint">改动立即写入预览窗口。调到满意后，把数值告诉我（或截图），我来同步到 <code>styles.css</code> 并打包。</p>
+
+        <div class="ctl">
+          <label for="ctlRadius">窗口圆角（矩形半圆感）<output id="outRadius">30px</output></label>
+          <input type="range" id="ctlRadius" min="0" max="60" step="2" value="30" />
+        </div>
+        <div class="ctl">
+          <label for="ctlPadX">水平内边距 <output id="outPadX">26px</output></label>
+          <input type="range" id="ctlPadX" min="6" max="48" step="2" value="26" />
+        </div>
+        <div class="ctl">
+          <label for="ctlPadY">垂直内边距 <output id="outPadY">24px</output></label>
+          <input type="range" id="ctlPadY" min="6" max="48" step="2" value="24" />
+        </div>
+        <div class="ctl">
+          <label for="ctlCardPad">回答卡片内边距 <output id="outCardPad">20px</output></label>
+          <input type="range" id="ctlCardPad" min="8" max="36" step="2" value="20" />
+        </div>
+        <div class="ctl">
+          <label for="ctlOpacity">窗体白底不透明度 <output id="outOpacity">0.9</output></label>
+          <input type="range" id="ctlOpacity" min="0.5" max="1" step="0.05" value="0.9" />
+        </div>
+
+        <div class="presets">
+          <button type="button" data-preset="current">当前默认</button>
+          <button type="button" data-preset="gank">Gank 极简</button>
+          <button type="button" data-preset="glass">玻璃感</button>
+        </div>
+
+        <div class="row">
+          <button type="button" class="primary" id="btnDemo">注入演示回答</button>
+          <button type="button" id="btnCompact">紧凑模式</button>
+          <button type="button" id="btnWall">换壁纸</button>
+        </div>
+
+        <p class="hint">快捷键在预览里不可用（需桌面端），用上方按钮模拟。</p>
+        <pre class="state-log" id="stateLog">等待窗口加载…</pre>
+      </aside>
+    </div>
+
+    <script>
+      const frame = document.getElementById("frame");
+      const log = document.getElementById("stateLog");
+      const walls = [
+        "radial-gradient(ellipse at 20% 20%, #8fb8d8 0%, transparent 55%), radial-gradient(ellipse at 85% 75%, #9db8a8 0%, transparent 50%), linear-gradient(160deg, #2c4a6e 0%, #4a6d94 40%, #6d8aa8 100%)",
+        "linear-gradient(160deg, #1f2d3d, #31465f 55%, #46608a)",
+        "radial-gradient(circle at 75% 25%, #f2d5a0 0%, transparent 45%), linear-gradient(150deg, #6b5c7a, #8a6f7c 60%, #b08a8f)",
+        "linear-gradient(165deg, #0f2418, #1e4633 50%, #2e6b4f)",
+      ];
+      let wallIndex = 0;
+
+      function say(msg) {
+        log.textContent = `[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}] ${msg}\n` + log.textContent.split("\n").slice(0, 8).join("\n");
+      }
+
+      // 向 iframe 注入桌面环境类 + 覆盖样式
+      const overrideStyle = frame.contentDocument ? null : null;
+      function doc() { return frame.contentDocument; }
+
+      function injectShell() {
+        const d = doc();
+        if (!d || !d.body) return false;
+        d.documentElement.classList.add("liuwa-host");
+        d.body.classList.add("liuwa-shell");
+        d.body.style.background = "transparent";
+        const style = d.createElement("style");
+        style.id = "preview-overrides";
+        d.head.append(style);
+        applyParams();
+        say("已注入桌面环境（liuwa-host + liuwa-shell）");
+        return true;
+      }
+
+      const params = { radius: 30, padX: 26, padY: 24, cardPad: 20, opacity: 0.9 };
+      function applyParams() {
+        const d = doc();
+        if (!d) return;
+        let style = d.getElementById("preview-overrides");
+        if (!style) return;
+        style.textContent = `
+          body.liuwa-shell .liuwa-orb {
+            border-radius: ${params.radius}px !important;
+            padding: ${params.padY}px ${params.padX}px calc(${params.padY}px - 4px) !important;
+          }
+          html.liuwa-host .liuwa-orb { background: rgba(255,255,255,${params.opacity}) !important; }
+          .liuwa-turn.is-assistant .liuwa-stream { padding: ${params.cardPad}px ${params.cardPad + 2}px !important; }
+        `;
+      }
+
+      function bind(id, key, outId, fmt = (v) => v + "px") {
+        const input = document.getElementById(id);
+        const out = document.getElementById(outId);
+        input.addEventListener("input", () => {
+          params[key] = Number(input.value);
+          out.textContent = fmt(params[key]);
+          applyParams();
+        });
+      }
+      bind("ctlRadius", "radius", "outRadius");
+      bind("ctlPadX", "padX", "outPadX");
+      bind("ctlPadY", "padY", "outPadY");
+      bind("ctlCardPad", "cardPad", "outCardPad");
+      bind("ctlOpacity", "opacity", "outOpacity", (v) => v.toFixed(2));
+
+      const PRESETS = {
+        current: { radius: 30, padX: 26, padY: 24, cardPad: 20, opacity: 0.9 },
+        gank: { radius: 22, padX: 18, padY: 16, cardPad: 14, opacity: 0.97 },
+        glass: { radius: 44, padX: 30, padY: 28, cardPad: 22, opacity: 0.72 },
+      };
+      document.querySelectorAll("[data-preset]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          Object.assign(params, PRESETS[btn.dataset.preset]);
+          document.getElementById("ctlRadius").value = params.radius;
+          document.getElementById("ctlPadX").value = params.padX;
+          document.getElementById("ctlPadY").value = params.padY;
+          document.getElementById("ctlCardPad").value = params.cardPad;
+          document.getElementById("ctlOpacity").value = params.opacity;
+          document.getElementById("outRadius").textContent = params.radius + "px";
+          document.getElementById("outPadX").textContent = params.padX + "px";
+          document.getElementById("outPadY").textContent = params.padY + "px";
+          document.getElementById("outCardPad").textContent = params.cardPad + "px";
+          document.getElementById("outOpacity").textContent = params.opacity.toFixed(2);
+          applyParams();
+          say(`切换预设：${btn.textContent} → ${JSON.stringify(params)}`);
+        });
+      });
+
+      const DEMO_REPLY = [
+        "## 解题思路",
+        "",
+        "这道题考察**二分查找**的边界处理，分三步走：",
+        "",
+        "1. 确定 `left/right` 初始区间 `[0, n-1]`",
+        "2. 每次取中点，比较后**排除一半**区间",
+        "3. 循环结束条件是 `left > right`",
+        "",
+        "> 易错点：`mid = left + (right - left) / 2` 防止溢出。",
+        "",
+        "```python",
+        "def search(nums, target):",
+        "    left, right = 0, len(nums) - 1",
+        "    while left <= right:",
+        "        mid = left + (right - left) // 2",
+        "        if nums[mid] == target:",
+        "            return mid",
+        "        elif nums[mid] < target:",
+        "            left = mid + 1",
+        "        else:",
+        "            right = mid - 1",
+        "    return -1",
+        "```",
+        "",
+        "时间复杂度 `O(log n)`，空间复杂度 `O(1)`。**核心**：区间定义保持不变（左闭右闭）。",
+      ].join("\n");
+
+      document.getElementById("btnDemo").addEventListener("click", () => {
+        const d = doc();
+        if (!d) return;
+        // 造一轮对话：用户截图 + AI Markdown 回答，走真实的渲染管线
+        const script = d.createElement("script");
+        script.type = "module";
+        script.textContent = `
+          import { renderMarkdown } from "./modules/markdown.js";
+          const thread = document.querySelector("#liuwaThread");
+          const idle = document.querySelector("#liuwaIdle");
+          if (idle) idle.hidden = true;
+          document.body.classList.remove("is-empty");
+          const user = document.createElement("article");
+          user.className = "liuwa-turn is-user";
+          user.innerHTML = '<div class="liuwa-gallery"><img src="data:image/svg+xml;base64,${btoa('<svg xmlns="http://www.w3.org/2000/svg" width="144" height="108"><rect width="144" height="108" fill="#eef3fa"/><rect x="14" y="14" width="116" height="10" rx="5" fill="#b9c8dd"/><rect x="14" y="34" width="82" height="10" rx="5" fill="#c9d6e8"/><rect x="14" y="54" width="100" height="10" rx="5" fill="#c9d6e8"/><rect x="14" y="78" width="56" height="10" rx="5" fill="#2461ef" opacity="0.55"/></svg>')}" alt="截图" /></div><p>请讲解这道截图题目</p>';
+          const ai = document.createElement("article");
+          ai.className = "liuwa-turn is-assistant";
+          const stream = document.createElement("div");
+          stream.className = "liuwa-stream md";
+          ai.append(stream);
+          thread.append(user, ai);
+          stream.innerHTML = renderMarkdown(${JSON.stringify(DEMO_REPLY)});
+        `;
+        d.body.append(script);
+        say("已注入演示回答（走真实 renderMarkdown 管线）");
+      });
+
+      document.getElementById("btnCompact").addEventListener("click", () => {
+        const d = doc();
+        if (!d) return;
+        const on = d.body.classList.toggle("liuwa-compact");
+        say(on ? "紧凑模式：开（320×240，只留 dock）" : "紧凑模式：关");
+      });
+
+      document.getElementById("btnWall").addEventListener("click", () => {
+        wallIndex = (wallIndex + 1) % walls.length;
+        document.body.style.background = walls[wallIndex];
+        document.body.style.backgroundAttachment = "fixed";
+        say(`壁纸已切换（${wallIndex + 1}/${walls.length}）`);
+      });
+
+      frame.addEventListener("load", () => {
+        try {
+          if (!injectShell()) say("iframe 加载异常：找不到 body");
+        } catch (err) {
+          say("注入失败：" + err.message);
+        }
+        // ?demo=1 注入静态演示回答；?live=PORT 走指定网关做真实流式闭环（默认 8001，mock 调试用 8002）
+        const qs = new URLSearchParams(location.search);
+        if (qs.get("demo") === "1") {
+          setTimeout(() => document.getElementById("btnDemo").click(), 300);
+        }
+        const livePort = qs.get("live");
+        if (livePort) {
+          setTimeout(() => runLiveLoop(livePort), 500);
+        }
+      });
+
+      // 真实闭环：把 iframe 的 state.apiOrigin 指向指定网关，注入截图 dataURL 到 addShot，
+      // 然后调用 iframe 内 home.js 暴露的 __liuwaSend——全程走真实前端代码路径。
+      async function runLiveLoop(port) {
+        const w = frame.contentWindow;
+        const d = doc();
+        if (!w || !d) return;
+        say(`真实闭环：网关 :${port}，注入截图并调用 iframe 的 sendChat()…`);
+        try {
+          // 1) 通过 iframe 暴露的 __liuwaState 直接改其模块内的 apiOrigin（同一实例）
+          if (!w.__liuwaState) throw new Error("__liuwaState 未暴露，home.js 需重新加载");
+          w.__liuwaState.apiOrigin = `http://127.0.0.1:${port}`;
+          say(`apiOrigin → ${w.__liuwaState.apiOrigin}`);
+
+          // 2) 拉取题目截图转 dataURL，通过 paste 事件走 home.js 的真实 addShot 路径
+          const imgResp = await fetch("/mock_q.png");
+          if (!imgResp.ok) throw new Error("mock_q.png 不存在");
+          const blob = await imgResp.blob();
+          say("截图已就绪（" + Math.round(blob.size / 1024) + "KB），模拟粘贴注入…");
+
+          const file = new File([blob], "mock_q.png", { type: "image/png" });
+          const dt = new w.DataTransfer();
+          dt.items.add(file);
+          const pasteEvent = new w.Event("paste", { bubbles: true, cancelable: true });
+          Object.defineProperty(pasteEvent, "clipboardData", { value: dt, writable: false });
+          d.dispatchEvent(pasteEvent);
+
+          // 3) 等 addShot/FileReader 完成后调用 home.js 暴露的 __liuwaSend（= 真实 sendChat）
+          setTimeout(() => {
+            if (typeof w.__liuwaSend === "function") {
+              w.__liuwaSend();
+              say("已触发 __liuwaSend()，流式渲染中…（mock 网关约 1-2 秒出全量）");
+            } else {
+              say("错误：__liuwaSend 未暴露。home.js 需重新加载（window.__liuwaSend = sendChat）。");
+            }
+          }, 600);
+        } catch (err) {
+          say("闭环失败：" + (err && err.message ? err.message : err));
+        }
+      }
+    </script>
+  </body>
+</html>

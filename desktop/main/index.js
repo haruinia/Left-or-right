@@ -2,8 +2,8 @@
 
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
-const { app, ipcMain, Menu, Tray, nativeImage, shell, nativeTheme, systemPreferences } = require('electron');
-const { loadConfig, saveConfig } = require('./config');
+const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences } = require('electron');
+const { loadConfig } = require('./config');
 const { createWindow, moveWindow, toggleCompact, toggleVisible, beginHoldInteract, setClickThrough, isInteractive } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
@@ -12,15 +12,10 @@ const { startBackend, stopBackend, waitForHealth } = require('./backend');
 app.setName('左右');
 const config = loadConfig();
 let win = null;
-let tray = null;
 let failedHotkeys = [];
 let currentBindings = BINDINGS;
-let lastHealthy = false;
 let permissionPaneOpened = false;
 let lastScreenshotTime = 0;
-let stealthEnabled = Boolean(config.stealth);
-
-let screenshotDebounce = null;
 
 const SCREEN_RECORDING_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
 
@@ -74,7 +69,6 @@ async function refreshUiHotkeys() {
     if (fingerprint === previous) return;
     currentBindings = next;
     failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
-    buildTray();
     if (win && !win.isDestroyed()) win.webContents.send('cockpit:hotkeys', hotkeySnapshot());
   } catch {
     // Overlay keeps the last working chords if the settings API is down.
@@ -157,94 +151,6 @@ async function attachScreenshot({ interactive }) {
   }
 }
 
-function buildTray(gatewayHealthy = lastHealthy) {
-  lastHealthy = Boolean(gatewayHealthy);
-  if (!tray) {
-    const trayIcon = stealthEnabled
-      ? nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray-stealth.png')).resize({ width: 18, height: 18 })
-      : nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png')).resize({ width: 18, height: 18 });
-    trayIcon.setTemplateImage(true);
-    tray = new Tray(trayIcon);
-    tray.setToolTip(stealthEnabled ? ' ' : '左右');
-  }
-  const hotkeyItems = currentBindings.map((binding) => {
-    const taken = failedHotkeys.some((failed) => failed.accelerator === binding.accelerator);
-    return {
-      label: `${binding.label}  ${formatAccelerator(binding.accelerator)}${taken ? '（被其他应用占用）' : ''}`,
-      enabled: false,
-    };
-  });
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      {
-        label: lastHealthy ? `后端已连接：${config.gatewayUrl}` : '后端未连接：请先启动 gateway',
-        enabled: false,
-      },
-      { type: 'separator' },
-      { label: '隐藏/显示', click: () => toggleVisible(win) },
-      { label: '紧凑/展开', click: () => toggleCompact(win) },
-      { type: 'separator' },
-      {
-        label: '低调模式',
-        type: 'checkbox',
-        checked: stealthEnabled,
-        click: (menuItem) => applyStealth(menuItem.checked),
-      },
-      { type: 'separator' },
-      { label: '共享保护：已开启（仅 macOS 生效）', enabled: false },
-      ...(() => {
-        if (process.platform !== 'darwin') return [{ label: '截图：仅 macOS', enabled: false }];
-        const status = screenAccessStatus();
-        if (status === 'not-determined') {
-          systemPreferences.askForMediaAccess('screen').catch(() => {});
-        }
-        if (status === 'denied') {
-          return [{ label: '截图：缺少屏幕录制权限，点击去授权', click: () => openScreenRecordingSettings() }];
-        }
-        return [{
-          label: `屏幕录制: ${status === 'granted' ? '✅' : '❌'}`,
-          enabled: false,
-        }];
-      })(),
-      ...hotkeyItems,
-      { type: 'separator' },
-      { label: '打开设置', click: () => shell.openExternal(`${config.gatewayUrl}/settings`) },
-      { label: '打开屏幕录制权限设置', click: () => openScreenRecordingSettings() },
-      { label: '退出', click: () => app.quit() },
-    ]),
-  );
-}
-
-function applyStealth(enabled) {
-  stealthEnabled = Boolean(enabled);
-  // Dock 图标隐藏/显示（macOS）
-  if (process.platform === 'darwin') {
-    if (stealthEnabled) {
-      app.dock?.hide();
-    } else {
-      app.dock?.show();
-    }
-  }
-  // 窗口标题通用化
-  if (win && !win.isDestroyed()) {
-    win.setTitle(stealthEnabled ? ' ' : '左右');
-  }
-  // 托盘图标与 tooltip 无辨识化
-  if (tray) {
-    const iconPath = stealthEnabled
-      ? path.join(__dirname, '..', 'assets', 'tray-stealth.png')
-      : path.join(__dirname, '..', 'assets', 'tray.png');
-    const icon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
-    icon.setTemplateImage(true);
-    tray.setImage(icon);
-    tray.setToolTip(stealthEnabled ? ' ' : '左右');
-  }
-  // 持久化到 config.json
-  saveConfig({ stealth: stealthEnabled });
-  // 重建托盘菜单以更新 checkbox 状态
-  buildTray();
-}
-
 function hotkeySnapshot() {
   return {
     hotkeys: currentBindings.map((binding) => ({
@@ -275,39 +181,25 @@ function registerIpc() {
 }
 
 app.whenReady().then(async () => {
-  // 低调模式：先隐藏 Dock 图标，再设置常规图标
-  if (stealthEnabled && process.platform === 'darwin') {
+  // Gank 式纯快捷键驱动：无条件隐藏 Dock 图标，不创建菜单栏托盘。
+  // accessory 策略让应用不出现在 Dock、Cmd+Tab 和应用菜单中。
+  if (process.platform === 'darwin') {
     app.dock?.hide();
-  } else {
-    app.dock?.setIcon(path.join(__dirname, '..', 'assets', 'icon.png'));
+    app.setActivationPolicy('accessory');
   }
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { role: 'appMenu', label: stealthEnabled ? ' ' : '左右' },
-    { role: 'fileMenu' },
-    { role: 'editMenu' },
-    { role: 'viewMenu' },
-    { role: 'windowMenu' },
-  ]));
   nativeTheme.themeSource = 'light';
   if (config.spawnBackend) {
     startBackend(config);
   }
-  const healthy = await waitForHealth(config.gatewayUrl, {
+  await waitForHealth(config.gatewayUrl, {
     timeoutMs: config.spawnBackend ? 30000 : 3000,
   });
   registerIpc();
   failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
   win = createWindow(config);
-  if (stealthEnabled && win && !win.isDestroyed()) {
-    win.setTitle(' ');
-  }
-  buildTray(healthy);
   refreshUiHotkeys();
   setInterval(refreshUiHotkeys, 4000);
 
-  win.on('focus', () => {
-    buildTray();
-  });
   const { session } = require('electron');
   const { RENDERER_INDEX } = require('./window');
   const rendererUrl = pathToFileURL(RENDERER_INDEX).href;

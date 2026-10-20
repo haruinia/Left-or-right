@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>左右 · 截图问 AI</title>
+    <title>左右</title>
     <script>
       if (window.cockpit) document.documentElement.classList.add("liuwa-host");
     </script>
@@ -13,49 +13,30 @@
   </head>
   <body class="liuwa-page is-empty">
     <main class="liuwa-orb">
-      <header class="liuwa-brand">
-        <img class="liuwa-mark" src="modules/pangsi-mark.svg" alt="左右标志：两条相伴的思路线" />
-        <div class="liuwa-name">
-          <h1>左右</h1>
-          <p class="liuwa-kicker">ZUOYOU · 截图提问</p>
-        </div>
-        <a class="liuwa-settings" id="liuwaSettings" href="/settings" target="_blank" rel="noopener">设置 ↗</a>
-      </header>
-
-      <div class="liuwa-context">
-        <span id="liuwaPreset">正在读取复习预设…</span>
-        <span id="liuwaModel">正在连接…</span>
-      </div>
-
       <section class="liuwa-thread" id="liuwaThread" aria-label="题目与 AI 讲解" aria-live="polite" aria-relevant="additions text">
         <div class="liuwa-idle" id="liuwaIdle">
           <h2>思路，就在旁边。</h2>
-          <p>截下这道题，慢慢看懂它。<br />支持截图、粘贴图片或直接提问。</p>
+          <p>截下这道题，慢慢看懂它。</p>
         </div>
       </section>
 
       <footer class="liuwa-dock">
         <div class="liuwa-shots" id="liuwaShots" hidden></div>
-        <label class="liuwa-note" for="liuwaNote">
-          <span>补充问题 <span class="liuwa-optional">可留空</span></span>
-          <textarea id="liuwaNote" rows="2" maxlength="8000" placeholder="想先看思路，还是卡在某一步？"></textarea>
-        </label>
         <section class="liuwa-shortcuts" id="liuwaKeys">
           <div class="liuwa-shortcut-primary">
             <span>截图 <kbd id="hintCapture" data-key-action="captureRegion">⌘⇧U</kbd></span>
             <span>发送 <kbd id="hintSend" data-key-action="sendChat">⌘⇧Enter</kbd></span>
             <span>隐藏/显示 <kbd data-key-action="toggleWindow">⌘⇧H</kbd></span>
-            <span>退出 <kbd data-key-action="quitApp">⌘⇧Q</kbd></span>
             <span>新对话 <kbd data-key-action="newQuestion">⌘⇧N</kbd></span>
-            <span>清空截图 <kbd data-key-action="clearShots">⌘⇧⌫</kbd></span>
           </div>
-          <p class="liuwa-shortcut-note" id="liuwaShortcutNote">连续截图会叠在一起，发送时一次带上。</p>
           <details>
             <summary aria-label="全部快捷键">全部快捷键</summary>
             <div class="liuwa-shortcut-grid">
               <span>操作面板 <kbd id="hintInteract" data-key-action="toggleVisible">⌘⇧Space</kbd></span>
               <span>全屏截图 <kbd data-key-action="captureScreen">⌘⇧Y</kbd></span>
               <span>紧凑 / 展开 <kbd data-key-action="toggleCompact">⌘⇧J</kbd></span>
+              <span>清空截图 <kbd data-key-action="clearShots">⌘⇧⌫</kbd></span>
+              <span>退出 <kbd data-key-action="quitApp">⌘⇧Q</kbd></span>
               <span>窗口上移 <kbd data-key-action="moveUp">⌘⇧↑</kbd></span>
               <span>窗口下移 <kbd data-key-action="moveDown">⌘⇧↓</kbd></span>
               <span>窗口左移 <kbd data-key-action="moveLeft">⌘⇧←</kbd></span>
@@ -66,41 +47,7 @@
         </section>
         <p class="liuwa-status" id="liuwaStatus" role="status"></p>
         <span role="button" tabindex="0" class="liuwa-stop" id="liuwaStop" aria-label="停止生成" hidden>停止生成</span>
-        <div class="liuwa-panel-btns">
-          <button type="button" class="liuwa-history-btn" id="liuwaHistory" aria-label="历史记录">历史记录</button>
-          <button type="button" class="liuwa-history-btn" id="liuwaKB" aria-label="知识库">知识库</button>
-        </div>
       </footer>
-
-      <!-- 历史记录面板 -->
-      <section class="liuwa-history-panel" id="liuwaHistoryPanel" hidden>
-        <header class="liuwa-history-header">
-          <h2>会话记录</h2>
-          <div class="liuwa-history-actions">
-            <button type="button" id="liuwaHistoryExport">导出 Markdown</button>
-            <button type="button" id="liuwaHistoryClose" aria-label="关闭">×</button>
-          </div>
-        </header>
-        <div class="liuwa-history-list" id="liuwaHistoryList"></div>
-      </section>
-
-      <!-- 知识库面板 -->
-      <section class="liuwa-history-panel" id="liuwaKBPanel" hidden>
-        <header class="liuwa-history-header">
-          <h2>知识库</h2>
-          <div class="liuwa-history-actions">
-            <button type="button" id="liuwaKBImport">从会话导入</button>
-            <button type="button" id="liuwaKBExport">导出 Markdown</button>
-            <button type="button" id="liuwaKBClose" aria-label="关闭">×</button>
-          </div>
-        </header>
-        <div class="liuwa-kb-stats" id="liuwaKBStats"></div>
-        <div class="liuwa-kb-filter">
-          <input type="search" id="liuwaKBSearch" placeholder="搜索问题、答案或标签…" />
-        </div>
-        <div class="liuwa-kb-tags" id="liuwaKBTags"></div>
-        <div class="liuwa-kb-list" id="liuwaKBList"></div>
-      </section>
     </main>
     <script type="module" src="modules/home.js"></script>
   </body>

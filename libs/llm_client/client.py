@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -220,8 +221,54 @@ def _request_payload(
     return payload
 
 
+_MOCK_DEMO_REPLY = """## 解题思路
+
+这是经典「**在排序数组中查找元素的第一个和最后一个位置**」问题（LeetCode 34），核心是 **两次二分查找**。
+
+### 关键思路
+
+1. **找第一个位置**：`nums[mid] == target` 时**不返回**，继续向左（`right = mid - 1`）。
+2. **找最后一个位置**：找到后**继续向右**（`left = mid + 1`）。
+
+### 参考实现（Python）
+
+```python
+def search_range(nums, target):
+    def bound(find_first):
+        left, right, ans = 0, len(nums) - 1, -1
+        while left <= right:
+            mid = left + (right - left) // 2  # 防溢出
+            if nums[mid] == target:
+                ans = mid
+                if find_first:
+                    right = mid - 1
+                else:
+                    left = mid + 1
+            elif nums[mid] < target:
+                left = mid + 1
+            else:
+                right = mid - 1
+        return ans
+
+    first = bound(True)
+    if first == -1:
+        return [-1, -1]
+    return [first, bound(False)]
+```
+
+### 复杂度
+
+| 指标 | 复杂度 |
+|------|--------|
+| 时间 | `O(log n)` |
+| 空间 | `O(1)` |
+
+> ⚠️ 区间定义要统一（本题解用左闭右闭）；`mid = left + (right - left) // 2` 防溢出。"""
+
+
 def _mock_text_chunks() -> list[str]:
-    text = "我是左右。当前是演示模式，尚未连接真实 AI。连接模型后，我会根据截图和你的复习预设讲解思路。"
+    override = os.environ.get("MOCK_REPLY_TEXT", "").strip()
+    text = override or _MOCK_DEMO_REPLY
     return [text[index : index + 2] for index in range(0, len(text), 2)]
 
 

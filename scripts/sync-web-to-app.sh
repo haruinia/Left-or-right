@@ -16,6 +16,8 @@ fi
 
 echo "同步 web 文件到已安装应用…"
 cp "$REPO_ROOT/web/index.html" "$APP_WEB/index.html"
+cp "$REPO_ROOT/web/settings.html" "$APP_WEB/settings.html"
+cp "$REPO_ROOT/web/cockpit.html" "$APP_WEB/cockpit.html" 2>/dev/null || true
 cp "$REPO_ROOT/web/styles.css" "$APP_WEB/styles.css"
 cp "$REPO_ROOT/web/modules/"*.js "$APP_WEB/modules/"
 cp "$REPO_ROOT/web/modules/"*.svg "$APP_WEB/modules/" 2>/dev/null || true

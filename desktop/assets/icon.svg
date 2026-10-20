@@ -1,5 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 100 100" fill="none"><rect x="2" y="2" width="96" height="96" rx="23" fill="#F3F6F8"/><g transform="translate(10 10)">
-  <path d="M43 15H28c-9.4 0-17 7.6-17 17v15c0 9.4 7.6 17 17 17h6" stroke="#395979" stroke-width="5" stroke-linecap="round"/>
-  <path d="M37 65h15c9.4 0 17-7.6 17-17V33c0-9.4-7.6-17-17-17h-6" stroke="#7898B5" stroke-width="5" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="fade-top" gradientUnits="userSpaceOnUse" x1="52" y1="15" x2="44" y2="15">
+      <stop offset="0" stop-color="#7898B5"/>
+      <stop offset="0.44" stop-color="#7898B5"/>
+      <stop offset="1" stop-color="#7898B5" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fade-bottom" gradientUnits="userSpaceOnUse" x1="28" y1="65" x2="36" y2="65">
+      <stop offset="0" stop-color="#395979"/>
+      <stop offset="0.44" stop-color="#395979"/>
+      <stop offset="1" stop-color="#395979" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <path d="M46 15H28c-9.4 0-17 7.6-17 17v16c0 9.4 7.6 17 17 17" stroke="#395979" stroke-width="5"/>
+  <path d="M28 65H40" stroke="url(#fade-bottom)" stroke-width="5"/>
+  <path d="M34 65h18c9.4 0 17-7.6 17-17V32c0-9.4-7.6-17-17-17" stroke="#7898B5" stroke-width="5"/>
+  <path d="M52 15H40" stroke="url(#fade-top)" stroke-width="5"/>
+  <path d="M46 15H32" stroke="#395979" stroke-width="5" stroke-linecap="round"/>
+  <path d="M34 65H42" stroke="#7898B5" stroke-width="5" stroke-linecap="round"/>
   <path d="m31 45 9-10 9 10" stroke="#395979" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
 </g></svg>

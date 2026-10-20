@@ -6,6 +6,7 @@ import { fetchGatewayJson, postJson, saveGatewayConnection } from "./gateway.js"
 import { checkAsrReadiness, checkLlmConnection, checkRuntime } from "./runtime.js";
 import { state } from "./state.js";
 import { appendEvent, escapeHtml } from "./ui.js";
+import "./assets.js"; // 学习资产板块（会话记录/知识库/反馈）
 
 const studyFields = {
   study_specialty: document.querySelector("#studySpecialty"),

@@ -5,12 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
     <title>左右 · 设置</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600&family=Sora:wght@500;600&family=ZCOOL+XiaoWei&display=swap"
-    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="settings-page">
@@ -24,7 +18,7 @@
             <p>在这里设好复习偏好，回到左右专心看题。</p>
           </div>
         </div>
-        <a class="button secondary" href="/">打开左右</a>
+        <a class="button secondary" href="http://127.0.0.1:8001/">打开左右</a>
       </header>
 
       <form id="studySettingsForm">
@@ -142,7 +136,7 @@
           <button type="button" id="saveGatewayKey" title="保存当前浏览器会话使用的 Gateway Key">保存接入</button>
           <button class="secondary" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
           <button class="secondary" type="button" id="checkModel" title="调用真实模型检查连接">检查模型</button>
-          <a class="button secondary" href="/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
+          <a class="button secondary" href="http://127.0.0.1:8001/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
         </div>
       </section>
 
@@ -276,7 +270,7 @@
         <h2>面试工作台</h2>
         <p class="small">原来的实时面试、语音转写、追问和评分仍可单独使用。</p>
         <div class="settings-actions">
-          <a class="button secondary" href="/cockpit" target="_blank" rel="noopener">打开旧版工作台</a>
+          <a class="button secondary" href="http://127.0.0.1:8001/cockpit" target="_blank" rel="noopener">打开旧版工作台</a>
           <button class="secondary" type="button" id="checkAsr">检查语音服务</button>
           <span class="status-pill" id="asrStatus" role="status"><span class="status-dot"></span><span>待检查</span></span>
           <button class="secondary" type="button" id="loadSampleSettings">填入岗位与简历样例</button>
@@ -289,6 +283,43 @@
         <button type="submit" id="saveUiSettings" disabled>保存设置</button>
       </div>
       </form>
+
+      <!-- 学习资产：会话记录 / 知识库 / 回答反馈（数据来自桌面端 localStorage） -->
+      <section class="settings-card" id="assets">
+        <h2>学习资产</h2>
+        <p class="small">桌面端每次「新对话」自动保存会话，可在这里回看、导入知识库、导出分享。</p>
+        <nav class="asset-tabs" id="assetTabs">
+          <button type="button" class="asset-tab is-active" data-asset-tab="records">会话记录</button>
+          <button type="button" class="asset-tab" data-asset-tab="kb">知识库</button>
+          <button type="button" class="asset-tab" data-asset-tab="feedback">回答反馈</button>
+        </nav>
+
+        <section class="asset-pane" id="assetRecords">
+          <div class="asset-toolbar">
+            <button type="button" class="secondary" id="recordsExport">导出 Markdown</button>
+          </div>
+          <div class="asset-list" id="recordsList"></div>
+        </section>
+
+        <section class="asset-pane" id="assetKB" hidden>
+          <div class="asset-toolbar">
+            <button type="button" class="secondary" id="kbImport">从会话导入</button>
+            <button type="button" class="secondary" id="kbExport">导出 Markdown</button>
+            <input type="search" id="kbSearch" placeholder="搜索问题、答案或标签…" />
+          </div>
+          <div class="asset-kb-stats" id="kbStats"></div>
+          <div class="asset-kb-tags" id="kbTags"></div>
+          <div class="asset-list" id="kbList"></div>
+        </section>
+
+        <section class="asset-pane" id="assetFeedback" hidden>
+          <div class="asset-toolbar">
+            <button type="button" class="secondary" id="feedbackExport">导出 Markdown</button>
+          </div>
+          <div class="asset-kb-stats" id="feedbackStats"></div>
+          <div class="asset-list" id="feedbackList"></div>
+        </section>
+      </section>
       <div class="feed settings-log" id="settingsLog" role="status" aria-live="polite"></div>
     </main>
     <script type="module" src="modules/settings.js"></script>

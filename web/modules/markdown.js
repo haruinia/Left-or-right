@@ -22,7 +22,7 @@ function renderInline(text) {
   return out;
 }
 
-// 块级渲染：按行扫描，识别代码块、标题、列表、引用、分隔线、段落。
+// 块级渲染：按行扫描，识别代码块、标题、列表、表格、引用、分隔线、段落。
 // 流式场景安全：未闭合的代码块按已到内容渲染（末尾假装闭合）。
 export function renderMarkdown(source) {
   const lines = String(source || "").replaceAll("\r\n", "\n").split("\n");
@@ -30,6 +30,7 @@ export function renderMarkdown(source) {
   let paragraph = [];
   let list = null; // { type: "ul"|"ol", items: [] }
   let codeFence = null; // { lang, lines: [] }
+  let table = null; // { header: [], align: [], rows: [[]] }
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -48,8 +49,27 @@ export function renderMarkdown(source) {
     html.push(`<pre class="md-code"${lang}><code>${escapeHtml(codeFence.lines.join("\n"))}</code></pre>`);
     codeFence = null;
   };
+  const flushTable = () => {
+    if (!table || !table.rows.length) { table = null; return; }
+    const cells = (row, tag) =>
+      row.map((cell) => `<${tag}>${renderInline(cell.trim())}</${tag}>`).join("");
+    const head = table.header.length
+      ? `<thead><tr>${cells(table.header, "th")}</tr></thead>`
+      : "";
+    const body = table.rows.map((row) => `<tr>${cells(row, "td")}</tr>`).join("");
+    html.push(`<table class="md-table">${head}<tbody>${body}</tbody></table>`);
+    table = null;
+  };
+  const splitTableRow = (line) => {
+    // 去掉首尾竖线后按竖线切分
+    const trimmed = line.trim().replace(/^\||\|$/g, "");
+    return trimmed.split("|");
+  };
+  const isTableDivider = (line) =>
+    /^\s*\|?[\s:|-]+\|?\s*$/.test(line) && line.includes("-");
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     // 代码围栏
     const fence = line.match(/^```(\S*)\s*$/);
     if (fence) {
@@ -58,6 +78,7 @@ export function renderMarkdown(source) {
       } else {
         flushParagraph();
         flushList();
+        flushTable();
         codeFence = { lang: fence[1] || "", lines: [] };
       }
       continue;
@@ -66,6 +87,21 @@ export function renderMarkdown(source) {
       codeFence.lines.push(line);
       continue;
     }
+
+    // 表格：连续以 | 开头/结尾的行。第一行是表头，第二行是分隔线，其余是数据。
+    if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      flushParagraph();
+      flushList();
+      if (!table) {
+        table = { header: [], align: [], rows: [] };
+        table.header = splitTableRow(line);
+        continue;
+      }
+      if (isTableDivider(line)) continue; // 分隔线跳过
+      table.rows.push(splitTableRow(line));
+      continue;
+    }
+    flushTable();
 
     // 标题
     const heading = line.match(/^(#{1,4})\s+(.+?)\s*$/);
@@ -127,5 +163,6 @@ export function renderMarkdown(source) {
   flushCode(); // 流式未闭合代码块也渲染
   flushParagraph();
   flushList();
+  flushTable();
   return html.join("");
 }

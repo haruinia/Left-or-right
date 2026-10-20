@@ -4,7 +4,7 @@ import argparse
 import socket
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8001
 DOCKER_COMPOSE_PORT = 8000
+SETTINGS_PORT = 9958
+WEB_ROOT = ROOT / "web"
 
 
 def readiness_label(ready: bool) -> str:
@@ -98,6 +100,31 @@ def start_default_port_redirect(host: str, port: int) -> tuple[ThreadingHTTPServ
     return start_port_redirect(host, DOCKER_COMPOSE_PORT, port)
 
 
+def start_settings_server(host: str, port: int = SETTINGS_PORT) -> tuple[ThreadingHTTPServer, str] | None:
+    """在 9958 端口起静态设置中心：默认页是 settings.html，/ 和 /settings 都指向它。"""
+    bind_host = _redirect_bind_host(host)
+
+    class SettingsHandler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(WEB_ROOT), **kwargs)
+
+        def do_GET(self) -> None:
+            if self.path in {"/", "/settings", "/settings/"}:
+                self.path = "/settings.html"
+            super().do_GET()
+
+        def log_message(self, format: str, *args) -> None:  # noqa: A002
+            return
+
+    try:
+        server = ThreadingHTTPServer((bind_host, port), SettingsHandler)
+    except OSError:
+        return None
+    thread = threading.Thread(target=server.serve_forever, name="settings-9958", daemon=True)
+    thread.start()
+    return server, display_url(bind_host, server.server_address[1])
+
+
 def port_is_available(host: str, port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -117,6 +144,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not redirect http://127.0.0.1:8000/ to the selected local port.",
     )
+    parser.add_argument(
+        "--no-settings-server",
+        action="store_true",
+        help=f"Do not serve the settings center on port {SETTINGS_PORT}.",
+    )
     return parser.parse_args(argv)
 
 
@@ -128,7 +160,7 @@ def runtime_summary_lines(status) -> list[str]:
     )
     lines = [
         f"Model: {status.llm_provider} / {status.llm_model} "
-        f"({mode_label(status.llm_provider, llm_ready)})",
+        f"{mode_label(status.llm_provider, llm_ready)}",
     ]
     if status.asr_provider == "aliyun_nls_ws":
         asr_ready = (
@@ -177,6 +209,13 @@ def main(argv: list[str] | None = None) -> int:
     if not redirect:
         for line in local_port_warning_lines(args.host, args.port):
             print(line)
+    if not args.no_settings_server:
+        settings_server = start_settings_server(args.host)
+        if settings_server:
+            _, settings_url = settings_server
+            print(f"Settings center: {settings_url}")
+        else:
+            print(f"Note: settings port {SETTINGS_PORT} is unavailable, skipped.", file=sys.stderr)
     for line in runtime_summary_lines(status):
         print(line)
     import uvicorn
@@ -192,3 +231,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
