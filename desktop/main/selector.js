@@ -13,6 +13,7 @@ const { BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
 //   3. 覆盖整块屏幕（bounds 而不是 workArea），菜单栏和 Dock 也能选到。
 let overlay = null;
 let pendingResolve = null;
+let selectedDisplay = null;
 let escShortcut = false;
 
 function selectorPage() {
@@ -54,10 +55,8 @@ function wireOnce() {
   ipcMain.on('selector:commit', (_event, rect) => {
     // 渲染层用的是 CSS 像素坐标；screencapture 要的是物理像素，
     // Retina 屏上差 2 倍，不换算会截到左上角四分之一的区域。
-    const display = screen.getDisplayNearestPoint({
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-    });
+    // clientX/clientY 是覆盖层内坐标；裁剪的是选中屏幕的截图，不叠加桌面原点。
+    const display = selectedDisplay || screen.getPrimaryDisplay();
     const scale = display?.scaleFactor || 1;
     settle({
       x: Math.round(rect.left * scale),
@@ -69,7 +68,7 @@ function wireOnce() {
   ipcMain.on('selector:cancel', () => settle(null));
 }
 
-function selectRegion() {
+function selectRegion(display = screen.getPrimaryDisplay()) {
   wireOnce();
   if (overlay) {
     // 上一次还没选完又按了一次：当作取消，重新开始。
@@ -77,8 +76,8 @@ function selectRegion() {
   }
   return new Promise((resolve) => {
     pendingResolve = resolve;
-    // screencapture 只抓主屏，所以框选窗口也铺在主屏上，坐标才对得上。
-    const bounds = screen.getPrimaryDisplay().bounds;
+    selectedDisplay = display;
+    const bounds = display.bounds;
     const win = new BrowserWindow({
       x: bounds.x,
       y: bounds.y,

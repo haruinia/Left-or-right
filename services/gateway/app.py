@@ -534,6 +534,10 @@ def _persist_llm_env(*, llm_model: str, llm_base_url: str, llm_api_key: str) -> 
     }
     if llm_api_key:
         updates["LLM_API_KEY"] = llm_api_key
+    _persist_env_updates(updates)
+
+
+def _persist_env_updates(updates: dict[str, str]) -> None:
     path = Path(".env")
     lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
     replaced: set[str] = set()
@@ -550,6 +554,43 @@ def _persist_llm_env(*, llm_model: str, llm_base_url: str, llm_api_key: str) -> 
         if key not in replaced:
             output.append(f"{key}={value}")
     path.write_text("\n".join(output) + "\n", encoding="utf-8")
+
+
+class ModelSelection(BaseModel):
+    screenshot_model: str
+    interview_model: str
+
+
+def _model_selection() -> dict:
+    settings = get_settings()
+    return {"screenshot_model": settings.vision_model or settings.llm_model, "interview_model": settings.llm_model}
+
+
+@app.get("/api/config/models")
+async def available_models():
+    selected = _model_selection()
+    warning = ""
+    try:
+        models = await get_llm_client().list_models()
+    except Exception:
+        models = []
+        warning = "当前接口未提供模型列表，可输入该接口支持的模型名称。"
+    return {**selected, "models": sorted(set(models) | set(selected.values())), "warning": warning}
+
+
+@app.post("/api/config/models")
+def select_models(payload: ModelSelection):
+    values = {key: value.strip() for key, value in payload.model_dump().items()}
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,159}", value) for value in values.values()):
+        raise HTTPException(422, "请输入有效的模型名称")
+    try:
+        _persist_env_updates({"VISION_MODEL": values["screenshot_model"], "LLM_MODEL": values["interview_model"]})
+    except OSError as exc:
+        raise HTTPException(503, "模型设置保存失败，请重试") from exc
+    settings = get_settings()
+    settings.vision_model = values["screenshot_model"]
+    settings.llm_model = values["interview_model"]
+    return _model_selection()
 
 
 @app.post("/api/config/llm/check")
@@ -876,6 +917,20 @@ def save_ui_settings(payload: UiSettings) -> UiSettings:
     stored = {**payload.model_dump(), "_hotkeys_version": 2}
     path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
+
+
+@app.patch("/api/ui/settings", response_model=UiSettings)
+def patch_ui_settings(payload: dict):
+    if set(payload) - set(UiSettings.model_fields):
+        raise HTTPException(422, "未知设置项")
+    current = _read_ui_settings().model_dump()
+    if isinstance(payload.get("hotkeys"), dict):
+        payload = {**payload, "hotkeys": {**current["hotkeys"], **payload["hotkeys"]}}
+    try:
+        settings = UiSettings.model_validate({**current, **payload})
+    except ValueError as exc:
+        raise HTTPException(422, "设置值无效") from exc
+    return save_ui_settings(settings)
 
 
 @app.get("/styles.css")

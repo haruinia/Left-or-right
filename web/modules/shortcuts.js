@@ -6,6 +6,7 @@ export const DEFAULT_HOTKEYS = {
   toggleWindow: "CommandOrControl+B",
   quitApp: "CommandOrControl+Q",
   newQuestion: "CommandOrControl+N",
+  resetView: "CommandOrControl+R",
   deleteLastShot: "CommandOrControl+L",
   clearShots: "CommandOrControl+Shift+Backspace",
 

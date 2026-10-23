@@ -594,3 +594,16 @@ def test_stream_text_mock_mode_does_not_call_http(monkeypatch) -> None:
         return "".join(bits)
 
     assert __import__("asyncio").run(collect()) == "## 解题思路\n离线验证\n\n## 答案\n42"
+
+
+def test_model_discovery_uses_configured_endpoint_and_credentials(monkeypatch):
+    monkeypatch.setenv('LLM_PROVIDER','openai_compatible')
+    monkeypatch.setenv('LLM_BASE_URL','https://models.test/v1')
+    monkeypatch.setenv('LLM_API_KEY','test-model-key')
+    get_settings.cache_clear()
+    def handle(request):
+        assert str(request.url)=='https://models.test/v1/models'
+        assert 'test-model-key' in request.headers.values() or any('test-model-key' in v for v in request.headers.values())
+        return httpx.Response(200,json={'data':[{'id':'vision-one'},{'id':'text-two'},{'id':'vision-one'},{}]})
+    import asyncio
+    assert asyncio.run(LLMClient(transport=httpx.MockTransport(handle)).list_models()) == ['text-two','vision-one']

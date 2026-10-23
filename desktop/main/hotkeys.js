@@ -15,6 +15,7 @@ const BINDINGS = [
   { accelerator: 'CommandOrControl+B', action: 'toggleWindow', label: '显示/隐藏' },
   { accelerator: 'CommandOrControl+Q', action: 'quitApp', label: '退出' },
   { accelerator: 'CommandOrControl+N', action: 'newQuestion', label: '新对话' },
+  { accelerator: 'CommandOrControl+R', action: 'resetView', label: '重置视图' },
   { accelerator: 'CommandOrControl+L', action: 'deleteLastShot', label: '删除最后一张截图' },
   { accelerator: 'CommandOrControl+Shift+Backspace', action: 'clearShots', label: '清空截图' },
 
@@ -65,6 +66,7 @@ function formatAccelerator(accelerator, platform = process.platform) {
   return mac ? parts.join('') : parts.join('+');
 }
 
+const registered = new Set();
 function registerHotkeys(handlers, bindings = BINDINGS) {
   unregisterHotkeys();
   const failed = [];
@@ -73,6 +75,7 @@ function registerHotkeys(handlers, bindings = BINDINGS) {
     if (!handler) continue;
     try {
       if (!globalShortcut.register(binding.accelerator, handler)) failed.push(binding);
+      else registered.add(binding.accelerator);
     } catch {
       failed.push(binding);
     }
@@ -90,13 +93,14 @@ function bindingsWith(overrides = {}) {
 // 只注销自己注册的那些。之前用 unregisterAll()，会把框选覆盖层临时注册的
 // Escape 一起清掉——框选进行到一半时设置页保存快捷键，Esc 就当场失效了。
 function unregisterHotkeys() {
-  for (const binding of BINDINGS) {
+  for (const accelerator of registered) {
     try {
-      globalShortcut.unregister(binding.accelerator);
+      globalShortcut.unregister(accelerator);
     } catch {
       // 未注册或已被系统收回时忽略。
     }
   }
+  registered.clear();
 }
 
 module.exports = { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator };

@@ -29,13 +29,15 @@ function tempPngPath() {
 //
 // 矩形截图不用 `screencapture -R`：macOS 26 上它稳定报 could not create image
 // from rect，而全屏截图正常。改成先整屏抓、再用 sips 裁，两段都稳定。
-async function captureScreenshot({ interactive = true, rect = null } = {}) {
+async function captureScreenshot({ interactive = true, rect = null, displayIndex = 1 } = {}) {
   if (process.platform !== 'darwin') {
     throw new Error('截图目前只支持 macOS');
   }
   const file = tempPngPath();
   // 传了 rect 就不要再走 -i：两点框选的坐标已经拿到了，交互模式反而会再弹一次十字。
   const args = interactive && !rect ? ['-x', '-i', '-t', 'png', file] : ['-x', '-t', 'png', file];
+  if (!Number.isSafeInteger(displayIndex) || displayIndex < 1) throw new Error('显示器编号无效');
+  args.splice(args.length - 1, 0, '-D', String(displayIndex));
   await run('/usr/sbin/screencapture', args);
 
   if (rect) {

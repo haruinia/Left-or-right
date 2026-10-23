@@ -21,8 +21,12 @@ function windowModule(area = {x:0,y:24,width:1440,height:876}) {
 
 test('compact restores the actual resized reading window and layouts stay within the screen',()=>{
   const {api,win} = windowModule();
+  api.setSurface(win,{answer:true});
+  win.setSize(640,700);
+  win.setPosition(900,500);
   assert.equal(api.toggleCompact(win),true);
-  assert.equal(win.getBounds().width,320);
+  assert.equal(win.getBounds().width,560);
+  assert.equal(win.getBounds().height,76);
   assert.equal(api.toggleCompact(win),false);
   assert.deepEqual([win.getBounds().width,win.getBounds().height],[640,700]);
   api.setLayout(win,'wide');
@@ -32,6 +36,7 @@ test('compact restores the actual resized reading window and layouts stay within
   api.setLayout(win,'unrecognized');
   assert.equal(api.getDisplayState(win).layout,'wide');
   const small = windowModule({x:0,y:0,width:800,height:600});
+  small.api.setSurface(small.win,{answer:true});
   small.api.setLayout(small.win,'wide');
   assert.deepEqual([small.win.getBounds().width,small.win.getBounds().height],[800,600]);
 });
@@ -43,9 +48,26 @@ test('opacity changes the background state while native text remains fully opaqu
   assert.ok(events.some(([event,value])=>event==='nativeOpacity'&&value===1));
   assert.ok(events.some(([event,value])=>event==='cockpit:display'&&value.opacity===.5));
   api.changeOpacity(win,-10);
-  assert.equal(api.getDisplayState(win).opacity,.3);
+  assert.equal(api.getDisplayState(win).opacity,0);
   api.setOpacity(win,NaN);
-  assert.equal(api.getDisplayState(win).opacity,.3);
+  assert.equal(api.getDisplayState(win).opacity,0);
+});
+
+test('idle surface grows for separate image previews and temporary settings then restores the reader',()=>{
+  const {api,win}=windowModule();
+  api.setSurface(win,{answer:false,shotCount:1});
+  assert.deepEqual([win.getBounds().width,win.getBounds().height],[560,160]);
+  api.setSurface(win,{settingsOpen:true});
+  assert.equal(win.getBounds().height,650);
+  api.setSurface(win,{settingsOpen:false});
+  assert.equal(win.getBounds().height,160);
+  api.setSurface(win,{answer:true});
+  api.setLayout(win,'narrow');
+  assert.deepEqual([win.getBounds().width,win.getBounds().height],[560,720]);
+  api.setTheme(win,'transparent-white');
+  assert.equal(api.getDisplayState(win).theme,'transparent-white');
+  api.setSurface(win,{answer:false,shotCount:0});
+  assert.equal(win.getBounds().height,76);
 });
 
 test('preferences write outside app.asar and merge with existing gateway configuration',()=>{

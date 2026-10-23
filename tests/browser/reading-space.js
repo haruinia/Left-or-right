@@ -29,16 +29,15 @@ async (page) => {
   if(await page.locator('#liuwaShots').isHidden()) throw Error('pending images disappeared before sending');
   await page.evaluate(()=>window.__liuwaSend());
   await page.locator('#liuwaAnswerTabs [data-panel="all"]').click();
-  const collapsed=await state();
-  if(!collapsed.shotsHidden||collapsed.count!==8||collapsed.height<550) throw Error('answered images still occupy the reader');
-  await page.screenshot({path:'output/playwright/reading-space-collapsed.png'});
-  await page.locator('#liuwaToggleShots').click();
   const expanded=await state();
-  if(expanded.shotsHidden||expanded.height<450||collapsed.height-expanded.height<60) throw Error('image review is missing or oversized');
+  if(expanded.shotsHidden||expanded.count!==8||expanded.height<350) throw Error('answered images are missing or oversized');
+  await page.screenshot({path:'output/playwright/reading-space-top-images.png'});
   await page.locator('[data-open="8"]').click();
-  if(!await page.locator('.liuwa-lightbox').isVisible()) throw Error('collapsed images cannot be reopened');
+  if(!await page.locator('.liuwa-lightbox').isVisible()) throw Error('top images cannot be reopened');
   await page.keyboard.press('Escape');
   await page.locator('#liuwaToggleShots').click();
+  const collapsed=await state();
+  if(!collapsed.shotsHidden||collapsed.height-expanded.height<60)throw Error('manual image collapse does not recover space');
   const titles=await page.locator('#liuwaSections option').allTextContents();
   if(!titles.includes('解题思路')||!titles.includes('最终答案')) throw Error('real answer sections missing');
   await page.locator('#liuwaSections').selectOption({label:'最终答案'});
@@ -49,11 +48,11 @@ async (page) => {
   await page.waitForFunction(()=>document.querySelector('.liuwa-stream').scrollTop<150);
   const thoughtPosition=await state();
   if(!(answerPosition.top>thoughtPosition.top))throw Error('section navigation did not move');
-  await page.locator('#liuwaDisplay summary').click();
+  await page.locator('#liuwaDisplay > summary').click();
   await page.locator('#liuwaOpacity').fill('50');
-  const opacity=await page.evaluate(()=>({panel:getComputedStyle(document.querySelector('.liuwa-orb')).backgroundColor,text:getComputedStyle(document.querySelector('.liuwa-stream')).opacity,value:document.querySelector('#liuwaOpacityValue').textContent}));
+  const opacity=await page.evaluate(()=>({panel:getComputedStyle(document.querySelector('.liuwa-reader')).backgroundColor,text:getComputedStyle(document.querySelector('.liuwa-stream')).opacity,value:document.querySelector('#liuwaOpacityValue').textContent}));
   if(!opacity.panel.includes('0.5')||opacity.text!=='1'||opacity.value!=='50%')throw Error('background opacity also faded text');
-  await page.locator('#liuwaDisplay summary').click();
+  await page.locator('#liuwaDisplay > summary').click();
   const sizes=[];
   for(const size of [{width:560,height:760},{width:1000,height:680},{width:320,height:500}]){
     await page.setViewportSize(size);
@@ -63,13 +62,13 @@ async (page) => {
   }
   await page.setViewportSize({width:560,height:760});
   await page.screenshot({path:'output/playwright/reading-space-narrow.png'});
-  await page.locator('#liuwaDisplay summary').click();
+  await page.locator('#liuwaDisplay > summary').click();
   await page.locator('#liuwaLayout').selectOption('wide');
   await page.locator('#liuwaCompact').click();
   if(!await page.locator('.liuwa-reader').isHidden())throw Error('compact did not hide the reader');
   await page.locator('#liuwaCompact').click();
   if(await page.locator('.liuwa-reader').isHidden())throw Error('expanding lost the answer');
-  await page.locator('#liuwaDisplay summary').click();
+  await page.locator('#liuwaDisplay > summary').click();
   await page.evaluate(()=>window.__spaceEvents.capture({mime:'image/png',data:document.querySelector('.liuwa-thumb img').src.split(',')[1]}));
   // The queue is full: remove one first, then confirm a new capture expands the tray.
   await page.locator('#liuwaToggleShots').click();
@@ -78,7 +77,7 @@ async (page) => {
   await capture();
   if(await page.locator('#liuwaShots').isHidden())throw Error('a new capture stayed hidden');
   await page.evaluate(()=>window.__liuwaSend());
-  if(!(await state()).shotsHidden||requestCount!==2)throw Error('the next answer did not collapse images');
+  if((await state()).shotsHidden||requestCount!==2)throw Error('the next answer lost top images');
   await page.unroute('**/api/chat/stream');
   return {passed:true,collapsed,expanded,titles,answerPosition,thoughtPosition,opacity,sizes};
 }

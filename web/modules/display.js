@@ -3,18 +3,21 @@ const opacityValue = document.querySelector('#liuwaOpacityValue');
 const layoutInput = document.querySelector('#liuwaLayout');
 const compactButton = document.querySelector('#liuwaCompact');
 const status = document.querySelector('#liuwaDisplayStatus');
-let current = {opacity: .9, layout: 'standard', compact: false};
+let current = {opacity: .9, layout: 'narrow', compact: true, theme:'light', answer:false};
 
 export function applyDisplay(display = {}) {
   current = {...current, ...display};
-  const opacity = Math.max(.3, Math.min(1, Number(current.opacity) || .9));
+  const opacity = Math.max(0, Math.min(1, Number.isFinite(Number(current.opacity)) ? Number(current.opacity) : .9));
   document.documentElement.style.setProperty('--panel-opacity', opacity);
   document.documentElement.dataset.layout = current.layout;
+  document.documentElement.dataset.theme = current.theme;
   document.body.classList.toggle('liuwa-compact', Boolean(current.compact));
-  if (opacityInput) opacityInput.value = String(Math.round(opacity * 100));
-  if (opacityValue) opacityValue.textContent = `${Math.round(opacity * 100)}%`;
+  const transparent = current.theme.startsWith('transparent-');
+  if (opacityInput) {opacityInput.value = String(Math.round(opacity * 100));opacityInput.disabled=transparent;}
+  if (opacityValue) opacityValue.textContent = transparent ? '全透明' : `${Math.round(opacity * 100)}%`;
+  document.querySelectorAll('[data-theme-mode]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.themeMode===current.theme)));
   if (layoutInput) layoutInput.value = current.layout;
-  if (compactButton) compactButton.textContent = current.compact ? '展开窗口' : '收起窗口';
+  if (compactButton) {compactButton.textContent = current.compact ? '展开回答' : '收起回答';compactButton.disabled=!current.answer;}
 }
 
 async function updateDisplay(patch) {
@@ -38,6 +41,7 @@ async function updateDisplay(patch) {
 opacityInput?.addEventListener('input', () => updateDisplay({opacity: Number(opacityInput.value) / 100}));
 layoutInput?.addEventListener('change', () => updateDisplay({layout: layoutInput.value, compact: false}));
 compactButton?.addEventListener('click', () => updateDisplay({compact: !current.compact}));
+document.querySelectorAll('[data-theme-mode]').forEach(button=>button.addEventListener('click',()=>updateDisplay({theme:button.dataset.themeMode})));
 window.cockpit?.onDisplay?.(applyDisplay);
 if (!window.cockpit) {
   try { applyDisplay(JSON.parse(localStorage.getItem('liuwa.display') || '{}')); } catch { applyDisplay(); }

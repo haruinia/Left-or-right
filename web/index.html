@@ -18,45 +18,44 @@
   </head>
   <body class="liuwa-page is-empty">
     <main class="liuwa-orb">
-      <section class="liuwa-reader" aria-label="题解阅读区">
-        <nav class="liuwa-pagination" id="liuwaPagination" aria-label="题解翻页" hidden>
-          <button type="button" id="liuwaReadingPrev" disabled>上一页</button>
-          <span>使用 <kbd data-key-action="readPrev">⌘,</kbd> / <kbd data-key-action="readNext">⌘.</kbd> 上下翻页</span>
-          <button type="button" id="liuwaReadingNext" disabled>下一页</button>
-          <select id="liuwaSections" aria-label="定位回答章节" hidden></select>
-        </nav>
-        <div id="liuwaAnswerTabs" class="liuwa-answer-tabs" role="tablist" aria-label="回答内容" hidden></div>
-      <div class="liuwa-thread" id="liuwaThread" role="region" aria-label="题目与 AI 讲解" aria-live="polite" aria-relevant="additions text">
-        <div class="liuwa-idle" id="liuwaIdle">
-          <h2>思路，就在旁边。</h2>
-          <p>截下这道题，慢慢看懂它。</p>
-        </div>
-      </div>
-      </section>
-
-      <footer class="liuwa-dock">
-        <div class="liuwa-toolbar">
-          <button type="button" id="liuwaToggleShots" aria-expanded="true" aria-controls="liuwaShots" hidden></button>
-          <details class="liuwa-display" id="liuwaDisplay">
-            <summary>显示</summary>
-            <div class="liuwa-display-panel">
-              <label for="liuwaOpacity">背景不透明度 <output id="liuwaOpacityValue">90%</output></label>
-              <input type="range" id="liuwaOpacity" min="30" max="100" step="10" value="90" />
-              <label for="liuwaLayout">窗口布局</label>
-              <select id="liuwaLayout">
-                <option value="narrow">窄长</option>
-                <option value="standard" selected>标准</option>
-                <option value="wide">宽屏</option>
-              </select>
-              <button type="button" id="liuwaCompact">收起窗口</button>
-              <p id="liuwaDisplayStatus" role="status"></p>
+      <div class="liuwa-shots" id="liuwaShots" aria-label="题目截图" hidden></div>
+      <nav class="liuwa-command-bar" aria-label="截图与解题">
+        <button type="button" id="liuwaCapture">截图 <kbd id="hintCapture" data-key-action="captureRegion">⌘H</kbd></button>
+        <button type="button" id="liuwaSend">解题 <kbd data-key-action="sendChat">⌘Enter</kbd></button>
+        <button type="button" id="liuwaDelete">删图 <kbd data-key-action="deleteLastShot">⌘L</kbd></button>
+        <button type="button" id="liuwaReset">重置 <kbd data-key-action="resetView">⌘R</kbd></button>
+        <button type="button" id="liuwaToggleShots" aria-expanded="true" aria-controls="liuwaShots" hidden>题图</button>
+        <details class="liuwa-display" id="liuwaDisplay">
+          <summary aria-label="快捷设置" title="快捷设置">⚙</summary>
+          <div class="liuwa-display-panel">
+            <header class="liuwa-settings-title"><strong>快捷设置</strong><button type="button" id="liuwaCloseSettings" aria-label="关闭快捷设置">×</button></header>
+            <label for="quickProgrammingLanguage">编程语言</label>
+            <input id="quickProgrammingLanguage" list="quickLanguages" maxlength="80" disabled />
+            <datalist id="quickLanguages"><option value="Python"><option value="Java"><option value="C++"><option value="JavaScript"><option value="TypeScript"><option value="Go"><option value="Rust"><option value="C"><option value="SQL"></datalist>
+            <label for="quickAnswerLanguage">回答语言</label>
+            <select id="quickAnswerLanguage" disabled><option value="zh-CN">中文</option><option value="en-US">English</option></select>
+            <div class="liuwa-theme-options" role="group" aria-label="外观模式">
+              <button type="button" data-theme-mode="light" aria-label="白色模式">白色</button>
+              <button type="button" data-theme-mode="dark" aria-label="黑色模式">黑色</button>
+              <button type="button" data-theme-mode="transparent-black" aria-label="透明黑字模式">透明黑字</button>
+              <button type="button" data-theme-mode="transparent-white" aria-label="透明白字模式">透明白字</button>
             </div>
-          </details>
-        </div>
-        <div class="liuwa-shots" id="liuwaShots" hidden></div>
+            <label for="quickScreenshotModel">截图模型</label><input id="quickScreenshotModel" list="quickModelOptions" maxlength="160" disabled />
+            <label for="quickInterviewModel">面试模型</label><input id="quickInterviewModel" list="quickModelOptions" maxlength="160" disabled />
+            <datalist id="quickModelOptions"></datalist>
+            <div class="liuwa-settings-actions"><button type="button" id="quickSaveModels" disabled>保存模型</button><button type="button" id="quickRefreshModels">刷新列表</button></div>
+            <p class="liuwa-setting-note">使用已配置的模型接口；截图模型需要支持图片。</p>
+            <label for="quickIdentity">我的身份</label><select id="quickIdentity" disabled><option value="candidate">面试者</option><option value="interviewer">面试官</option></select>
+            <label for="quickCaptureMode">截图方式</label><select id="quickCaptureMode" disabled><option value="area">局部截图</option><option value="full">全屏截图</option></select>
+            <label for="quickDisplay">显示器</label><select id="quickDisplay" disabled><option>正在读取…</option></select>
+            <label for="liuwaOpacity">背景不透明度 <output id="liuwaOpacityValue">90%</output></label>
+            <input type="range" id="liuwaOpacity" min="0" max="100" step="10" value="90" />
+            <label for="liuwaLayout">回答窗口</label><select id="liuwaLayout"><option value="narrow">窄长</option><option value="standard">标准</option><option value="wide">宽屏</option></select>
+            <button type="button" id="liuwaCompact">收起回答</button>
+            <p id="liuwaDisplayStatus" role="status"></p>
         <section class="liuwa-shortcuts" id="liuwaKeys">
-          <div class="liuwa-shortcut-primary">
-            <span>截图 <kbd id="hintCapture" data-key-action="captureRegion">⌘H</kbd></span>
+          <div class="liuwa-shortcut-primary" hidden>
+            <span>截图 <kbd data-key-action="captureRegion">⌘H</kbd></span>
             <span>处理 <kbd id="hintSend" data-key-action="sendChat">⌘Enter</kbd></span>
             <span>显示/隐藏 <kbd data-key-action="toggleWindow">⌘B</kbd></span>
             <span>删除最后一张 <kbd data-key-action="deleteLastShot">⌘L</kbd></span>
@@ -77,6 +76,7 @@
               <span>缩小字号 <kbd data-key-action="zoomOut">⌘−</kbd></span>
               <span>还原字号 <kbd data-key-action="zoomReset">⌘0</kbd></span>
               <span>放大字号 <kbd data-key-action="zoomIn">⌘=</kbd></span>
+              <span>重置视图 <kbd data-key-action="resetView">⌘R</kbd></span>
               <span>新对话 <kbd data-key-action="newQuestion">⌘N</kbd></span>
               <span>清空截图 <kbd data-key-action="clearShots">⌘⇧⌫</kbd></span>
               <span>操作面板 <kbd id="hintInteract" data-key-action="toggleVisible">⌘⇧Space</kbd></span>
@@ -87,10 +87,31 @@
           </details>
           <p class="liuwa-hotkey-warning" id="liuwaHotkeyWarning" role="status" hidden></p>
         </section>
-        <p class="liuwa-status" id="liuwaStatus" role="status"></p>
-        <span role="button" tabindex="0" class="liuwa-stop" id="liuwaStop" aria-label="停止生成" hidden>停止生成</span>
-      </footer>
+
+            <button type="button" id="quickAdvancedSettings">更多设置与学习资产 ↗</button>
+            <p id="quickSettingsStatus" role="status">正在读取设置…</p>
+          </div>
+        </details>
+      </nav>
+      <section class="liuwa-reader" aria-label="题解阅读区">
+        <nav class="liuwa-pagination" id="liuwaPagination" aria-label="题解翻页" hidden>
+          <button type="button" id="liuwaReadingPrev" disabled>上一页</button>
+          <span>使用 <kbd data-key-action="readPrev">⌘,</kbd> / <kbd data-key-action="readNext">⌘.</kbd> 上下翻页</span>
+          <button type="button" id="liuwaReadingNext" disabled>下一页</button>
+          <select id="liuwaSections" aria-label="定位回答章节" hidden></select>
+        </nav>
+        <div id="liuwaAnswerTabs" class="liuwa-answer-tabs" role="tablist" aria-label="回答内容" hidden></div>
+      <div class="liuwa-thread" id="liuwaThread" role="region" aria-label="题目与 AI 讲解" aria-live="polite" aria-relevant="additions text">
+        <div class="liuwa-idle" id="liuwaIdle">
+          <h2>思路，就在旁边。</h2>
+          <p>截下这道题，慢慢看懂它。</p>
+        </div>
+      </div>
+      </section>
+
+      <div class="liuwa-feedback"><p class="liuwa-status" id="liuwaStatus" role="status"></p><span role="button" tabindex="0" class="liuwa-stop" id="liuwaStop" aria-label="停止生成" hidden>停止生成</span></div>
     </main>
+    <input type="file" id="liuwaImageImport" accept="image/*" multiple hidden />
     <script type="module" src="modules/home.js"></script>
   </body>
 </html>

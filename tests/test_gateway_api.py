@@ -3956,3 +3956,40 @@ def test_gateway_chat_stream_rejects_invalid_images(tmp_path: Path, monkeypatch)
     response = client.post("/api/chat/stream", json={"images": ["not-a-data-url"]})
     assert response.status_code == 400
     assert "data URL" in response.json()["detail"]
+
+
+def test_quick_settings_patch_preserves_unrelated_fields(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch)
+    before = client.get('/api/ui/settings').json()
+    before['study_instructions'] = '保留用户偏好'
+    client.post('/api/ui/settings', json=before).raise_for_status()
+    saved = client.patch('/api/ui/settings', json={'study_language':'Java','answer_language':'en-US','assistant_role':'interviewer'}).json()
+    assert saved['study_language'] == 'Java'
+    assert saved['answer_language'] == 'en-US'
+    assert saved['assistant_role'] == 'interviewer'
+    assert saved['study_instructions'] == '保留用户偏好'
+    assert saved['hotkeys']['resetView'] == 'CommandOrControl+R'
+    assert client.patch('/api/ui/settings', json={'answer_language':'invalid'}).status_code == 422
+    assert client.patch('/api/ui/settings', json={'unknown':True}).status_code == 422
+    from libs.schemas import UiSettings
+    from services.chat_service.service import study_preface
+    preface = study_preface(UiSettings.model_validate(saved))
+    assert 'English' in preface and '面试官' in preface and 'Java' in preface
+
+
+def test_separate_models_are_persisted_and_route_to_the_actual_payload(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = _client(tmp_path, monkeypatch)
+    (tmp_path/'.env').write_text('LLM_API_KEY=keep-existing-key\nLLM_BASE_URL=https://existing.test/v1\n')
+    saved=client.post('/api/config/models',json={'screenshot_model':'provider/vision-v2','interview_model':'provider/text-v3'})
+    assert saved.status_code == 200
+    from libs.llm_client.client import LLMMessage, _payload_model
+    assert _payload_model([LLMMessage(role='user',content='题目',images=('data:image/png;base64,AA==',))]) == 'provider/vision-v2'
+    assert _payload_model([LLMMessage(role='user',content='面试问题')]) == 'provider/text-v3'
+    raw=(tmp_path/'.env').read_text()
+    assert 'LLM_API_KEY=keep-existing-key' in raw and 'VISION_MODEL=provider/vision-v2' in raw
+    assert 'LLM_MODEL=provider/text-v3' in raw
+    for value in ['bad\nLLM_API_KEY=oops', 'bad #comment','']:
+        assert client.post('/api/config/models',json={'screenshot_model':value,'interview_model':'okay'}).status_code == 422
+    models=client.get('/api/config/models').json()
+    assert 'provider/vision-v2' in models['models']

@@ -4,16 +4,18 @@ const { execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { app, BrowserWindow, shell, screen } = require('electron');
 
-const COMPACT = { width: 320, height: 240 };
+const COMPACT = { width: 560, height: 76 };
 // 780 = Gank 解答区的 740px 上限 + 窗口与卡片两层内边距（约 40px）。
 // 560 时卡片内宽只有 460，长代码行仍然折；对齐 Gank 的实际阅读宽度。
 const EXPANDED = { width: 780, height: 760 };
-const LAYOUTS = { narrow: {width: 560, height: 760}, standard: EXPANDED, wide: {width: 1000, height: 680} };
+const LAYOUTS = { narrow: {width: 560, height: 720}, standard: EXPANDED, wide: {width: 1000, height: 680} };
 
 let compact = false;
 let layout = 'standard';
 let expandedSize = {...EXPANDED};
 let onDisplayChange = null;
+let theme = 'light';
+let surface = {answer:false, shotCount:0, settingsOpen:false, notice:false};
 
 // The UI ships with the app and loads from disk, so the window still renders when
 // the gateway is down. The gateway URL and key reach the renderer through the
@@ -29,12 +31,14 @@ function createWindow(config, { onMove, onDisplay } = {}) {
   // 记住上次的位置：透明无边框窗口没有标题栏可以拖，每次启动都回默认位置
   // 时用户得重新按快捷键挪一遍。
   const saved = config && config.windowBounds;
-  compact = false;
-  layout = Object.hasOwn(LAYOUTS, config?.windowLayout) ? config.windowLayout : 'standard';
+  compact = true;
+  surface = {answer:false, shotCount:0, settingsOpen:false, notice:false};
+  layout = config?.surfaceVersion === 1 && Object.hasOwn(LAYOUTS, config?.windowLayout) ? config.windowLayout : 'narrow';
+  theme = ['light','dark','transparent-black','transparent-white'].includes(config?.panelTheme) ? config.panelTheme : 'light';
   opacity = Number.isFinite(config?.panelOpacity) ? config.panelOpacity : .9;
   expandedSize = {
-    width: Number.isFinite(saved?.width) ? Math.max(COMPACT.width, saved.width) : LAYOUTS[layout].width,
-    height: Number.isFinite(saved?.height) ? Math.max(COMPACT.height, saved.height) : LAYOUTS[layout].height,
+    width: config?.surfaceVersion === 1 && Number.isFinite(saved?.width) ? Math.max(320, saved.width) : LAYOUTS[layout].width,
+    height: config?.surfaceVersion === 1 && Number.isFinite(saved?.height) ? Math.max(300, saved.height) : LAYOUTS[layout].height,
   };
   onDisplayChange = onDisplay;
   const win = new BrowserWindow({
@@ -43,9 +47,9 @@ function createWindow(config, { onMove, onDisplay } = {}) {
     ...(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
       ? { x: Math.round(saved.x), y: Math.round(saved.y) }
       : {}),
-    width: Math.round(expandedSize.width),
-    height: Math.round(expandedSize.height),
-    minWidth: COMPACT.width,
+    width: COMPACT.width,
+    height: COMPACT.height,
+    minWidth: 320,
     minHeight: COMPACT.height,
     frame: false,
     show: false,
@@ -67,7 +71,7 @@ function createWindow(config, { onMove, onDisplay } = {}) {
       backgroundThrottling: false,
     },
   });
-  fitWindow(win, expandedSize);
+  fitWindow(win, COMPACT);
   clampToArea(win);
   setOpacity(win, opacity);
 
@@ -104,7 +108,7 @@ function createWindow(config, { onMove, onDisplay } = {}) {
   win.once('ready-to-show', () => {
     win.setBackgroundColor('#00000000');
     win.setFocusable(false);
-    setClickThrough(win, true);
+    setClickThrough(win, false);
     win.showInactive();
   });
   win.on('blur', () => {
@@ -141,7 +145,8 @@ function createWindow(config, { onMove, onDisplay } = {}) {
       if (win.isDestroyed()) return;
       const { x, y, width, height } = win.getBounds();
       // 收起尺寸不覆盖阅读尺寸；重启仍恢复最后的阅读窗口。
-      onMove({ x, y, ...(compact ? expandedSize : {width, height}) });
+      if (!compact && !surface.settingsOpen) expandedSize = {width,height};
+      onMove({ x, y, ...expandedSize });
     }, 400);
   };
   win.on('move', persistBounds);
@@ -152,19 +157,19 @@ function createWindow(config, { onMove, onDisplay } = {}) {
 
 // 不透明度：Gank 用 ⌘[ / ⌘] 调，范围 0.3–1，默认 1。
 // 悬浮窗挡在题目上时，调低一点能看清底下的原文。
-const OPACITY_MIN = 0.3;
+const OPACITY_MIN = 0;
 const OPACITY_MAX = 1;
 const OPACITY_STEP = 0.1;
 let opacity = .9;
 
 function getDisplayState(win) {
-  return {opacity, layout, compact, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
+  return {opacity, layout, compact, theme, ...surface, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
 }
 
 function notifyDisplay(win) {
   const display = getDisplayState(win);
   if (win && !win.isDestroyed()) win.webContents.send('cockpit:display', display);
-  onDisplayChange?.({panelOpacity: opacity, windowLayout: layout});
+  onDisplayChange?.({panelOpacity: opacity, windowLayout: layout, panelTheme:theme, surfaceVersion:1});
   return display;
 }
 
@@ -222,12 +227,12 @@ function moveWindow(win, dx, dy) {
 
 function toggleCompact(win) {
   if (!win || win.isDestroyed()) return compact;
-  if (!compact) {
+  if (!compact && !surface.settingsOpen) {
     const {width, height} = win.getBounds();
     expandedSize = {width, height};
   }
   compact = !compact;
-  fitWindow(win, compact ? COMPACT : expandedSize);
+  fitSurface(win);
   // 贴在屏幕右下角时展开，大半截会跑到屏幕外——重设尺寸后重新夹一次。
   clampToArea(win);
   win.webContents.send('cockpit:compact', compact);
@@ -243,11 +248,35 @@ function fitWindow(win, size) {
 function setLayout(win, value) {
   if (!win || win.isDestroyed() || !Object.hasOwn(LAYOUTS, value)) return getDisplayState(win);
   layout = value;
-  compact = false;
+  compact = !surface.answer;
   expandedSize = {...LAYOUTS[value]};
-  fitWindow(win, expandedSize);
+  fitSurface(win);
   clampToArea(win);
   win.webContents.send('cockpit:compact', false);
+  return notifyDisplay(win);
+}
+
+function fitSurface(win) {
+  const size = compact ? {...COMPACT, height:COMPACT.height + (surface.shotCount ? 84 : 0) + (surface.notice ? 26 : 0)} : {...expandedSize};
+  if(surface.settingsOpen) size.height = Math.max(size.height, 650);
+  fitWindow(win, size);
+  clampToArea(win);
+}
+
+function setSurface(win, patch = {}) {
+  if(!win || win.isDestroyed()) return getDisplayState(win);
+  if(patch.answer === false) compact = true;
+  else if(patch.answer === true && !surface.answer) compact = false;
+  if(typeof patch.answer === 'boolean') surface.answer = patch.answer;
+  if(Number.isInteger(patch.shotCount)) surface.shotCount = Math.max(0, Math.min(8, patch.shotCount));
+  if(typeof patch.settingsOpen === 'boolean') surface.settingsOpen = patch.settingsOpen;
+  if(typeof patch.notice === 'boolean') surface.notice = patch.notice;
+  fitSurface(win);
+  return notifyDisplay(win);
+}
+
+function setTheme(win, value) {
+  if(['light','dark','transparent-black','transparent-white'].includes(value)) theme = value;
   return notifyDisplay(win);
 }
 
@@ -255,7 +284,7 @@ function showWindow(win) {
   if (!win || win.isDestroyed()) return;
   if (!win.isVisible()) win.showInactive();
   win.setFocusable(false);
-  setClickThrough(win, !isInteractive());
+  setClickThrough(win, false);
 }
 
 function hideWindow(win) {
@@ -318,7 +347,7 @@ function setInteractive(win, on, { restore = true } = {}) {
     setClickThrough(win, false);
     win.focus();
   } else {
-    setClickThrough(win, true);
+    setClickThrough(win, false);
     win.setFocusable(false);
     const pid = previousPid;
     previousPid = '';
@@ -361,4 +390,6 @@ module.exports = {
   LAYOUTS,
   setLayout,
   getDisplayState,
+  setSurface,
+  setTheme,
 };

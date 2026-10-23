@@ -1185,6 +1185,7 @@ class UiHotkeys(BaseModel):
     toggleWindow: str = "CommandOrControl+B"
     quitApp: str = "CommandOrControl+Q"
     newQuestion: str = "CommandOrControl+N"
+    resetView: str = "CommandOrControl+R"
     deleteLastShot: str = "CommandOrControl+L"
     clearShots: str = "CommandOrControl+Shift+Backspace"
 
@@ -1216,6 +1217,7 @@ class UiHotkeys(BaseModel):
         "captureScreen",
         "sendChat",
         "newQuestion",
+        "resetView",
         "deleteLastShot",
         "clearShots",
         "readPrev",
@@ -1265,6 +1267,8 @@ class ChatStreamRequest(BaseModel):
 
 
 class UiSettings(BaseModel):
+    answer_language: Literal["zh-CN", "en-US"] = "zh-CN"
+    assistant_role: Literal["candidate", "interviewer"] = "candidate"
     study_specialty: str = Field(default="计算机 / 软件工程", max_length=120)
     study_language: str = Field(default="Python", max_length=80)
     study_goal: str = Field(default="看懂眼前这段代码或报错", max_length=1000)

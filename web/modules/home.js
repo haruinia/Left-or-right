@@ -1,4 +1,4 @@
-import { formatAccelerator } from "./shortcuts.js";
+import { formatAccelerator, acceleratorFromEvent } from "./shortcuts.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
 import { saveSessionRecord } from "./session-store.js";
 import { renderAnswer } from "./answer-view.js";
@@ -6,6 +6,7 @@ import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
 import { page, resetReading } from "./reading.js";
 import { syncSections, jumpToSection } from "./answer-navigation.js";
 import { applyDisplay } from "./display.js";
+import './quick-settings.js';
 
 const thread = document.querySelector("#liuwaThread");
 const idle = document.querySelector("#liuwaIdle");
@@ -35,6 +36,8 @@ let nextShotId = 1;
 let currentModel = "";
 let activeShotId = "";
 let shotsExpanded = true;
+let surfaceSignature = '';
+let resetAccelerator = 'CommandOrControl+R';
 let sessionStartedAt = new Date().toISOString();
 
 function syncActiveShot() {
@@ -64,6 +67,7 @@ function escapeHtml(value) {
 
 function setStatus(text) {
   if (statusNode) statusNode.textContent = text || "";
+  window.cockpit?.setSurface?.({notice:Boolean(text)}).then(applyDisplay).catch(()=>{});
 }
 
 function syncEmpty() {
@@ -76,6 +80,13 @@ function syncEmpty() {
   if (pagination) pagination.hidden = empty;
   if (empty) document.querySelector('#liuwaAnswerTabs').hidden = true;
   syncReadingControls();
+  const surface = {answer:!empty,shotCount:shotsExpanded ? pending.length : 0};
+  const signature = JSON.stringify(surface);
+  if(signature !== surfaceSignature) {
+    if(!surfaceSignature || JSON.parse(surfaceSignature).answer !== surface.answer) applyDisplay({compact:empty,answer:!empty});
+    surfaceSignature = signature;
+    window.cockpit?.setSurface?.(surface).then(applyDisplay).catch(()=>setStatus('窗口显示状态未能更新。'));
+  }
 }
 
 function renderPending() {
@@ -317,7 +328,14 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
   throw lastError || new Error("发送失败，请检查网络后重试。");
 }
 
-async function sendChat() {
+let activeSendTask = null;
+function sendChat() {
+  if(activeSendTask) return activeSendTask;
+  activeSendTask = runChat().finally(()=>{activeSendTask=null;});
+  return activeSendTask;
+}
+
+async function runChat() {
   if (savingSession) {
     setStatus("正在保存会话，请稍候。");
     return;
@@ -361,8 +379,6 @@ async function sendChat() {
     const answer = renderAnswer(reply, streamNode, {complete});
     if (answer.full.trim() && !streamNode.dataset.hasContent) {
       streamNode.dataset.hasContent = 'true';
-      shotsExpanded = false;
-      renderPending();
     }
     syncReadingControls();
   };
@@ -446,6 +462,7 @@ function stopChat() {
 
 function applyHotkeyHints(cfg) {
   const byAction = new Map((cfg.hotkeys || []).map((binding) => [binding.action, binding]));
+  resetAccelerator = byAction.get('resetView')?.accelerator || 'CommandOrControl+R';
   const apply = (node, action) => {
     const binding = byAction.get(action);
     if (node && binding && binding.display) node.textContent = binding.display;
@@ -479,6 +496,7 @@ function wireDesktop(cockpit) {
   document.body.classList.add("liuwa-shell");
   cockpit.onHotkeys?.(applyHotkeyHints);
   cockpit.onNewQuestion?.(newQuestion);
+  cockpit.onReset?.(resetView);
   cockpit.onClearShots?.(clearShots);
   cockpit.onDeleteLastShot?.(deleteLastShot);
   cockpit.onTheme?.(applyTheme);
@@ -572,6 +590,21 @@ shots?.addEventListener("keydown", (event) => {
 stopBtn?.addEventListener("click", stopChat);
 readingPrev?.addEventListener("click", () => page(-1));
 readingNext?.addEventListener("click", () => page(1));
+document.querySelector('#liuwaSend')?.addEventListener('click',sendChat);
+document.querySelector('#liuwaDelete')?.addEventListener('click',deleteLastShot);
+document.querySelector('#liuwaReset')?.addEventListener('click',resetView);
+document.addEventListener('keydown',event=>{
+  if(window.cockpit && acceleratorFromEvent(event, /Mac|iPhone|iPad/.test(navigator.platform)) === resetAccelerator) {
+    event.preventDefault();resetView();
+  }
+});
+document.querySelector('#liuwaCapture')?.addEventListener('click',()=>window.cockpit?.captureExam ? window.cockpit.captureExam() : document.querySelector('#liuwaImageImport').click());
+document.querySelector('#liuwaImageImport')?.addEventListener('change',event=>{
+  Array.from(event.target.files || []).filter(file=>file.type.startsWith('image/')).forEach(file=>{
+    const reader=new FileReader();reader.onload=()=>addShot(String(reader.result || ''));reader.readAsDataURL(file);
+  });
+  event.target.value='';
+});
 sections?.addEventListener('change', () => jumpToSection(thread?.querySelector('.liuwa-stream'), sections.value));
 thread?.addEventListener('answer-panel-change', () => {
   if(sections) { sections.value = ''; delete sections.dataset.sections; }
@@ -704,6 +737,17 @@ async function newQuestion() {
   resetReading();
   renderPending();
   setStatus("");
+}
+let resetting = false;
+async function resetView() {
+  if(resetting)return;
+  resetting=true;
+  try {
+    stopChat();
+    if(activeSendTask)await activeSendTask;
+    await newQuestion();
+    if(document.body.classList.contains('is-empty')) document.querySelector('#liuwaDisplay').open=false;
+  } finally {resetting=false;}
 }
 window.addEventListener("focus", refreshContext);
 document.addEventListener("visibilitychange", () => {

@@ -2,7 +2,7 @@
 
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
-const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences } = require('electron');
+const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences, screen } = require('electron');
 const { loadConfig, saveConfig } = require('./config');
 const {
   createWindow,
@@ -11,13 +11,15 @@ const {
   toggleVisible,
   beginHoldInteract,
   setClickThrough,
-  isInteractive,
   changeOpacity,
   changeZoom,
   resetZoom,
   setOpacity,
   setLayout,
   getDisplayState,
+  setSurface,
+  setTheme,
+  setInteractive,
 } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
@@ -78,13 +80,14 @@ function hotkeyHandlers() {
     moveLeft: () => moveWindow(win, -STEP, 0),
     moveRight: () => moveWindow(win, STEP, 0),
 
-    captureRegion: () => attachScreenshot({ interactive: true }),
+    captureRegion: () => attachScreenshot({ interactive: config.screenshotMode !== 'full' }),
     // 全屏截图不该弹框选十字：screencapture 不带 -i 直接抓当前显示器的完整画面。
     captureScreen: () => attachScreenshot({ interactive: false }),
     sendChat: () => sendChat(),
     newQuestion: () => {
       if (win && !win.isDestroyed()) win.webContents.send('liuwa:new-question');
     },
+    resetView: () => { if(win && !win.isDestroyed()) win.webContents.send('liuwa:reset-view'); },
     readPrev: () => sendRead('prev'),
     readNext: () => sendRead('next'),
     scrollUp: () => sendScroll(-1),
@@ -154,7 +157,7 @@ async function hideWindowForCapture() {
 function restoreWindow(wasVisible) {
   if (wasVisible && win && !win.isDestroyed()) {
     win.showInactive();
-    setClickThrough(win, !isInteractive());
+    setClickThrough(win, false);
   }
 }
 
@@ -169,11 +172,14 @@ async function attachScreenshot({ interactive }) {
   screenBusy = true;
   const wasVisible = await hideWindowForCapture();
   try {
+    const displays = screen.getAllDisplays();
+    const display = displays.find(d => String(d.id) === String(config.captureDisplayId)) || screen.getPrimaryDisplay();
+    const displayIndex = displays.findIndex(d => d.id === display.id) + 1;
     let rect = null;
     if (interactive) {
       // 两点式框选：先让用户点两个角，再按矩形截。
       // 取消（Esc / 右键）返回 null，此时不该截图也不该报错。
-      rect = await selectRegion();
+      rect = await selectRegion(display);
       if (!rect) {
         restoreWindow(wasVisible);
         return;
@@ -181,7 +187,7 @@ async function attachScreenshot({ interactive }) {
     }
     // 节流只统计真正发生了的截图：取消/重选不该被 800ms 挡回去。
     lastScreenshotTime = Date.now();
-    const shot = await captureScreenshot({ interactive: false, rect });
+    const shot = await captureScreenshot({ interactive: false, rect, displayIndex });
     restoreWindow(wasVisible);
     sendCapture({
       mime: shot.mime,
@@ -222,12 +228,19 @@ function hotkeySnapshot() {
   };
 }
 
+function captureOptions() {
+  const displays = screen.getAllDisplays();
+  const selected = displays.find(d => String(d.id) === String(config.captureDisplayId)) || screen.getPrimaryDisplay();
+  return {mode:config.screenshotMode || 'area',displayId:String(selected.id),displays:displays.map((d,i)=>({id:String(d.id),label:d.label || `显示器 ${i+1}`,width:d.bounds.width,height:d.bounds.height,scaleFactor:d.scaleFactor}))};
+}
+
 function registerIpc() {
   ipcMain.handle('cockpit:getConfig', () => ({
     gatewayUrl: config.gatewayUrl,
     gatewayApiKey: config.gatewayApiKey,
     ...hotkeySnapshot(),
     display: getDisplayState(win),
+    captureOptions: captureOptions(),
   }));
   ipcMain.on('cockpit:getConfigSync', (event) => {
     event.returnValue = { gatewayUrl: config.gatewayUrl, gatewayApiKey: config.gatewayApiKey };
@@ -236,19 +249,37 @@ function registerIpc() {
   ipcMain.handle('cockpit:setDisplay', (_event, patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('Invalid display settings');
     if (Number.isFinite(patch.opacity)) setOpacity(win, patch.opacity);
+    if (typeof patch.theme === 'string') setTheme(win, patch.theme);
     if (typeof patch.layout === 'string') setLayout(win, patch.layout);
     if (typeof patch.compact === 'boolean' && patch.compact !== getDisplayState(win).compact) toggleCompact(win);
     const display = getDisplayState(win);
     const {x, y, width, height} = display;
-    const saved = saveConfig({panelOpacity: display.opacity, windowLayout: display.layout,
+    const saved = saveConfig({panelOpacity: display.opacity, windowLayout: display.layout, panelTheme:display.theme, surfaceVersion:1,
       ...(!display.compact && Number.isFinite(x) ? {windowBounds: {x, y, width, height}} : {})});
     return {...display, saved};
   });
+  ipcMain.handle('cockpit:setSurface', (_event, patch) => {
+    if(!patch || typeof patch !== 'object') throw new Error('Invalid surface state');
+    if(typeof patch.settingsOpen === 'boolean') setInteractive(win, patch.settingsOpen);
+    return setSurface(win, patch);
+  });
+  ipcMain.handle('cockpit:setCaptureOptions', (_event, patch) => {
+    if(!patch || typeof patch !== 'object') throw new Error('Invalid capture settings');
+    if(['area','full'].includes(patch.mode)) config.screenshotMode = patch.mode;
+    if(patch.displayId !== undefined) {
+      if(!screen.getAllDisplays().some(d => String(d.id) === String(patch.displayId))) throw new Error('显示器已断开，请重新选择');
+      config.captureDisplayId = String(patch.displayId);
+    }
+    const saved = saveConfig({screenshotMode:config.screenshotMode || 'area',captureDisplayId:config.captureDisplayId || ''});
+    return {...captureOptions(),saved};
+  });
+  ipcMain.handle('cockpit:openSettings', () => shell.openExternal('http://127.0.0.1:9958/settings.html'));
+  ipcMain.handle('liuwa:reset-view', () => { if(win && !win.isDestroyed()) win.webContents.send('liuwa:reset-view'); });
   ipcMain.handle('cockpit:toggleVisible', () => {
     toggleVisible(win);
   });
   ipcMain.handle('liuwa:capture', (_event, options) =>
-    attachScreenshot({ interactive: options?.interactive !== false }),
+    attachScreenshot({ interactive: typeof options?.interactive === 'boolean' ? options.interactive : config.screenshotMode !== 'full' }),
   );
   ipcMain.handle('liuwa:send', () => sendChat());
 }
@@ -261,7 +292,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => {
     if (win && !win.isDestroyed()) {
       win.showInactive();
-      setClickThrough(win, !isInteractive());
+      setClickThrough(win, false);
     }
   });
   app.whenReady().then(boot);

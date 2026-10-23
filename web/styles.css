@@ -3230,6 +3230,146 @@ html[data-layout="wide"] { --reader-width: 1000px; }
   .liuwa-turn.is-assistant .liuwa-stream { padding: 12px 14px 16px; }
 }
 
+/* 主悬浮窗：独立题图、短工具条和按需展开的阅读卡片。 */
+body.liuwa-page .liuwa-orb,
+body.liuwa-shell .liuwa-orb,
+html.liuwa-host .liuwa-orb {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  align-content: start;
+  gap: 8px;
+  width: calc(100% - 16px);
+  max-width: var(--reader-width);
+  height: calc(100dvh - 16px);
+  margin: 8px auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.liuwa-page.is-empty .liuwa-orb,
+.liuwa-page.liuwa-compact .liuwa-orb { grid-template-rows: auto auto auto; align-content: start; }
+.liuwa-page.is-empty .liuwa-reader,
+.liuwa-page.liuwa-compact .liuwa-reader { display: none; }
+.liuwa-page .liuwa-shots { grid-row: 1; min-height: 0; max-height: 76px; padding: 3px; gap: 8px; }
+body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
+.liuwa-page .liuwa-shots .liuwa-thumb { background: transparent; }
+.liuwa-page .liuwa-thumb img { width: 112px; height: 64px; background: #fff; border: 2px solid #fff; border-radius: 9px; box-shadow: var(--shadow-sm); }
+.liuwa-page .liuwa-thumb-x { top: -2px; right: -2px; }
+.liuwa-command-bar {
+  grid-row: 2;
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 50px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(var(--panel-rgb, 255,255,255), var(--panel-opacity));
+  box-shadow: var(--shadow-sm);
+  -webkit-app-region: drag;
+}
+.liuwa-command-bar > button,
+.liuwa-command-bar .liuwa-display > summary {
+  -webkit-app-region: no-drag;
+  min-height: 32px;
+  padding: 6px 9px;
+  gap: 7px;
+  color: var(--ink);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.liuwa-command-bar > button:hover,
+.liuwa-command-bar .liuwa-display > summary:hover { background: var(--accent-soft); }
+.liuwa-command-bar kbd { font: inherit; font-size: 10px; color: var(--muted); }
+.liuwa-command-bar #liuwaToggleShots { max-width: 110px; overflow: hidden; text-overflow: ellipsis; font-size: 10px; padding: 5px; }
+.liuwa-command-bar .liuwa-display { margin-left: auto; -webkit-app-region: no-drag; }
+.liuwa-command-bar .liuwa-display > summary { list-style: none; font-size: 21px; padding: 2px 8px; cursor: pointer; }
+.liuwa-command-bar summary::-webkit-details-marker { display: none; }
+.liuwa-page:not(.is-empty) .liuwa-reader {
+  grid-row: 3;
+  background: rgba(var(--panel-rgb,255,255,255), var(--panel-opacity));
+  border-radius: 15px;
+  border-color: var(--line);
+}
+.liuwa-feedback { grid-row: 4; display: flex; align-items: center; gap: 12px; min-height: 0; }
+.liuwa-feedback:has(.liuwa-status:empty):has(.liuwa-stop[hidden]) { display: none; }
+.liuwa-feedback .liuwa-status { margin: 0; padding: 2px 6px; color: var(--ink); font-size: 11px; }
+.liuwa-feedback .liuwa-stop { position: static; padding: 3px 7px; white-space: nowrap; }
+.liuwa-command-bar .liuwa-display-panel {
+  top: calc(100% + 12px); bottom: auto; right: 0;
+  width: 340px; max-width: calc(100vw - 24px);
+  display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+  align-items: center; gap: 10px 12px;
+  padding: 16px;
+  background: var(--menu-bg, #f7f9fd);
+  border-color: var(--line);
+  color: var(--ink);
+  overflow: auto;
+  box-shadow: var(--shadow);
+}
+.liuwa-display-panel input:not([type="range"]), .liuwa-display-panel select {
+  min-width: 0; width: 100%; min-height: 30px; padding: 5px 7px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--ink); font-size: 12px;
+}
+.liuwa-display-panel label { display: flex; flex-wrap: wrap; gap: 3px; color: var(--ink); font-size: 12px; }
+.liuwa-settings-title, .liuwa-theme-options, .liuwa-settings-actions,
+.liuwa-display-panel .liuwa-shortcuts, .liuwa-display-panel > p,
+.liuwa-display-panel > button { grid-column: 1 / -1; }
+.liuwa-settings-title { display: flex; align-items: center; justify-content: space-between; padding-bottom: 2px; }
+.liuwa-settings-title strong { font-size: 13px; font-weight: 600; }
+.liuwa-display-panel button { min-height: 28px; padding: 4px 8px; font-size: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); box-shadow: none; border-radius: 6px; }
+.liuwa-display-panel button:hover { background: var(--accent-soft); }
+.liuwa-settings-title button { min-height: 24px; border: 0; font-size: 18px; }
+.liuwa-theme-options, .liuwa-settings-actions { display: flex; gap: 5px; flex-wrap: wrap; }
+.liuwa-theme-options button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.liuwa-display-panel .liuwa-setting-note, .liuwa-display-panel #quickSettingsStatus { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.liuwa-display-panel .liuwa-shortcuts { margin: 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.liuwa-display-panel .liuwa-shortcut-grid { grid-template-columns: 1fr; max-height: 160px; overflow: auto; }
+.liuwa-pagination button { background: var(--surface); color: var(--ink); }
+html[data-theme="dark"], html.liuwa-host[data-theme="dark"],
+html[data-theme="transparent-white"], html.liuwa-host[data-theme="transparent-white"] {
+  color-scheme: dark;
+  --panel-rgb: 22,30,46;
+  --menu-bg: #192338;
+  --ink: #f1f5fd; --muted: #b6c1d7; --faint: #99a9c6;
+  --surface: #26334a; --surface-2: #1f2b40;
+  --line: #3a4963; --line-soft: #334159;
+  --accent: #8eb3ff; --accent-soft: #2b3c5b; --accent-ring: #628ddd50;
+}
+body.liuwa-shell { color: var(--ink); }
+html[data-theme^="transparent-"] .liuwa-command-bar,
+html[data-theme^="transparent-"] .liuwa-reader {
+  background: transparent !important; border-color: transparent !important; box-shadow: none;
+}
+html[data-theme^="transparent-"] .liuwa-command-bar > button,
+html[data-theme^="transparent-"] .liuwa-display > summary { text-shadow: 0 1px 2px #7774; }
+html[data-theme^="transparent-"] .md-code,
+html[data-theme^="transparent-"] .md-inline-code,
+html[data-theme^="transparent-"] .md-table th,
+html[data-theme^="transparent-"] .md-table tbody tr,
+html[data-theme^="transparent-"] .md blockquote { background: transparent; color: var(--ink); }
+html[data-theme^="transparent-"] .md-code code,
+html[data-theme^="transparent-"] .md-code code span { background: transparent; color: var(--ink); }
+html[data-theme="dark"] .md th, html[data-theme="transparent-white"] .md th { background: var(--surface); }
+@media (max-width: 540px) {
+  .liuwa-command-bar { gap: 0; padding: 5px; }
+  .liuwa-command-bar > button { padding: 6px; font-size: 11px; }
+  .liuwa-command-bar kbd, .liuwa-command-bar #liuwaToggleShots { display: none; }
+}
+
 /* ===== 学习资产板块（设置页） ===== */
 .asset-tabs {
   display: flex;

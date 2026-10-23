@@ -34,6 +34,17 @@ class LLMClient:
         self._async_transport = async_transport or transport
         self._sync_transport = sync_transport or transport
 
+    async def list_models(self) -> list[str]:
+        settings = get_settings()
+        if settings.llm_provider == "mock" or not settings.llm_api_key or not settings.llm_base_url:
+            return []
+        async with httpx.AsyncClient(timeout=5, transport=self._async_transport) as client:
+            response = await client.get(settings.llm_base_url.rstrip("/") + "/models", headers=_auth_headers())
+            response.raise_for_status()
+        data = response.json()
+        items = data.get("data", []) if isinstance(data, dict) else []
+        return sorted({item["id"] for item in items if isinstance(item, dict) and isinstance(item.get("id"), str) and item["id"].strip()})
+
     async def complete_json(
         self,
         messages: list[LLMMessage],

@@ -17,6 +17,7 @@ const studyFields = {
 };
 const saveState = document.querySelector("#settingsSaveState");
 let settingsLoaded = false;
+let savedUiSettings = {};
 
 const HOTKEY_ACTIONS = Object.keys(DEFAULT_HOTKEYS);
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -46,6 +47,7 @@ function applyHotkeysToForm(hotkeys) {
 }
 
 function hydrateForm(saved) {
+  savedUiSettings = saved;
   for (const [key, input] of Object.entries(studyFields)) input.value = saved[key] ?? "";
   if (jdText) jdText.value = saved.jd_text || "";
   if (resumeText) resumeText.value = saved.resume_text || "";
@@ -84,6 +86,7 @@ async function saveUiSettings(event) {
   if (button) button.disabled = true;
   try {
     const saved = await postJson("/api/ui/settings", {
+      ...savedUiSettings,
       ...Object.fromEntries(Object.entries(studyFields).map(([key, input]) => [key, input.value.trim()])),
       jd_text: jdText ? jdText.value : "",
       resume_text: resumeText ? resumeText.value : "",
