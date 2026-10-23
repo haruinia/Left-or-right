@@ -5,28 +5,16 @@
 //   box.scrollBy({ top: ±step, behavior: "smooth" });
 //
 // 它没有分段、没有标签页，也没有页码；中间那行是「使用 X 或 Y 上下滚动」。
-// 所以这里也只做滚动：进入新回答时视口复位，翻页就是往前/往后推一屏多一点。
+// 翻页只移动正文，不切换题目或语义小节。
 
 const thread = () => document.querySelector("#liuwaThread");
 
-// 最新回答的卡片自己滚动，外层只负责旧回答。选择视口里真正可滚动的容器，
-// 否则长答案看得到滚动条，快捷键却在滚一个没有溢出的外层。
+// 主面板始终只有当前答案，无论它是否已溢出，都使用同一个正文容器。
+// 不能在内容增长时动态换容器，否则分页位置和滚动高度会发生跳变。
 export function readingBox() {
   const outer = thread();
   if (!outer) return null;
-  const viewport = outer.getBoundingClientRect();
-  let best = outer;
-  let overlap = 0;
-  for (const node of outer.querySelectorAll(".liuwa-answer-body, .liuwa-stream")) {
-    if (node.scrollHeight <= node.clientHeight + 1) continue;
-    const rect = node.getBoundingClientRect();
-    const visible = Math.max(0, Math.min(rect.bottom, viewport.bottom) - Math.max(rect.top, viewport.top));
-    if (visible > overlap) {
-      overlap = visible;
-      best = node;
-    }
-  }
-  return best;
+  return outer.querySelector(".liuwa-stream") || outer;
 }
 
 const step = () => {
@@ -58,9 +46,9 @@ export function scrollByScreen(fraction = 0.85) {
   box.scrollBy({ top: box.clientHeight * fraction, behavior: "smooth" });
 }
 
-// 新回答开始时把视口拉回开头——Gank 换题也是从顶部开始读。
+// 本产品的新题明确从开头读；Gank MV 没有显式复位，不能把此策略当作其运行证据。
 export function resetReading() {
-  const box = thread();
+  const box = readingBox();
   if (box) box.scrollTop = 0;
 }
 

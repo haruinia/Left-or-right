@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { renderMarkdown } from '../web/modules/markdown.js';
-import { page, scrollByScreen } from '../web/modules/reading.js';
+import { page, readingBox, scrollByScreen } from '../web/modules/reading.js';
 import { renderAnswer } from '../web/modules/answer-view.js';
 
 test('a multi-section answer stays visible in source order without tabs', () => {
@@ -40,6 +40,7 @@ test('reading keys scroll the visible answer when the card owns the scrollbar', 
     clientHeight: 550, scrollHeight: 550, scrollTop: 0,
     getBoundingClientRect: () => ({ top: 0, bottom: 550, height: 550 }),
     querySelectorAll: () => [card],
+    querySelector: () => card,
     scrollBy: () => assert.fail('the outer thread has no scrollable content'),
   };
   globalThis.document = { querySelector: () => thread };
@@ -51,4 +52,19 @@ test('reading keys scroll the visible answer when the card owns the scrollbar', 
   } finally {
     delete globalThis.document;
   }
+});
+
+test('the current answer remains the reading target before it becomes scrollable', () => {
+  const card = { clientHeight: 500, scrollHeight: 500, scrollTop: 0 };
+  const thread = {
+    querySelector: () => card,
+    querySelectorAll: () => [card],
+    getBoundingClientRect: () => ({top:0,bottom:550,height:550}),
+  };
+  globalThis.document = { querySelector: () => thread };
+  try {
+    assert.equal(readingBox(), card);
+    card.scrollHeight = 2000;
+    assert.equal(readingBox(), card);
+  } finally { delete globalThis.document; }
 });

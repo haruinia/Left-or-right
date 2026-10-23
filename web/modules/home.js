@@ -3,7 +3,7 @@ import { fallbackGatewayOrigins, state } from "./state.js";
 import { saveSessionRecord } from "./session-store.js";
 import { renderAnswer } from "./answer-view.js";
 import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
-import { page, readingBox, resetReading } from "./reading.js";
+import { page, resetReading } from "./reading.js";
 
 const thread = document.querySelector("#liuwaThread");
 const idle = document.querySelector("#liuwaIdle");
@@ -11,19 +11,15 @@ const shots = document.querySelector("#liuwaShots");
 const statusNode = document.querySelector("#liuwaStatus");
 const hintCapture = document.querySelector("#hintCapture");
 const stopBtn = document.querySelector("#liuwaStop");
+const pagination = document.querySelector("#liuwaPagination");
+const readingPrev = document.querySelector("#liuwaReadingPrev");
+const readingNext = document.querySelector("#liuwaReadingNext");
 
-// Follow-tail: only auto-scroll while the user is already near the bottom. Once they
-// scroll up to read, new tokens must not yank them back down (Gank's 24px rule).
-let stickBottom = true;
-thread?.addEventListener("scroll", () => {
-  const box = readingBox();
-  if (box) stickBottom = box.scrollHeight - box.scrollTop - box.clientHeight <= 24;
-}, true);
-function followTail() {
-  if (!stickBottom || !thread) return;
-  thread.scrollTop = thread.scrollHeight;
-  const box = readingBox();
-  if (box) box.scrollTop = box.scrollHeight;
+// 截图题解固定在当前阅读位置。Gank 的24px自动追尾属于语音面板，不能套到这里。
+function syncReadingControls() {
+  const hasAnswer = Boolean(thread?.querySelector(".liuwa-stream")?.textContent.trim());
+  if (readingPrev) readingPrev.disabled = !hasAnswer;
+  if (readingNext) readingNext.disabled = !hasAnswer;
 }
 
 const pending = [];
@@ -71,6 +67,8 @@ function syncEmpty() {
   const empty = !hasTurns;
   document.body.classList.toggle("is-empty", empty);
   if (idle) idle.hidden = !empty;
+  if (pagination) pagination.hidden = empty;
+  syncReadingControls();
 }
 
 function renderPending() {
@@ -189,12 +187,15 @@ function appendUserTurn(images, text, carriedCount = 0) {
 }
 
 function appendAssistantTurn() {
+  // 主面板只展示当前题解；历史保留在 history，不能挤占下一题的阅读高度。
+  thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   const article = document.createElement("article");
   article.className = "liuwa-turn is-assistant is-stream";
   const body = document.createElement("div");
   body.className = "liuwa-stream md";
   article.append(body);
   thread.append(article);
+  resetReading();
   return body;
 }
 
@@ -337,14 +338,12 @@ async function sendChat() {
   const streamNode = appendAssistantTurn();
   const assistantTurn = streamNode.parentElement;
   syncEmpty();
-  stickBottom = true;
-  followTail();
   let reply = "";
   let flushTimer = null;
   const flush = () => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     renderAnswer(reply, streamNode);
-    followTail();
+    syncReadingControls();
   };
   const commitTurn = (complete = true) => {
     // 部分回答虽需保留，但不能把待处理截图标成完成，否则连接中断后再按处理键无效。
@@ -549,6 +548,8 @@ shots?.addEventListener("keydown", (event) => {
 });
 
 stopBtn?.addEventListener("click", stopChat);
+readingPrev?.addEventListener("click", () => page(-1));
+readingNext?.addEventListener("click", () => page(1));
 stopBtn?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();

@@ -2001,10 +2001,49 @@ html.transparent-white {
 }
 .liuwa-context span:last-child { color: var(--faint); }
 
-.liuwa-thread {
+.liuwa-reader {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  overflow: auto;
-  padding: 8px 6px 12px;
+  overflow: hidden;
+}
+
+.liuwa-page:not(.is-empty) .liuwa-reader {
+  background: #fff;
+  border: 1px solid var(--line-soft);
+  border-radius: 16px;
+}
+
+.liuwa-pagination {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.liuwa-pagination span { white-space: nowrap; }
+.liuwa-pagination kbd { font: inherit; }
+.liuwa-pagination button {
+  min-height: 0;
+  padding: 4px 9px;
+  border: 0;
+  background: #f3f4f6;
+  color: #4b5563;
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.liuwa-pagination button:hover:not(:disabled) { background: #e5e7eb; }
+
+.liuwa-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
   -webkit-app-region: no-drag;
 }
 
@@ -2062,7 +2101,7 @@ html.transparent-white {
   border-radius: 10px;
 }
 
-.liuwa-turn p {
+.liuwa-turn.is-user p {
   max-width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -2081,14 +2120,14 @@ html.transparent-white {
 /* 回答卡片：参考 Gank 的白底卡片排版，独立 padding 和阴影，与白底对话区形成层次 */
 .liuwa-turn.is-assistant .liuwa-stream {
   justify-self: stretch;
-  background: #ffffff;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   color: var(--ink);
-  padding: 14px 15px;
-  font-size: 13.5px;
-  line-height: 1.75;
+  padding: 16px 24px 20px;
+  font-size: 16px;
+  line-height: 1.65;
   overflow-wrap: anywhere;
 }
 
@@ -2106,7 +2145,8 @@ html.transparent-white {
 }
 
 .liuwa-turn {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  margin: 0;
 }
 
 .liuwa-turn.is-assistant:last-child {
@@ -2152,8 +2192,8 @@ html.transparent-white {
   color: var(--ink);
   font-weight: 600;
 }
-.md h2.md-heading { font-size: 16px; }
-.md h3.md-heading { font-size: 15px; }
+.md h2.md-heading { font-size: 20px; }
+.md h3.md-heading { font-size: 18px; }
 .md h4.md-heading,
 .md h5.md-heading { font-size: 14px; }
 
@@ -3088,7 +3128,7 @@ body.liuwa-shell .liuwa-history-panel {
   color: var(--red);
 }
 body.liuwa-compact .liuwa-dock { min-height: 0; overflow: auto; }
-.liuwa-page.liuwa-compact .liuwa-thread { display: none; }
+.liuwa-page.liuwa-compact .liuwa-reader { display: none; }
 
 /* ===== 学习资产板块（设置页） ===== */
 .asset-tabs {

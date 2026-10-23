@@ -3764,7 +3764,9 @@ def test_gateway_root_is_liuwa_home(tmp_path: Path, monkeypatch) -> None:
     assert "左右" in page.text
     assert 'src="modules/home.js"' in page.text
     assert "结束并评分" not in page.text
-    assert '<button' not in page.text
+    assert 'id="liuwaReadingPrev"' in page.text
+    assert 'id="liuwaReadingNext"' in page.text
+    assert 'aria-label="题解翻页"' in page.text
     # favicon 用 link href；正文里不再重复挂 logo 图片。
     assert page.text.count('modules/pangsi-mark.svg') == 1
     assert 'aria-label="全部快捷键"' in page.text
