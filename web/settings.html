@@ -91,6 +91,13 @@
           />
         </label>
         <label>
+          接口预设
+        </label>
+        <div class="preset-chips" id="providerPresetChips" role="group" aria-label="服务接入预设" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="button secondary" id="presetLan" style="font-size:12px;padding:4px 10px;">局域网测试 (192.168.2.251)</button>
+          <button type="button" class="button secondary" id="presetSiliconFlow" style="font-size:12px;padding:4px 10px;">SiliconFlow (备用)</button>
+        </div>
+        <label>
           模型
           <input
             id="llmModel"
@@ -99,8 +106,23 @@
             spellcheck="false"
             placeholder="例如 deepseek-chat"
             aria-label="模型名"
+            list="llmModelOptions"
           />
+          <datalist id="llmModelOptions">
+            <option value="antigravity/claude-opus-4-6-thinking">Claude Opus 4.6 Thinking</option>
+            <option value="antigravity/gemini-3.8-flash-high">Gemini 3.8 Flash High</option>
+            <option value="workbuddy/deepseek-v4.1-flash">DeepSeek V4.1 Flash</option>
+            <option value="qoder/dfmodel">Qoder dfmodel (上游暂不可用)</option>
+            <option value="deepseek-ai/DeepSeek-V4.1-Flash">SiliconFlow DeepSeek</option>
+          </datalist>
         </label>
+        <div class="preset-chips" id="modelPresetChips" role="group" aria-label="快速选择模型" style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button type="button" class="button secondary" data-preset-model="antigravity/claude-opus-4-6-thinking" style="font-size:11px;padding:3px 8px;">Claude Opus 4.6</button>
+          <button type="button" class="button secondary" data-preset-model="antigravity/gemini-3.8-flash-high" style="font-size:11px;padding:3px 8px;">Gemini 3.8 Flash</button>
+          <button type="button" class="button secondary" data-preset-model="workbuddy/deepseek-v4.1-flash" style="font-size:11px;padding:3px 8px;">DeepSeek V4.1</button>
+          <button type="button" class="button secondary" data-preset-model="qoder/dfmodel" style="font-size:11px;padding:3px 8px;opacity:0.6;">Qoder (异常)</button>
+          <button type="button" class="button secondary" data-preset-model="deepseek-ai/DeepSeek-V4.1-Flash" style="font-size:11px;padding:3px 8px;">SiliconFlow</button>
+        </div>
         <label>
           模型接口地址（OpenAI 兼容）
           <input

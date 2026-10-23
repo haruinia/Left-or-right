@@ -50,13 +50,23 @@ function hydrateCapture(config) {
   byId('quickDisplay').replaceChildren(...options.displays.map(d=>new Option(`${d.label} · ${d.width}×${d.height}`,d.id)));
   byId('quickDisplay').value=options.displayId;byId('quickDisplay').disabled=false;
 }
+function syncActiveModelPreset(currentModel) {
+  const container = byId('quickModelPresets');
+  if(!container) return;
+  for(const btn of container.querySelectorAll('button[data-model]')) {
+    btn.setAttribute('aria-pressed', btn.dataset.model === currentModel ? 'true' : 'false');
+  }
+}
 async function loadModels() {
   if(modelsLoading)return;modelsLoading=true;byId('quickRefreshModels').disabled=true;
   try {
     const data=await request('/api/config/models');
     byId('quickScreenshotModel').value=data.screenshot_model;
     byId('quickInterviewModel').value=data.interview_model;
-    byId('quickModelOptions').replaceChildren(...data.models.map(name=>new Option(name,name)));
+    const knownModels = ['antigravity/claude-opus-4-6-thinking','antigravity/gemini-3.8-flash-high','workbuddy/deepseek-v4.1-flash','qoder/dfmodel'];
+    const allModels = [...new Set([...(data.models || []), ...knownModels])];
+    byId('quickModelOptions').replaceChildren(...allModels.map(name=>new Option(name,name)));
+    syncActiveModelPreset(data.interview_model);
     for(const id of ['quickScreenshotModel','quickInterviewModel','quickSaveModels'])byId(id).disabled=false;
     if(data.warning)notice(data.warning);
   } catch(error) {notice(`模型列表读取失败：${error.message}`);}
@@ -84,10 +94,32 @@ for(const [id,key] of [['quickCaptureMode','mode'],['quickDisplay','displayId']]
   catch(error){notice(error.message);try{hydrateCapture(await window.cockpit.getConfig());}catch{}}
   finally {input.disabled=false;}
 });
+byId('quickModelPresets')?.addEventListener('click',async(event)=>{
+  const btn = event.target.closest('button[data-model]');
+  if(!btn) return;
+  const model = btn.dataset.model;
+  byId('quickScreenshotModel').value = model;
+  byId('quickInterviewModel').value = model;
+  syncActiveModelPreset(model);
+  const saveBtn = byId('quickSaveModels');
+  if(saveBtn) saveBtn.disabled = true;
+  try {
+    await request('/api/config/models', {screenshot_model: model, interview_model: model});
+    notice(`已切换模型为：${btn.textContent.trim()}`);
+  } catch(error) {
+    notice(error.message);
+  } finally {
+    if(saveBtn) saveBtn.disabled = false;
+  }
+});
 byId('quickSaveModels')?.addEventListener('click',async()=>{
   const button=byId('quickSaveModels');button.disabled=true;
-  try {await request('/api/config/models',{screenshot_model:byId('quickScreenshotModel').value.trim(),interview_model:byId('quickInterviewModel').value.trim()});notice('模型已保存，下次调用生效。');}
-  catch(error){notice(error.message);}finally{button.disabled=false;}
+  const interviewModel = byId('quickInterviewModel').value.trim();
+  try {
+    await request('/api/config/models',{screenshot_model:byId('quickScreenshotModel').value.trim(),interview_model:interviewModel});
+    syncActiveModelPreset(interviewModel);
+    notice('模型已保存，下次调用生效。');
+  } catch(error){notice(error.message);}finally{button.disabled=false;}
 });
 byId('quickRefreshModels')?.addEventListener('click',loadModels);
 byId('quickAdvancedSettings')?.addEventListener('click',()=>window.cockpit?.openSettings ? window.cockpit.openSettings() : window.open('settings.html','_blank','noopener'));

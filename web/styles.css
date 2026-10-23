@@ -3327,7 +3327,7 @@ body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
   background: var(--surface); color: var(--ink); font-size: 12px;
 }
 .liuwa-display-panel label { display: flex; flex-wrap: wrap; gap: 3px; color: var(--ink); font-size: 12px; }
-.liuwa-settings-title, .liuwa-theme-options, .liuwa-settings-actions,
+.liuwa-settings-title, .liuwa-theme-options, .liuwa-model-options, .liuwa-settings-actions,
 .liuwa-display-panel .liuwa-shortcuts, .liuwa-display-panel > p,
 .liuwa-display-panel > button { grid-column: 1 / -1; }
 .liuwa-settings-title { display: flex; align-items: center; justify-content: space-between; padding-bottom: 2px; }
@@ -3337,6 +3337,10 @@ body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
 .liuwa-settings-title button { min-height: 24px; border: 0; font-size: 18px; }
 .liuwa-theme-options, .liuwa-settings-actions { display: flex; gap: 5px; flex-wrap: wrap; }
 .liuwa-theme-options button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.liuwa-model-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.liuwa-model-options button { font-size: 11px; padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; }
+.liuwa-model-options button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.liuwa-model-options button.is-unavailable { opacity: 0.65; }
 .liuwa-display-panel .liuwa-setting-note, .liuwa-display-panel #quickSettingsStatus { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .liuwa-display-panel .liuwa-shortcuts { margin: 0; padding-top: 10px; border-top: 1px solid var(--line); }
 .liuwa-display-panel .liuwa-shortcut-grid { grid-template-columns: 1fr; max-height: 160px; overflow: auto; }

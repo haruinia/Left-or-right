@@ -59,9 +59,22 @@
               <button type="button" data-theme-mode="transparent-black" aria-label="透明黑字模式">透明黑字</button>
               <button type="button" data-theme-mode="transparent-white" aria-label="透明白字模式">透明白字</button>
             </div>
+            <label>快速选择模型</label>
+            <div class="liuwa-model-options" id="quickModelPresets" role="group" aria-label="快速选择模型">
+              <button type="button" data-model="antigravity/claude-opus-4-6-thinking" title="Claude Opus 4.6 Thinking（全能推荐）">Claude Opus</button>
+              <button type="button" data-model="antigravity/gemini-3.8-flash-high" title="Gemini 3.8 Flash High（极速）">Gemini Flash</button>
+              <button type="button" data-model="workbuddy/deepseek-v4.1-flash" title="DeepSeek V4.1 Flash">DeepSeek V4.1</button>
+              <button type="button" data-model="qoder/dfmodel" class="is-unavailable" title="Qoder dfmodel（上游暂不可用）">Qoder (异常)</button>
+            </div>
             <label for="quickScreenshotModel">截图模型</label><input id="quickScreenshotModel" list="quickModelOptions" maxlength="160" disabled />
             <label for="quickInterviewModel">面试模型</label><input id="quickInterviewModel" list="quickModelOptions" maxlength="160" disabled />
-            <datalist id="quickModelOptions"></datalist>
+            <datalist id="quickModelOptions">
+              <option value="antigravity/claude-opus-4-6-thinking">Claude Opus 4.6 Thinking</option>
+              <option value="antigravity/gemini-3.8-flash-high">Gemini 3.8 Flash High</option>
+              <option value="workbuddy/deepseek-v4.1-flash">DeepSeek V4.1 Flash</option>
+              <option value="qoder/dfmodel">Qoder dfmodel</option>
+              <option value="deepseek-ai/DeepSeek-V4.1-Flash">SiliconFlow DeepSeek</option>
+            </datalist>
             <div class="liuwa-settings-actions"><button type="button" id="quickSaveModels" disabled>保存模型</button><button type="button" id="quickRefreshModels">刷新列表</button></div>
             <p class="liuwa-setting-note">使用已配置的模型接口；截图模型需要支持图片。</p>
             <label for="quickIdentity">我的身份</label><select id="quickIdentity" disabled><option value="candidate">面试者</option><option value="interviewer">面试官</option></select>

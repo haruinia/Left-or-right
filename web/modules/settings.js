@@ -207,6 +207,61 @@ async function saveLlmConfig() {
     if (button) button.disabled = false;
   }
 }
+const LAN_PRESET = {
+  baseUrl: "http://192.168.2.251:9555/v1",
+  apiKey: "tfl_807202ed3a706f06d7338b68e9286f444671c6a602fbd0518a56aff2b6a4cee3",
+  defaultModel: "antigravity/claude-opus-4-6-thinking",
+};
+const SILICON_PRESET = {
+  baseUrl: "https://api.siliconflow.cn/v1",
+  apiKey: "sk-amdyurxdspunioseickjxswmxrjqgqhptygtkcmvcamtumdy",
+  defaultModel: "deepseek-ai/DeepSeek-V4.1-Flash",
+};
+
+document.querySelector("#presetLan")?.addEventListener("click", () => {
+  const baseUrlInput = document.querySelector("#llmBaseUrl");
+  const apiKeyInput = document.querySelector("#llmApiKey");
+  const modelInput = document.querySelector("#llmModel");
+  if (baseUrlInput) baseUrlInput.value = LAN_PRESET.baseUrl;
+  if (apiKeyInput) apiKeyInput.value = LAN_PRESET.apiKey;
+  if (modelInput && (!modelInput.value || modelInput.value.includes("deepseek-ai"))) {
+    modelInput.value = LAN_PRESET.defaultModel;
+  }
+  saveState.textContent = "已填入局域网测试网关配置，点击【保存模型】生效。";
+});
+
+document.querySelector("#presetSiliconFlow")?.addEventListener("click", () => {
+  const baseUrlInput = document.querySelector("#llmBaseUrl");
+  const apiKeyInput = document.querySelector("#llmApiKey");
+  const modelInput = document.querySelector("#llmModel");
+  if (baseUrlInput) baseUrlInput.value = SILICON_PRESET.baseUrl;
+  if (apiKeyInput) apiKeyInput.value = SILICON_PRESET.apiKey;
+  if (modelInput) modelInput.value = SILICON_PRESET.defaultModel;
+  saveState.textContent = "已填入 SiliconFlow 云端配置，点击【保存模型】生效。";
+});
+
+document.querySelector("#modelPresetChips")?.addEventListener("click", (event) => {
+  const btn = event.target.closest("button[data-preset-model]");
+  if (!btn) return;
+  const model = btn.dataset.presetModel;
+  const modelInput = document.querySelector("#llmModel");
+  if (modelInput) modelInput.value = model;
+  const baseUrlInput = document.querySelector("#llmBaseUrl");
+  const apiKeyInput = document.querySelector("#llmApiKey");
+  if (model.startsWith("antigravity/") || model.startsWith("workbuddy/") || model.startsWith("qoder/")) {
+    if (baseUrlInput && (!baseUrlInput.value || baseUrlInput.value.includes("siliconflow"))) {
+      baseUrlInput.value = LAN_PRESET.baseUrl;
+      if (apiKeyInput) apiKeyInput.value = LAN_PRESET.apiKey;
+    }
+  } else if (model.startsWith("deepseek-ai/")) {
+    if (baseUrlInput && (!baseUrlInput.value || baseUrlInput.value.includes("192.168.2.251"))) {
+      baseUrlInput.value = SILICON_PRESET.baseUrl;
+      if (apiKeyInput) apiKeyInput.value = SILICON_PRESET.apiKey;
+    }
+  }
+  saveState.textContent = `已选择模型 ${model}，点击【保存模型】生效。`;
+});
+
 document.querySelector("#saveLlmConfig")?.addEventListener("click", saveLlmConfig);
 async function saveConnection() {
   const origin = document.querySelector("#gatewayOrigin");
