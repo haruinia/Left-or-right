@@ -118,3 +118,28 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
   paint(); syncTabs();
   return {...model, selected:reader.selected};
 }
+
+export function stepAnswerTab(direction, root) {
+  const doc = (root && root.ownerDocument) ? root.ownerDocument : (typeof document !== 'undefined' ? document : null);
+  if (!doc) return false;
+  const targetRoot = root || doc.querySelector?.('.liuwa-stream');
+  const container = targetRoot?.closest?.('.liuwa-reader') || doc;
+  const tabs = container.querySelector?.('#liuwaAnswerTabs');
+  if (!tabs || tabs.hidden) return false;
+  const buttons = Array.from(tabs.querySelectorAll?.('button[data-panel]') || []).filter(b => !b.hidden && b.style?.display !== 'none');
+  if (buttons.length < 2) return false;
+  const delta = typeof direction === 'string'
+    ? (direction === 'prev' ? -1 : 1)
+    : (direction < 0 ? -1 : 1);
+  const currentIndex = buttons.findIndex(b => b.getAttribute?.('aria-selected') === 'true');
+  const nextIndex = currentIndex === -1
+    ? (delta > 0 ? 0 : buttons.length - 1)
+    : (currentIndex + delta + buttons.length) % buttons.length;
+  const targetButton = buttons[nextIndex];
+  if (typeof targetButton.click === 'function') {
+    targetButton.click();
+  } else if (typeof tabs.onclick === 'function') {
+    tabs.onclick({ target: targetButton });
+  }
+  return true;
+}

@@ -1,7 +1,7 @@
 import { formatAccelerator, acceleratorFromEvent } from "./shortcuts.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
 import { saveSessionRecord } from "./session-store.js";
-import { renderAnswer } from "./answer-view.js";
+import { renderAnswer, stepAnswerTab } from "./answer-view.js";
 import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
 import { page, resetReading } from "./reading.js";
 import { syncSections, jumpToSection } from "./answer-navigation.js";
@@ -81,9 +81,24 @@ function showQuestion(entry) {
 // 截图题解固定在当前阅读位置。Gank 的24px自动追尾属于语音面板，不能套到这里。
 function syncReadingControls() {
   const hasAnswer = thread?.querySelector(".liuwa-stream")?.dataset.hasAnswer === 'true';
-  if (readingPrev) readingPrev.disabled = !hasAnswer;
-  if (readingNext) readingNext.disabled = !hasAnswer;
+  const tabs = document.querySelector("#liuwaAnswerTabs");
+  const tabButtons = tabs && !tabs.hidden ? Array.from(tabs.querySelectorAll("button[data-panel]")).filter(b => !b.hidden) : [];
+  const hasTabs = tabButtons.length >= 2;
+  if (readingPrev) {
+    readingPrev.disabled = !hasAnswer;
+    readingPrev.title = hasTabs ? "切换到上一小节 (⌘,)" : "向上翻页 (⌘,)";
+  }
+  if (readingNext) {
+    readingNext.disabled = !hasAnswer;
+    readingNext.title = hasTabs ? "切换到下一小节 (⌘.)" : "向下翻页 (⌘.)";
+  }
   syncSections(thread?.querySelector('.liuwa-stream'), sections);
+}
+
+function stepReading(direction) {
+  const delta = typeof direction === "string" ? (direction === "prev" ? -1 : 1) : (direction < 0 ? -1 : 1);
+  if (stepAnswerTab(delta)) return;
+  page(delta);
 }
 
 const pending = [];
@@ -592,7 +607,7 @@ function wireDesktop(cockpit) {
   if (typeof cockpit.onRead === "function") {
     cockpit.onRead((direction) => {
       if (isLightboxOpen()) return;
-      page(direction === "prev" ? -1 : 1);
+      stepReading(direction);
     });
   }
   if (typeof cockpit.onScroll === "function") {
@@ -661,14 +676,29 @@ shots?.addEventListener("keydown", (event) => {
 });
 
 stopBtn?.addEventListener("click", stopChat);
-readingPrev?.addEventListener("click", () => page(-1));
-readingNext?.addEventListener("click", () => page(1));
+readingPrev?.addEventListener("click", () => stepReading(-1));
+readingNext?.addEventListener("click", () => stepReading(1));
 document.querySelector('#liuwaSend')?.addEventListener('click',sendChat);
 document.querySelector('#liuwaDelete')?.addEventListener('click',deleteLastShot);
 document.querySelector('#liuwaReset')?.addEventListener('click',resetView);
 document.addEventListener('keydown',event=>{
-  if(window.cockpit && acceleratorFromEvent(event, /Mac|iPhone|iPad/.test(navigator.platform)) === resetAccelerator) {
+  if (isLightboxOpen()) return;
+  const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const accel = acceleratorFromEvent(event, isMac);
+  if(window.cockpit && accel === resetAccelerator) {
     event.preventDefault();resetView();
+    return;
+  }
+  if (!window.cockpit) {
+    if (accel === "CommandOrControl+,") {
+      event.preventDefault(); stepReading(-1);
+    } else if (accel === "CommandOrControl+.") {
+      event.preventDefault(); stepReading(1);
+    } else if (accel === "CommandOrControl+;") {
+      event.preventDefault(); page(-1);
+    } else if (accel === "CommandOrControl+'") {
+      event.preventDefault(); page(1);
+    }
   }
 });
 document.querySelector('#liuwaCapture')?.addEventListener('click',()=>window.cockpit?.captureExam ? window.cockpit.captureExam() : document.querySelector('#liuwaImageImport').click());

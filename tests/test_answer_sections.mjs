@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {splitAnswer, stripAnswerMetadata} from '../web/modules/answer-sections.js';
 import {renderMarkdown} from '../web/modules/markdown.js';
+import {stepAnswerTab} from '../web/modules/answer-view.js';
 
 for (const [type,content,preferred] of [
   ['choice','## 解题思路\n排除其他选项\n## 答案\nB. TCP\n## 详细解析\n可靠传输。','answer'],
@@ -60,3 +61,37 @@ test('general answers with a code section infer programming and open code first'
   assert.equal(model.panels[0].key,'code');
   assert.match(model.panels.find(p=>p.key==='code').markdown,/```sql/);
 });
+
+test('stepAnswerTab switches between tabs in left and right direction', () => {
+  const clicked = [];
+  const btnAnswer = {
+    dataset: { panel: 'answer' },
+    getAttribute: attr => attr === 'aria-selected' ? 'true' : null,
+    click: () => clicked.push('answer'),
+  };
+  const btnThought = {
+    dataset: { panel: 'thought' },
+    getAttribute: attr => attr === 'aria-selected' ? 'false' : null,
+    click: () => clicked.push('thought'),
+  };
+  const btnCode = {
+    dataset: { panel: 'code' },
+    getAttribute: attr => attr === 'aria-selected' ? 'false' : null,
+    click: () => clicked.push('code'),
+  };
+  const tabs = {
+    hidden: false,
+    querySelectorAll: selector => selector.includes('button') ? [btnAnswer, btnThought, btnCode] : [],
+  };
+  const doc = {
+    querySelector: sel => sel === '#liuwaAnswerTabs' ? tabs : null,
+  };
+
+  assert.equal(stepAnswerTab(1, { ownerDocument: doc }), true);
+  assert.deepEqual(clicked, ['thought']);
+
+  clicked.length = 0;
+  assert.equal(stepAnswerTab(-1, { ownerDocument: doc }), true);
+  assert.deepEqual(clicked, ['code']);
+});
+
