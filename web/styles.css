@@ -2,6 +2,8 @@
    with aihub #2461ef actions. Frost uses white alpha so the meeting behind
    the overlay stays visible; the canvas itself is never a gray slab. */
 :root {
+  --panel-opacity: .9;
+  --reader-width: 780px;
   color-scheme: light;
   --bg: #f4f6fc;
   --surface: #ffffff;
@@ -1950,7 +1952,7 @@ html.transparent-white {
      高度被内容撑死，dock 反而吃掉 1fr——回答区就是这么被压小的。 */
   grid-template-rows: minmax(0, 1fr) auto;
   gap: 8px;
-  width: min(780px, calc(100% - 16px));
+  width: min(var(--reader-width), calc(100% - 16px));
   /* 不再写 min(760px, …)：窗口被用户拉高之后，orb 卡在 760 不动，
      多出来的高度全是透明死空间。Gank 的解答面板是 flex 吃满高度的，
      这里让 orb 直接跟着窗口走。 */
@@ -1960,7 +1962,7 @@ html.transparent-white {
   padding: 12px 12px 8px;
   border: 1px solid #fff;
   border-radius: 28px;
-  background: var(--frost-card);
+  background: rgba(255, 255, 255, var(--panel-opacity));
   box-shadow: var(--shadow);
   backdrop-filter: blur(15px);
   -webkit-backdrop-filter: blur(15px);
@@ -2009,7 +2011,7 @@ html.transparent-white {
 }
 
 .liuwa-page:not(.is-empty) .liuwa-reader {
-  background: #fff;
+  background: transparent;
   border: 1px solid var(--line-soft);
   border-radius: 16px;
 }
@@ -2023,6 +2025,7 @@ html.transparent-white {
   padding: 10px 12px 2px;
   color: var(--muted);
   font-size: 11px;
+  flex-wrap: wrap;
 }
 
 .liuwa-pagination span { white-space: nowrap; }
@@ -2038,6 +2041,15 @@ html.transparent-white {
   line-height: 1.6;
 }
 .liuwa-pagination button:hover:not(:disabled) { background: #e5e7eb; }
+.liuwa-pagination select {
+  width: auto;
+  min-width: 0;
+  max-width: 160px;
+  padding: 4px 6px;
+  color: var(--ink);
+  font-size: 12px;
+  background: var(--surface);
+}
 
 .liuwa-thread {
   flex: 1 1 auto;
@@ -2320,9 +2332,14 @@ html.transparent-white {
 
 .liuwa-shots {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  overflow-x: auto;
+  max-height: 100px;
+  padding: 6px 3px;
 }
+.liuwa-shots .liuwa-thumb { flex: 0 0 auto; }
+.liuwa-shots .liuwa-shot-chips { display: none; }
 
 .liuwa-thumb {
   position: relative;
@@ -2629,7 +2646,7 @@ html.liuwa-host * {
 }
 
 html.liuwa-host .liuwa-orb {
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, var(--panel-opacity));
   border: 1px solid rgba(255, 255, 255, 0.7);
   box-shadow: 0 12px 36px rgba(24, 60, 121, 0.16);
 }
@@ -2645,7 +2662,7 @@ body.liuwa-shell .liuwa-orb {
   width: calc(100% - 12px);
   height: calc(100% - 12px);
   margin: 6px;
-  padding: 24px 26px 20px;
+  padding: 12px 12px 8px;
   border-radius: 30px;
 }
 
@@ -3127,8 +3144,65 @@ body.liuwa-shell .liuwa-history-panel {
   border-color: var(--red);
   color: var(--red);
 }
-body.liuwa-compact .liuwa-dock { min-height: 0; overflow: auto; }
+body.liuwa-compact .liuwa-dock { min-height: 0; }
 .liuwa-page.liuwa-compact .liuwa-reader { display: none; }
+
+/* 阅读时把辅助操作收成一行；显示面板浮在正文上，不挤占阅读高度。 */
+.liuwa-toolbar { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.liuwa-toolbar button, .liuwa-display summary {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 400;
+}
+.liuwa-display { position: relative; margin-left: auto; }
+.liuwa-display summary { cursor: pointer; white-space: nowrap; }
+.liuwa-display-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 10;
+  width: 224px;
+  max-height: calc(100dvh - 70px);
+  overflow: auto;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f7f9fd;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+  font-size: 12px;
+}
+.liuwa-display-panel label { display: flex; justify-content: space-between; }
+.liuwa-display-panel input { width: 100%; padding: 0; accent-color: var(--accent); }
+.liuwa-display-panel select { width: 100%; padding: 6px; font-size: 12px; }
+.liuwa-display-panel p { margin: 0; color: var(--muted); }
+.liuwa-display-panel p:empty, .liuwa-status:empty { display: none; }
+.liuwa-page:not(.is-empty) .liuwa-dock { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.liuwa-page:not(.is-empty) .liuwa-toolbar { grid-column: 1; grid-row: 1; }
+.liuwa-page:not(.is-empty) .liuwa-shortcuts { grid-column: 2; grid-row: 1; border: 0; padding: 0; }
+.liuwa-page:not(.is-empty) .liuwa-shortcut-primary { display: none; }
+.liuwa-page:not(.is-empty) .liuwa-shots,
+.liuwa-page:not(.is-empty) .liuwa-status,
+.liuwa-page:not(.is-empty) .liuwa-stop { grid-column: 1 / -1; }
+html[data-layout="narrow"] { --reader-width: 560px; }
+html[data-layout="wide"] { --reader-width: 1000px; }
+.liuwa-compact #liuwaToggleShots { display: none; }
+.liuwa-compact .liuwa-orb { display: flex; flex-direction: column; justify-content: flex-end; }
+.liuwa-compact .liuwa-shortcut-primary { display: none; }
+.liuwa-compact .liuwa-shortcut-grid { max-height: 100px; overflow: auto; }
+@media (max-width: 580px) {
+  .liuwa-pagination > span { display: none; }
+  .liuwa-pagination { gap: 6px; padding: 8px 8px 2px; }
+  .liuwa-turn.is-assistant .liuwa-stream { padding: 12px 14px 16px; }
+}
 
 /* ===== 学习资产板块（设置页） ===== */
 .asset-tabs {

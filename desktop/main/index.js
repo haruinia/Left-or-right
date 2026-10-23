@@ -15,6 +15,9 @@ const {
   changeOpacity,
   changeZoom,
   resetZoom,
+  setOpacity,
+  setLayout,
+  getDisplayState,
 } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
@@ -224,11 +227,23 @@ function registerIpc() {
     gatewayUrl: config.gatewayUrl,
     gatewayApiKey: config.gatewayApiKey,
     ...hotkeySnapshot(),
+    display: getDisplayState(win),
   }));
   ipcMain.on('cockpit:getConfigSync', (event) => {
     event.returnValue = { gatewayUrl: config.gatewayUrl, gatewayApiKey: config.gatewayApiKey };
   });
   ipcMain.handle('cockpit:toggleCompact', () => toggleCompact(win));
+  ipcMain.handle('cockpit:setDisplay', (_event, patch) => {
+    if (!patch || typeof patch !== 'object') throw new Error('Invalid display settings');
+    if (Number.isFinite(patch.opacity)) setOpacity(win, patch.opacity);
+    if (typeof patch.layout === 'string') setLayout(win, patch.layout);
+    if (typeof patch.compact === 'boolean' && patch.compact !== getDisplayState(win).compact) toggleCompact(win);
+    const display = getDisplayState(win);
+    const {x, y, width, height} = display;
+    const saved = saveConfig({panelOpacity: display.opacity, windowLayout: display.layout,
+      ...(!display.compact && Number.isFinite(x) ? {windowBounds: {x, y, width, height}} : {})});
+    return {...display, saved};
+  });
   ipcMain.handle('cockpit:toggleVisible', () => {
     toggleVisible(win);
   });
@@ -270,6 +285,7 @@ async function boot() {
   failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
   win = createWindow(config, {
     onMove: (bounds) => saveConfig({ windowBounds: bounds }),
+    onDisplay: (patch) => saveConfig(patch),
   });
   refreshUiHotkeys();
   setInterval(refreshUiHotkeys, 4000);

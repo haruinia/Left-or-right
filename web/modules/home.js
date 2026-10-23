@@ -4,6 +4,8 @@ import { saveSessionRecord } from "./session-store.js";
 import { renderAnswer } from "./answer-view.js";
 import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
 import { page, resetReading } from "./reading.js";
+import { syncSections, jumpToSection } from "./answer-navigation.js";
+import { applyDisplay } from "./display.js";
 
 const thread = document.querySelector("#liuwaThread");
 const idle = document.querySelector("#liuwaIdle");
@@ -14,12 +16,15 @@ const stopBtn = document.querySelector("#liuwaStop");
 const pagination = document.querySelector("#liuwaPagination");
 const readingPrev = document.querySelector("#liuwaReadingPrev");
 const readingNext = document.querySelector("#liuwaReadingNext");
+const sections = document.querySelector("#liuwaSections");
+const toggleShots = document.querySelector("#liuwaToggleShots");
 
 // 截图题解固定在当前阅读位置。Gank 的24px自动追尾属于语音面板，不能套到这里。
 function syncReadingControls() {
   const hasAnswer = Boolean(thread?.querySelector(".liuwa-stream")?.textContent.trim());
   if (readingPrev) readingPrev.disabled = !hasAnswer;
   if (readingNext) readingNext.disabled = !hasAnswer;
+  syncSections(thread?.querySelector('.liuwa-stream'), sections);
 }
 
 const pending = [];
@@ -29,6 +34,7 @@ let savingSession = false;
 let nextShotId = 1;
 let currentModel = "";
 let activeShotId = "";
+let shotsExpanded = true;
 let sessionStartedAt = new Date().toISOString();
 
 function syncActiveShot() {
@@ -74,7 +80,12 @@ function syncEmpty() {
 function renderPending() {
   if (!shots) return;
   syncActiveShot();
-  shots.hidden = pending.length === 0;
+  shots.hidden = pending.length === 0 || !shotsExpanded;
+  if (toggleShots) {
+    toggleShots.hidden = pending.length === 0;
+    toggleShots.textContent = `${shotsExpanded ? '收起' : '查看'}题图（${pending.length}）`;
+    toggleShots.setAttribute('aria-expanded', String(shotsExpanded));
+  }
   const chips =
     pending.length > 1
       ? `<div class="liuwa-shot-chips" aria-label="截图切换">${pending
@@ -122,6 +133,7 @@ function addShot(dataUrl) {
     return;
   }
   pending.push({ id: String(nextShotId), dataUrl });
+  shotsExpanded = true;
   nextShotId += 1;
   renderPending();
   setStatus("");
@@ -187,6 +199,7 @@ function appendUserTurn(images, text, carriedCount = 0) {
 }
 
 function appendAssistantTurn() {
+  if (sections) { sections.value = ''; delete sections.dataset.sections; }
   // 主面板只展示当前题解；历史保留在 history，不能挤占下一题的阅读高度。
   thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   const article = document.createElement("article");
@@ -343,6 +356,11 @@ async function sendChat() {
   const flush = () => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     renderAnswer(reply, streamNode);
+    if (reply.trim() && !streamNode.dataset.hasContent) {
+      streamNode.dataset.hasContent = 'true';
+      shotsExpanded = false;
+      renderPending();
+    }
     syncReadingControls();
   };
   const commitTurn = (complete = true) => {
@@ -491,7 +509,7 @@ function wireDesktop(cockpit) {
   }
   if (typeof cockpit.onCompact === "function") {
     cockpit.onCompact((value) => {
-      document.body.classList.toggle("liuwa-compact", Boolean(value));
+      applyDisplay({compact: Boolean(value)});
     });
   }
   if (typeof cockpit.onArmed === "function") {
@@ -503,6 +521,7 @@ function wireDesktop(cockpit) {
     cockpit.getConfig().then((cfg) => {
       applyHotkeyHints(cfg || {});
       applyTheme(cfg || {});
+      applyDisplay(cfg.display || {});
       if (cfg && cfg.gatewayApiKey) state.gatewayApiKey = cfg.gatewayApiKey;
     });
   }
@@ -550,6 +569,11 @@ shots?.addEventListener("keydown", (event) => {
 stopBtn?.addEventListener("click", stopChat);
 readingPrev?.addEventListener("click", () => page(-1));
 readingNext?.addEventListener("click", () => page(1));
+sections?.addEventListener('change', () => jumpToSection(thread?.querySelector('.liuwa-stream'), sections.value));
+toggleShots?.addEventListener('click', () => {
+  shotsExpanded = !shotsExpanded;
+  renderPending();
+});
 stopBtn?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();

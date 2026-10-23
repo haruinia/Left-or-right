@@ -8,8 +8,12 @@ const COMPACT = { width: 320, height: 240 };
 // 780 = Gank 解答区的 740px 上限 + 窗口与卡片两层内边距（约 40px）。
 // 560 时卡片内宽只有 460，长代码行仍然折；对齐 Gank 的实际阅读宽度。
 const EXPANDED = { width: 780, height: 760 };
+const LAYOUTS = { narrow: {width: 560, height: 760}, standard: EXPANDED, wide: {width: 1000, height: 680} };
 
 let compact = false;
+let layout = 'standard';
+let expandedSize = {...EXPANDED};
+let onDisplayChange = null;
 
 // The UI ships with the app and loads from disk, so the window still renders when
 // the gateway is down. The gateway URL and key reach the renderer through the
@@ -20,19 +24,27 @@ const RENDERER_INDEX = app.isPackaged
   ? path.join(process.resourcesPath, 'web', 'index.html')
   : path.resolve(__dirname, '..', '..', 'web', 'index.html');
 
-function createWindow(config, { onMove } = {}) {
+function createWindow(config, { onMove, onDisplay } = {}) {
   const isMac = process.platform === 'darwin';
   // 记住上次的位置：透明无边框窗口没有标题栏可以拖，每次启动都回默认位置
   // 时用户得重新按快捷键挪一遍。
   const saved = config && config.windowBounds;
+  compact = false;
+  layout = Object.hasOwn(LAYOUTS, config?.windowLayout) ? config.windowLayout : 'standard';
+  opacity = Number.isFinite(config?.panelOpacity) ? config.panelOpacity : .9;
+  expandedSize = {
+    width: Number.isFinite(saved?.width) ? Math.max(COMPACT.width, saved.width) : LAYOUTS[layout].width,
+    height: Number.isFinite(saved?.height) ? Math.max(COMPACT.height, saved.height) : LAYOUTS[layout].height,
+  };
+  onDisplayChange = onDisplay;
   const win = new BrowserWindow({
     title: '左右',
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
     ...(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
       ? { x: Math.round(saved.x), y: Math.round(saved.y) }
       : {}),
-    width: EXPANDED.width,
-    height: EXPANDED.height,
+    width: Math.round(expandedSize.width),
+    height: Math.round(expandedSize.height),
     minWidth: COMPACT.width,
     minHeight: COMPACT.height,
     frame: false,
@@ -55,6 +67,9 @@ function createWindow(config, { onMove } = {}) {
       backgroundThrottling: false,
     },
   });
+  fitWindow(win, expandedSize);
+  clampToArea(win);
+  setOpacity(win, opacity);
 
   // Keep the interviewer's private panel out of screen share and screen recording,
   // the same way presenter notes stay off the shared feed. macOS maps this to
@@ -124,11 +139,13 @@ function createWindow(config, { onMove } = {}) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       if (win.isDestroyed()) return;
-      const { x, y } = win.getBounds();
-      onMove({ x, y });
+      const { x, y, width, height } = win.getBounds();
+      // 收起尺寸不覆盖阅读尺寸；重启仍恢复最后的阅读窗口。
+      onMove({ x, y, ...(compact ? expandedSize : {width, height}) });
     }, 400);
   };
   win.on('move', persistBounds);
+  win.on('resize', persistBounds);
   win.on('closed', () => clearTimeout(saveTimer));
   return win;
 }
@@ -138,11 +155,25 @@ function createWindow(config, { onMove } = {}) {
 const OPACITY_MIN = 0.3;
 const OPACITY_MAX = 1;
 const OPACITY_STEP = 0.1;
-let opacity = 1;
+let opacity = .9;
+
+function getDisplayState(win) {
+  return {opacity, layout, compact, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
+}
+
+function notifyDisplay(win) {
+  const display = getDisplayState(win);
+  if (win && !win.isDestroyed()) win.webContents.send('cockpit:display', display);
+  onDisplayChange?.({panelOpacity: opacity, windowLayout: layout});
+  return display;
+}
 
 function setOpacity(win, value) {
+  if (!Number.isFinite(value)) return opacity;
   opacity = Math.max(OPACITY_MIN, Math.min(OPACITY_MAX, Math.round(value * 10) / 10));
-  if (win && !win.isDestroyed()) win.setOpacity(opacity);
+  // 保持字与代码清晰，只调整 CSS 背景；不让整个窗口一起褪色。
+  if (win && !win.isDestroyed()) win.setOpacity(1);
+  notifyDisplay(win);
   return opacity;
 }
 
@@ -190,14 +221,34 @@ function moveWindow(win, dx, dy) {
 }
 
 function toggleCompact(win) {
-  if (!win) return compact;
+  if (!win || win.isDestroyed()) return compact;
+  if (!compact) {
+    const {width, height} = win.getBounds();
+    expandedSize = {width, height};
+  }
   compact = !compact;
-  const size = compact ? COMPACT : EXPANDED;
-  win.setSize(size.width, size.height, true);
+  fitWindow(win, compact ? COMPACT : expandedSize);
   // 贴在屏幕右下角时展开，大半截会跑到屏幕外——重设尺寸后重新夹一次。
   clampToArea(win);
   win.webContents.send('cockpit:compact', compact);
+  notifyDisplay(win);
   return compact;
+}
+
+function fitWindow(win, size) {
+  const area = screen.getDisplayMatching(win.getBounds()).workArea;
+  win.setSize(Math.round(Math.min(size.width, area.width)), Math.round(Math.min(size.height, area.height)));
+}
+
+function setLayout(win, value) {
+  if (!win || win.isDestroyed() || !Object.hasOwn(LAYOUTS, value)) return getDisplayState(win);
+  layout = value;
+  compact = false;
+  expandedSize = {...LAYOUTS[value]};
+  fitWindow(win, expandedSize);
+  clampToArea(win);
+  win.webContents.send('cockpit:compact', false);
+  return notifyDisplay(win);
 }
 
 function showWindow(win) {
@@ -307,4 +358,7 @@ module.exports = {
   RENDERER_INDEX,
   COMPACT,
   EXPANDED,
+  LAYOUTS,
+  setLayout,
+  getDisplayState,
 };

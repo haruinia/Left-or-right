@@ -23,6 +23,7 @@
           <button type="button" id="liuwaReadingPrev" disabled>上一页</button>
           <span>使用 <kbd data-key-action="readPrev">⌘,</kbd> / <kbd data-key-action="readNext">⌘.</kbd> 上下翻页</span>
           <button type="button" id="liuwaReadingNext" disabled>下一页</button>
+          <select id="liuwaSections" aria-label="定位回答章节" hidden></select>
         </nav>
       <div class="liuwa-thread" id="liuwaThread" role="region" aria-label="题目与 AI 讲解" aria-live="polite" aria-relevant="additions text">
         <div class="liuwa-idle" id="liuwaIdle">
@@ -33,6 +34,24 @@
       </section>
 
       <footer class="liuwa-dock">
+        <div class="liuwa-toolbar">
+          <button type="button" id="liuwaToggleShots" aria-expanded="true" aria-controls="liuwaShots" hidden></button>
+          <details class="liuwa-display" id="liuwaDisplay">
+            <summary>显示</summary>
+            <div class="liuwa-display-panel">
+              <label for="liuwaOpacity">背景不透明度 <output id="liuwaOpacityValue">90%</output></label>
+              <input type="range" id="liuwaOpacity" min="30" max="100" step="10" value="90" />
+              <label for="liuwaLayout">窗口布局</label>
+              <select id="liuwaLayout">
+                <option value="narrow">窄长</option>
+                <option value="standard" selected>标准</option>
+                <option value="wide">宽屏</option>
+              </select>
+              <button type="button" id="liuwaCompact">收起窗口</button>
+              <p id="liuwaDisplayStatus" role="status"></p>
+            </div>
+          </details>
+        </div>
         <div class="liuwa-shots" id="liuwaShots" hidden></div>
         <section class="liuwa-shortcuts" id="liuwaKeys">
           <div class="liuwa-shortcut-primary">
