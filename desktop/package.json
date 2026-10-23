@@ -26,6 +26,10 @@
       {
         "from": "../web",
         "to": "web"
+      },
+      {
+        "from": "native",
+        "to": "native"
       }
     ],
     "mac": {

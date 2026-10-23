@@ -25,6 +25,7 @@ const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccele
 const { captureScreenshot } = require('./capture');
 const { selectRegion } = require('./selector');
 const { startBackend, stopBackend, waitForHealth } = require('./backend');
+const { startCommandKeyMonitor } = require('./command-key');
 
 app.setName('左右');
 const config = loadConfig();
@@ -33,6 +34,7 @@ let failedHotkeys = [];
 let currentBindings = BINDINGS;
 let permissionPaneOpened = false;
 let lastScreenshotTime = 0;
+let stopCommandKeyMonitor = null;
 // 一次截图流程（框选 → 抓 → 恢复窗口）进行中时，再按截图键直接忽略。
 // 之前第二次 ⌘⇧U 会先取消旧框选再立刻开新的，而旧流程的收尾
 // 会把主面板重新 show 到新覆盖层上面，下一次点击就被面板吃掉了。
@@ -157,7 +159,8 @@ async function hideWindowForCapture() {
 function restoreWindow(wasVisible) {
   if (wasVisible && win && !win.isDestroyed()) {
     win.showInactive();
-    setClickThrough(win, false);
+    win.setFocusable(false);
+    setClickThrough(win, true);
   }
 }
 
@@ -260,7 +263,6 @@ function registerIpc() {
   });
   ipcMain.handle('cockpit:setSurface', (_event, patch) => {
     if(!patch || typeof patch !== 'object') throw new Error('Invalid surface state');
-    if(typeof patch.settingsOpen === 'boolean') setInteractive(win, patch.settingsOpen);
     return setSurface(win, patch);
   });
   ipcMain.handle('cockpit:setCaptureOptions', (_event, patch) => {
@@ -292,7 +294,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', () => {
     if (win && !win.isDestroyed()) {
       win.showInactive();
-      setClickThrough(win, false);
+      win.setFocusable(false);
+      setClickThrough(win, true);
     }
   });
   app.whenReady().then(boot);
@@ -318,6 +321,9 @@ async function boot() {
     onMove: (bounds) => saveConfig({ windowBounds: bounds }),
     onDisplay: (patch) => saveConfig(patch),
   });
+  stopCommandKeyMonitor = startCommandKeyMonitor((held) => {
+    setInteractive(win, held, { restore: !held });
+  });
   refreshUiHotkeys();
   setInterval(refreshUiHotkeys, 4000);
 
@@ -335,6 +341,7 @@ async function boot() {
 }
 
 app.on('will-quit', () => {
+  stopCommandKeyMonitor?.();
   unregisterHotkeys();
   stopBackend();
 });

@@ -51,3 +51,12 @@ test('a partially streamed metadata marker is hidden and absent preferred conten
   assert.equal(model.panels.find(p=>p.key==='code').hasContent,false);
   assert.equal(model.panels.find(p=>p.key==='thought').hasContent,true);
 });
+
+test('general answers with a code section infer programming and open code first',()=>{
+  const source='<!-- liuwa:type=general -->\n## 答案\n查询活跃用户。\n## 代码\n```sql\nSELECT * FROM users WHERE active = 1;\n```';
+  const model=splitAnswer(source);
+  assert.equal(model.type,'programming');
+  assert.equal(model.preferred,'code');
+  assert.equal(model.panels[0].key,'code');
+  assert.match(model.panels.find(p=>p.key==='code').markdown,/```sql/);
+});

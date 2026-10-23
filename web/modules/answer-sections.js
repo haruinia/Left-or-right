@@ -65,6 +65,8 @@ export function splitAnswer(markdown) {
     else if (groups.has('thought') && !groups.has('answer')) type = 'reasoning';
     else type = 'general';
   }
+  // 某些模型会把 SQL 等代码题标成 general；已有明确代码小节时仍应默认展示代码。
+  if (type === 'general' && groups.has('code')) type = 'programming';
   const priority = type === 'mixed' ? ['all','answer','code','thought','analysis','other']
     : type === 'programming' ? ['code','thought','analysis','answer','other','all']
     : type === 'reasoning' ? ['thought','answer','analysis','code','other','all']

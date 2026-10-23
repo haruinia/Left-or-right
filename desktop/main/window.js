@@ -109,15 +109,17 @@ function createWindow(config, { onMove, onDisplay } = {}) {
   win.once('ready-to-show', () => {
     win.setBackgroundColor('#00000000');
     win.setFocusable(false);
-    setClickThrough(win, false);
+    // Gank 式悬浮层：默认让鼠标完全穿过，只有系统级 Command 监听报告
+    // Command 按下时才临时接收点击。不能在这里设成可点击，否则面板会
+    // 一直挡住下面的题目。
+    setClickThrough(win, true);
     win.showInactive();
   });
-  win.on('blur', () => {
-    if (!interact || Date.now() - armedAt < 250) return;
-    setInteractive(win, false, { restore: false });
-  });
+  // 松开 Command 由 command-key.js 的系统级监听负责。这里保留一个
+  // 窗口已获得焦点时的兜底：即使原生监听暂不可用，Command 的 keyUp
+  // 仍能恢复穿透。
   win.webContents.on('before-input-event', (_event, input) => {
-    if (!interact || input.type !== 'keyUp' || Date.now() - armedAt < 250) return;
+    if (!interact || input.type !== 'keyUp') return;
     if (
       input.key === 'Meta' ||
       input.key === 'Control' ||
@@ -286,7 +288,7 @@ function showWindow(win) {
   if (!win || win.isDestroyed()) return;
   if (!win.isVisible()) win.showInactive();
   win.setFocusable(false);
-  setClickThrough(win, false);
+  setClickThrough(win, true);
 }
 
 function hideWindow(win) {
@@ -344,16 +346,20 @@ function setInteractive(win, on, { restore = true } = {}) {
   interact = next;
   if (interact) {
     armedAt = Date.now();
-    if (!win.isVisible()) win.show();
+    if (!win.isVisible()) win.showInactive();
+    // 不主动 focus：按下 Command 只解除鼠标穿透，用户仍可继续在题目
+    // 窗口里操作；真正点击悬浮层时才由 macOS 把焦点交给它。
     win.setFocusable(true);
     setClickThrough(win, false);
-    win.focus();
   } else {
-    setClickThrough(win, false);
+    const hadFocus = typeof win.isFocused === 'function' && win.isFocused();
+    setClickThrough(win, true);
     win.setFocusable(false);
     const pid = previousPid;
     previousPid = '';
-    if (restore && pid && pid !== String(process.pid)) activatePid(pid);
+    // 只有悬浮层真的取得过焦点时才把焦点还给原来的应用。单纯按住
+    // Command 不会打断用户正在输入的题目。
+    if (restore && hadFocus && pid && pid !== String(process.pid)) activatePid(pid);
   }
   win.webContents.send('cockpit:armed', interact);
   return interact;
@@ -361,10 +367,8 @@ function setInteractive(win, on, { restore = true } = {}) {
 
 function beginHoldInteract(win) {
   if (!win || win.isDestroyed()) return;
-  if (interact && Date.now() - armedAt > 250) {
-    setInteractive(win, false);
-    return;
-  }
+  // 兼容旧的“按住操作面板”全局快捷键：它只负责进入临时交互，
+  // 松开 Command 后仍由系统级监听统一恢复穿透。
   const pid = frontmostPid();
   if (pid && pid !== String(process.pid)) previousPid = pid;
   setInteractive(win, true);

@@ -15,6 +15,11 @@ function windowModule(area = {x:0,y:24,width:1440,height:876}) {
     setSize:(width,height)=>{bounds={...bounds,width,height};},
     setPosition:(x,y)=>{bounds={...bounds,x,y};},
     setOpacity:value=>events.push(['nativeOpacity',value]),
+    setIgnoreMouseEvents:(ignore,options)=>events.push(['ignoreMouse',ignore,options]),
+    setFocusable:focusable=>events.push(['focusable',focusable]),
+    isVisible:()=>true,
+    isFocused:()=>true,
+    showInactive:()=>events.push(['showInactive']),
     webContents:{send:(...args)=>events.push(args)}};
   return {api:sandbox.module.exports,win,events};
 }
@@ -72,6 +77,26 @@ test('idle surface grows for separate image previews and temporary settings then
   assert.equal(api.getDisplayState(win).theme,'transparent-white');
   api.setSurface(win,{answer:false,shotCount:0});
   assert.equal(win.getBounds().height,76);
+});
+
+test('the overlay passes clicks through by default and only captures them while Command is held',()=>{
+  const {api,win,events}=windowModule();
+  const lastIgnore=()=>[...events].reverse().find(([event])=>event==='ignoreMouse')?.[1];
+
+  api.showWindow(win);
+  assert.equal(lastIgnore(),true);
+  assert.equal(api.isInteractive(),false);
+
+  api.setInteractive(win,true,{restore:false});
+  assert.equal(lastIgnore(),false);
+  assert.equal(api.isInteractive(),true);
+  assert.ok(events.some(([event,value])=>event==='focusable'&&value===true));
+
+  api.setInteractive(win,false,{restore:false});
+  assert.equal(lastIgnore(),true);
+  assert.equal(api.isInteractive(),false);
+  assert.ok(events.some(([event,value])=>event==='focusable'&&value===false));
+  assert.ok(events.some(([event,value])=>event==='cockpit:armed'&&value===false));
 });
 
 test('preferences write outside app.asar and merge with existing gateway configuration',()=>{
