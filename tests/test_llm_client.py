@@ -607,3 +607,90 @@ def test_model_discovery_uses_configured_endpoint_and_credentials(monkeypatch):
         return httpx.Response(200,json={'data':[{'id':'vision-one'},{'id':'text-two'},{'id':'vision-one'},{}]})
     import asyncio
     assert asyncio.run(LLMClient(transport=httpx.MockTransport(handle)).list_models()) == ['text-two','vision-one']
+
+
+def _probe_json() -> str:
+    return json.dumps(
+        {
+            "suggestions": [
+                {
+                    "question": "q",
+                    "target": "t",
+                    "competency": "c",
+                    "priority": 1,
+                }
+            ],
+            "credibility": {"level": "vague", "reason": "r", "drill_down_hint": "d"},
+        },
+        ensure_ascii=False,
+    )
+
+
+def _configure_json_client(monkeypatch, model: str) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_MODEL", model)
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test")
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_AUTH_HEADER", "Authorization")
+    monkeypatch.setenv("LLM_AUTH_SCHEME", "Bearer")
+    monkeypatch.setenv("LLM_RESPONSE_CONTENT_PATH", "choices.0.message.content")
+    get_settings.cache_clear()
+
+
+def test_llm_client_accepts_markdown_fenced_json_content(monkeypatch) -> None:
+    """Providers that honour response_format=json_object still wrap output in ```json."""
+    _configure_json_client(monkeypatch, "fenced-model")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "```json\n" + _probe_json() + "\n```",
+                        }
+                    }
+                ]
+            },
+        )
+
+    result = __import__("asyncio").run(_call_with_transport(httpx.MockTransport(handler)))
+    assert result.suggestions[0].question == "q"
+    assert result.credibility.level == "vague"
+
+
+def test_llm_client_accepts_json_wrapped_in_prose(monkeypatch) -> None:
+    _configure_json_client(monkeypatch, "prose-model")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": "好的，结果如下：\n" + _probe_json() + "\n以上。",
+                        }
+                    }
+                ]
+            },
+        )
+
+    result = __import__("asyncio").run(_call_with_transport(httpx.MockTransport(handler)))
+    assert result.suggestions[0].question == "q"
+
+
+def test_llm_client_still_falls_back_on_non_json_content(monkeypatch) -> None:
+    _configure_json_client(monkeypatch, "broken-model")
+    monkeypatch.setenv("LLM_MAX_RETRIES", "0")
+    get_settings.cache_clear()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "抱歉，我无法完成。"}}]},
+        )
+
+    result = __import__("asyncio").run(_call_with_transport(httpx.MockTransport(handler)))
+    assert result.suggestions[0].question == "fallback"

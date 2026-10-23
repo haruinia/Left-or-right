@@ -7,7 +7,12 @@ import pytest
 from libs.common.config import get_settings
 from libs.common.prompts import load_prompt
 from libs.schemas import ChatStreamRequest, UiSettings
-from services.chat_service.service import _exam_prompt, build_chat_messages, normalize_image_data_url
+from services.chat_service.service import (
+    _exam_prompt,
+    build_chat_messages,
+    normalize_image_data_url,
+    study_preface,
+)
 
 _PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -41,6 +46,12 @@ def test_exam_direction_still_honours_the_answer_language() -> None:
     content = _exam_prompt(settings)
     assert "正文语言：English" in content
     assert "正文语言：中文" in _exam_prompt(UiSettings())
+
+
+def test_study_preface_enforces_selected_answer_and_code_language() -> None:
+    preface = study_preface(UiSettings(study_language="Go", answer_language="en-US"))
+    assert "所有自然语言正文必须使用 English" in preface
+    assert "所有代码必须使用该语言" in preface
 
 
 def test_normalize_image_rejects_empty_and_oversize(monkeypatch) -> None:

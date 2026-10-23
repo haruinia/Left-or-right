@@ -313,12 +313,37 @@ def _auth_headers() -> dict[str, str]:
 def _parse_json_response(payload: Any, schema: type[T]) -> T:
     content = _extract_path(payload, get_settings().llm_response_content_path)
     if isinstance(content, str):
-        data: Any = json.loads(content)
+        data: Any = _loads_json_content(content)
     elif isinstance(content, (dict, list)):
         data = content
     else:
         raise ValueError("LLM response content path did not resolve to JSON data")
     return schema.model_validate(data)
+
+
+def _loads_json_content(content: str) -> Any:
+    """Parse JSON even when the provider wraps it in a Markdown fence.
+
+    Several OpenAI-compatible providers return ``response_format=json_object``
+    payloads as ```json ... ``` blocks anyway.  Strip a single leading fence
+    and, if the rest still has prose around the object, decode the first JSON
+    value instead of failing the whole request.
+    """
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:] if lines and lines[0].lstrip().startswith("```") else lines
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        starts = [index for index in (text.find("{"), text.find("[")) if index >= 0]
+        if not starts:
+            raise
+        value, _ = json.JSONDecoder().raw_decode(text[min(starts) :])
+        return value
 
 
 def _extract_path(payload: Any, path: str) -> Any:
