@@ -40,6 +40,7 @@ def test_load_liuwa_chat_prompt_reads_prompt_file() -> None:
     assert prompt.startswith("你是一位通用解题助手")
     assert "## 解题思路" in prompt
     assert "{language}" in prompt
+    assert "{answer_language}" in prompt
     assert prompt == prompt.strip()
 
 

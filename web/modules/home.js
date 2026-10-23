@@ -18,7 +18,65 @@ const pagination = document.querySelector("#liuwaPagination");
 const readingPrev = document.querySelector("#liuwaReadingPrev");
 const readingNext = document.querySelector("#liuwaReadingNext");
 const sections = document.querySelector("#liuwaSections");
+const questionSelect = document.querySelector("#liuwaQuestions");
 const toggleShots = document.querySelector("#liuwaToggleShots");
+
+// 当前会话里已经问过的题。回答区一次只渲染一道题，但可以直接切回上一题，
+// 不必重新截图或重新请求模型。重置/新题时随会话一起清空。
+const questions = [];
+let viewedQuestionId = "";
+let nextQuestionId = 1;
+
+function rememberReadingPosition() {
+  const entry = questions.find((question) => question.id === viewedQuestionId);
+  const box = thread?.querySelector('.liuwa-stream');
+  if (!entry || !box) return;
+  entry.scrollTop = box.scrollTop || 0;
+  entry.panel = box.dataset.answerPanel || '';
+}
+
+function syncQuestionSelector() {
+  if (!questionSelect) return;
+  questionSelect.hidden = questions.length < 2;
+  const signature = questions.map((question) => question.id).join('|');
+  if (questionSelect.dataset.questions !== signature) {
+    questionSelect.replaceChildren(
+      ...questions.map((question, index) => new Option(
+        `第 ${index + 1} 题${question.partial ? '（已中断）' : ''}`,
+        question.id,
+      )),
+    );
+    questionSelect.dataset.questions = signature;
+  }
+  questionSelect.value = viewedQuestionId;
+  // 生成中切题会把流式内容留在已移除的节点里，等这一轮结束再允许切换。
+  questionSelect.disabled = streaming;
+}
+
+function showQuestion(entry) {
+  if (!entry) return;
+  viewedQuestionId = entry.id;
+  thread.querySelectorAll('.liuwa-turn').forEach((turn) => turn.remove());
+  const body = appendAssistantTurn();
+  renderAnswer(entry.markdown, body, {complete: true});
+  // 分区按钮在上一步才建好；恢复用户上次看到的分区与位置。
+  if (entry.panel) {
+    document.querySelector(`#liuwaAnswerTabs [data-panel="${entry.panel}"]`)?.click();
+  }
+  body.scrollTop = entry.scrollTop || 0;
+  // 顶部的题图属于当前这道题：切题时换成它当时的截图，避免图和答案对不上。
+  // 这些截图已经发送过，不参与下一次请求。
+  if (pending.length || entry.shots?.length) {
+    pending.length = 0;
+    (entry.shots || []).forEach((dataUrl) => pending.push({id: String(nextShotId++), dataUrl, sent: true}));
+    activeShotId = "";
+    shotsExpanded = true;
+    renderPending();
+  }
+  syncQuestionSelector();
+  syncReadingControls();
+  syncEmpty();
+}
 
 // 截图题解固定在当前阅读位置。Gank 的24px自动追尾属于语音面板，不能套到这里。
 function syncReadingControls() {
@@ -365,10 +423,12 @@ async function runChat() {
   activeAbort = controller;
   const timeoutGuard = setTimeout(() => controller.abort(), 180_000);
   document.body.classList.add("is-busy");
+  syncQuestionSelector();
   setStatus("正在分析题目…");
   shots.querySelectorAll("[data-remove]").forEach((button) => { button.disabled = true; });
   if (stopBtn) stopBtn.hidden = false;
   const userTurn = appendUserTurn(unsent, "", images.length - unsent.length);
+  rememberReadingPosition();
   const streamNode = appendAssistantTurn();
   const assistantTurn = streamNode.parentElement;
   syncEmpty();
@@ -385,7 +445,19 @@ async function runChat() {
   const commitTurn = (complete = true) => {
     // 部分回答虽需保留，但不能把待处理截图标成完成，否则连接中断后再按处理键无效。
     if (complete) pending.forEach((shot) => { shot.sent = true; });
+    // 每道题在本次会话里留一份完整 Markdown，题目选择器靠它切回旧题。
+    const entry = {
+      id: String(nextQuestionId++),
+      markdown: reply,
+      partial: !complete,
+      scrollTop: 0,
+      panel: '',
+      shots: unsent.slice(),
+    };
     renderPending();
+    questions.push(entry);
+    viewedQuestionId = entry.id;
+    syncQuestionSelector();
     history.push({
       role: "user",
       text: "请讲解这道截图题目",
@@ -453,6 +525,7 @@ async function runChat() {
     }
     if (assistantTurn.isConnected) assistantTurn.classList.remove("is-stream");
     renderPending();
+    syncQuestionSelector();
   }
 }
 
@@ -606,8 +679,16 @@ document.querySelector('#liuwaImageImport')?.addEventListener('change',event=>{
   event.target.value='';
 });
 sections?.addEventListener('change', () => jumpToSection(thread?.querySelector('.liuwa-stream'), sections.value));
+questionSelect?.addEventListener('change', () => {
+  rememberReadingPosition();
+  showQuestion(questions.find((question) => question.id === questionSelect.value));
+});
 thread?.addEventListener('answer-panel-change', () => {
   if(sections) { sections.value = ''; delete sections.dataset.sections; }
+  // 手动切分区后记下选择，切回这道题时还停在同一个分区。
+  const entry = questions.find((question) => question.id === viewedQuestionId);
+  const panel = thread?.querySelector('.liuwa-stream')?.dataset.answerPanel;
+  if (entry && panel) entry.panel = panel;
   syncReadingControls();
 });
 toggleShots?.addEventListener('click', () => {
@@ -697,6 +778,8 @@ function clearShots() {
   }
   pending.length = 0;
   activeShotId = "";
+  // 切回旧题时顶部题图也跟着切，但不能让它重新变成「待发送」。
+  questions.forEach((question) => { question.shots = []; });
   // 历史轮次里的图片也要一起清掉，否则下一轮请求仍然会把这些 base64 发出去：
   // 界面说「已清空」、模型却还看得到，而且每轮请求体积越滚越大。
   history.forEach((turn) => {
@@ -733,6 +816,11 @@ async function newQuestion() {
   pending.length = 0;
   activeShotId = "";
   nextShotId = 1;
+  // 题目选择器只覆盖当前这次会话；会话保存后新题从空列表重新开始。
+  questions.length = 0;
+  viewedQuestionId = "";
+  nextQuestionId = 1;
+  syncQuestionSelector();
   sessionStartedAt = new Date().toISOString();
   resetReading();
   renderPending();

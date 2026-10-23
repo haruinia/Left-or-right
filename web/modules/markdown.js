@@ -118,7 +118,22 @@ export function renderMarkdown(source) {
     if (!codeFence) return;
     const lang = codeFence.lang ? ` data-lang="${escapeHtml(codeFence.lang)}"` : "";
     const raw = codeFence.lines.join("\n");
-    html.push(`<pre class="md-code"${lang}><code class="hljs">${highlightCode(raw, codeFence.lang)}</code></pre>`);
+    // 行号单独一列：不切分高亮后的 HTML，跨行注释/字符串的 span 不会被拆断。
+    // 行号列在 pre 之外，复制按钮读 pre.textContent 就只拿到源码本身。
+    const lines = Math.max(1, codeFence.lines.length);
+    const gutter = Array.from({length: lines}, (_line, index) => index + 1).join("\n");
+    html.push(
+      `<div class="md-code-block"${lang}>` +
+        `<div class="md-code-head">` +
+          `<span class="md-code-lang">${escapeHtml(codeFence.lang || "text")}</span>` +
+          `<button type="button" class="md-copy" aria-label="复制代码">复制</button>` +
+        `</div>` +
+        `<div class="md-code-body">` +
+          `<span class="md-code-gutter" aria-hidden="true">${gutter}</span>` +
+          `<pre class="md-code"${lang}><code class="hljs">${highlightCode(raw, codeFence.lang)}</code></pre>` +
+        `</div>` +
+      `</div>`,
+    );
     codeFence = null;
   };
   const flushTable = () => {
