@@ -6,8 +6,8 @@ import pytest
 
 from libs.common.config import get_settings
 from libs.common.prompts import load_prompt
-from libs.schemas import ChatStreamRequest
-from services.chat_service.service import build_chat_messages, normalize_image_data_url
+from libs.schemas import ChatStreamRequest, UiSettings
+from services.chat_service.service import build_chat_messages, normalize_image_data_url, study_preface
 
 _PNG = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -27,6 +27,12 @@ def test_build_chat_messages_uses_liuwa_prompt_and_images(monkeypatch) -> None:
     assert messages[1].content == "上一问"
     assert messages[-1].images == (data_url,)
     assert "截图" in messages[-1].content
+
+
+def test_study_preface_enforces_selected_answer_and_code_language() -> None:
+    preface = study_preface(UiSettings(study_language="Go", answer_language="en-US"))
+    assert "所有自然语言正文必须使用 English" in preface
+    assert "所有代码必须使用该语言" in preface
 
 
 def test_normalize_image_rejects_empty_and_oversize(monkeypatch) -> None:

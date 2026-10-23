@@ -67,7 +67,12 @@ def study_preface(study_settings: UiSettings) -> str:
     if guide and goal == _NEUTRAL_GOAL:
         goal = _EXAM_GOAL
     answer_language = "English" if study_settings.answer_language == "en-US" else "中文"
-    language_line = f"作答语言：{answer_language}。为支持分区，固定的二级分区标题仍按输出协议使用中文，正文按作答语言书写。"
+    # 中文和英文名之间留一个空格，避免出现「必须使用English」这种粘连。
+    language_gap = " " if answer_language.isascii() else ""
+    language_line = (
+        f"作答语言：{answer_language}。除固定分区标题外，所有自然语言正文必须使用{language_gap}{answer_language}；"
+        "如用户本次明确要求其他语言，以用户要求为准。"
+    )
     style = (_EXAM_STYLES if guide else _CODE_STYLES)[study_settings.study_answer_style]
     identity_line = (
         "我的身份：面试官。明确解题要求照常完成；讨论面试话题时，从考察点、追问和评价依据展开，不替候选人虚构经历。"
@@ -78,7 +83,9 @@ def study_preface(study_settings: UiSettings) -> str:
         "用户的复习预设（本次明确提问优先于默认偏好）：",
         f"专业 / 方向：{specialty}",
         language_line,
-        f"编程语言：{language or '按题目要求'}" if not guide else "考试题按实际交付物作答，不生成无关代码。",
+        f"编程语言：{language or '按题目要求'}。除非用户本次明确要求其他语言，所有代码必须使用该语言。"
+        if not guide
+        else "考试题按实际交付物作答，不生成无关代码。",
         identity_line,
         f"复习目标：{goal}",
         f"讲解方式：{style}",
