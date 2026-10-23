@@ -21,7 +21,7 @@ const toggleShots = document.querySelector("#liuwaToggleShots");
 
 // 截图题解固定在当前阅读位置。Gank 的24px自动追尾属于语音面板，不能套到这里。
 function syncReadingControls() {
-  const hasAnswer = Boolean(thread?.querySelector(".liuwa-stream")?.textContent.trim());
+  const hasAnswer = thread?.querySelector(".liuwa-stream")?.dataset.hasAnswer === 'true';
   if (readingPrev) readingPrev.disabled = !hasAnswer;
   if (readingNext) readingNext.disabled = !hasAnswer;
   syncSections(thread?.querySelector('.liuwa-stream'), sections);
@@ -74,6 +74,7 @@ function syncEmpty() {
   document.body.classList.toggle("is-empty", empty);
   if (idle) idle.hidden = !empty;
   if (pagination) pagination.hidden = empty;
+  if (empty) document.querySelector('#liuwaAnswerTabs').hidden = true;
   syncReadingControls();
 }
 
@@ -200,6 +201,8 @@ function appendUserTurn(images, text, carriedCount = 0) {
 
 function appendAssistantTurn() {
   if (sections) { sections.value = ''; delete sections.dataset.sections; }
+  const tabs = document.querySelector('#liuwaAnswerTabs');
+  if(tabs) { tabs.hidden = true; tabs.replaceChildren(); delete tabs.dataset.signature; }
   // 主面板只展示当前题解；历史保留在 history，不能挤占下一题的阅读高度。
   thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   const article = document.createElement("article");
@@ -257,7 +260,7 @@ function finalizeStopped(streamNode, reply, assistantTurn, marker = "（已中�
   // 中断标记挂在卡片上，正文保留模型已经生成的内容。
   assistantTurn.classList.add("is-stopped");
   assistantTurn.dataset.stoppedLabel = marker;
-  renderAnswer(reply, streamNode);
+  renderAnswer(reply, streamNode, {complete:true});
   assistantTurn.classList.remove("is-stream");
 }
 
@@ -353,10 +356,10 @@ async function sendChat() {
   syncEmpty();
   let reply = "";
   let flushTimer = null;
-  const flush = () => {
+  const flush = (complete = false) => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    renderAnswer(reply, streamNode);
-    if (reply.trim() && !streamNode.dataset.hasContent) {
+    const answer = renderAnswer(reply, streamNode, {complete});
+    if (answer.full.trim() && !streamNode.dataset.hasContent) {
       streamNode.dataset.hasContent = 'true';
       shotsExpanded = false;
       renderPending();
@@ -397,13 +400,13 @@ async function sendChat() {
       }),
     });
     await readSse(response, onDelta, controller.signal);
-    flush();
+    flush(true);
     assistantTurn.classList.remove("is-stream");
     commitTurn();
     setStatus("");
   } catch (error) {
     clearTimeout(flushTimer);
-    flush();
+    flush(true);
     const aborted = controller.signal.aborted || error?.name === "AbortError";
     const rawMessage = error && error.message ? error.message : String(error);
     const message = /RemoteProtocolError|incomplete chunked read|peer closed connection/i.test(rawMessage)
@@ -570,6 +573,10 @@ stopBtn?.addEventListener("click", stopChat);
 readingPrev?.addEventListener("click", () => page(-1));
 readingNext?.addEventListener("click", () => page(1));
 sections?.addEventListener('change', () => jumpToSection(thread?.querySelector('.liuwa-stream'), sections.value));
+thread?.addEventListener('answer-panel-change', () => {
+  if(sections) { sections.value = ''; delete sections.dataset.sections; }
+  syncReadingControls();
+});
 toggleShots?.addEventListener('click', () => {
   shotsExpanded = !shotsExpanded;
   renderPending();

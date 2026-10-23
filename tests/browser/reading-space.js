@@ -28,6 +28,7 @@ async (page) => {
   for(let i=0;i<8;i++) await capture();
   if(await page.locator('#liuwaShots').isHidden()) throw Error('pending images disappeared before sending');
   await page.evaluate(()=>window.__liuwaSend());
+  await page.locator('#liuwaAnswerTabs [data-panel="all"]').click();
   const collapsed=await state();
   if(!collapsed.shotsHidden||collapsed.count!==8||collapsed.height<550) throw Error('answered images still occupy the reader');
   await page.screenshot({path:'output/playwright/reading-space-collapsed.png'});

@@ -4,6 +4,8 @@
 //
 // 数学公式用 KaTeX（和 Gank 同一个方案），vendor 在 web/vendor/katex。
 
+import { stripAnswerMetadata } from './answer-sections.js';
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -80,7 +82,7 @@ function renderInline(text) {
 // 块级渲染：按行扫描，识别代码块、标题、列表、表格、引用、分隔线、段落。
 // 流式场景安全：未闭合的代码块按已到内容渲染（末尾假装闭合）。
 export function renderMarkdown(source) {
-  const lines = String(source || "").replaceAll("\r\n", "\n").split("\n");
+  const lines = stripAnswerMetadata(source).text.split("\n");
   const html = [];
   let paragraph = [];
   let list = null; // { type: "ul"|"ol", items: [] }

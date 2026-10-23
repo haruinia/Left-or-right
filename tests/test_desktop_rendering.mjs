@@ -4,14 +4,14 @@ import { renderMarkdown } from '../web/modules/markdown.js';
 import { page, readingBox, scrollByScreen } from '../web/modules/reading.js';
 import { renderAnswer } from '../web/modules/answer-view.js';
 
-test('a multi-section answer stays visible in source order without tabs', () => {
+test('an untyped answer opens its answer section while retaining the complete source', () => {
   const root = { innerHTML: '', scrollTop: 120 };
-  renderAnswer('## 解题思路\n先排序。\n\n## 答案\n42', root);
-  assert.match(root.innerHTML, /先排序。/);
+  const model = renderAnswer('## 解题思路\n先排序。\n\n## 答案\n42', root, {complete:true});
+  assert.doesNotMatch(root.innerHTML, /先排序。/);
   assert.match(root.innerHTML, /42/);
-  assert.ok(root.innerHTML.indexOf('解题思路') < root.innerHTML.indexOf('答案'));
-  assert.doesNotMatch(root.innerHTML, /tablist|tabpanel/);
-  assert.equal(root.scrollTop, 120);
+  assert.match(model.full, /先排序。/);
+  assert.equal(model.selected, 'answer');
+  assert.equal(root.scrollTop, 0);
 });
 
 test('math-looking lines inside a code fence stay literal, including while streaming', () => {

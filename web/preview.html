@@ -315,7 +315,7 @@
           body.className = "liuwa-stream md";
           ai.append(body);
           thread.append(ai);
-          renderAnswer(${JSON.stringify(DEMO_REPLY)}, body);
+          renderAnswer(${JSON.stringify(DEMO_REPLY)}, body, {complete:true});
           document.querySelector("#liuwaPagination").hidden = false;
           document.querySelector("#liuwaReadingPrev").disabled = false;
           document.querySelector("#liuwaReadingNext").disabled = false;

@@ -24,6 +24,7 @@ async (page) => {
     return {cards:document.querySelectorAll('.liuwa-turn').length,top:body?.scrollTop,height:body?.clientHeight,total:body?.scrollHeight,paragraphPadding:style?.padding,font:style?.fontSize,pagination:!!document.querySelector('#liuwaReadingNext')};
   });
   await capture();await page.evaluate(()=>window.__liuwaSend());
+  await page.locator('#liuwaAnswerTabs [data-panel="all"]').click();
   const returned=await metrics();await page.screenshot({path:`output/playwright/reading-${phase}-returned.png`});
   await page.evaluate(()=>window.__readingEvents.read('next'));
   await page.waitForTimeout(450);
@@ -52,6 +53,8 @@ async (page) => {
   });
   await page.waitForFunction(() => !!window.__readingStream);
   await page.evaluate(text => window.__readingStream.enqueue(new TextEncoder().encode('data: '+JSON.stringify({delta:text})+'\n\n')), answer);
+  await page.waitForSelector('#liuwaAnswerTabs [data-panel="all"]');
+  await page.locator('#liuwaAnswerTabs [data-panel="all"]').click();
   await page.waitForFunction(() => document.querySelector('.liuwa-stream').scrollHeight > 1000);
   await page.locator('#liuwaReadingNext').click();
   await page.waitForFunction(() => document.querySelector('.liuwa-stream').scrollTop > 100);

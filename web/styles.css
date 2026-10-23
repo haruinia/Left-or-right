@@ -2050,6 +2050,32 @@ html.transparent-white {
   font-size: 12px;
   background: var(--surface);
 }
+.liuwa-answer-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 8px 16px 4px;
+  overflow-x: auto;
+  -webkit-app-region: no-drag;
+}
+.liuwa-answer-tabs button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.liuwa-answer-tabs button:hover { background: var(--accent-soft); }
+.liuwa-answer-tabs button[aria-selected="true"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-ring);
+}
 
 .liuwa-thread {
   flex: 1 1 auto;
@@ -2185,7 +2211,7 @@ html.transparent-white {
 }
 
 .liuwa-turn.is-stream .liuwa-stream:empty::before {
-  content: "思考中···";
+  content: attr(data-waiting);
   margin-right: 2px;
   color: var(--accent);
   letter-spacing: 2px;
