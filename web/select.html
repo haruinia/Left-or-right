@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>选择截图区域</title>
+    <style>
+      /* 覆盖层只吃两次点击，不画任何东西：没有提示条、没有角点、没有尺寸标签，
+         cursor 保持系统默认箭头——用户看的是底下的题目，不是这个窗口。 */
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        cursor: default;
+        user-select: none;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <script type="module" src="modules/select.js"></script>
+  </body>
+</html>

@@ -1,18 +1,33 @@
+// 键位对齐 Gank Interview 的实际默认值：全套 ⌘ + 单键，没有 ⌘⇧ 组合。
+// 与 desktop/main/hotkeys.js、libs/schemas/models.py 的 UiHotkeys 保持一致。
 export const DEFAULT_HOTKEYS = {
-  captureRegion: "CommandOrControl+Shift+U",
-  sendChat: "CommandOrControl+Shift+Enter",
-  toggleWindow: "CommandOrControl+Shift+H",
-  quitApp: "CommandOrControl+Shift+Q",
-  newQuestion: "CommandOrControl+Shift+N",
+  captureRegion: "CommandOrControl+H",
+  sendChat: "CommandOrControl+Enter",
+  toggleWindow: "CommandOrControl+B",
+  quitApp: "CommandOrControl+Q",
+  newQuestion: "CommandOrControl+N",
+  deleteLastShot: "CommandOrControl+L",
   clearShots: "CommandOrControl+Shift+Backspace",
 
   toggleVisible: "CommandOrControl+Shift+Space",
   captureScreen: "CommandOrControl+Shift+Y",
   toggleCompact: "CommandOrControl+Shift+J",
-  moveUp: "CommandOrControl+Shift+Up",
-  moveDown: "CommandOrControl+Shift+Down",
-  moveLeft: "CommandOrControl+Shift+Left",
-  moveRight: "CommandOrControl+Shift+Right",
+
+  readPrev: "CommandOrControl+,",
+  readNext: "CommandOrControl+.",
+  scrollUp: "CommandOrControl+;",
+  scrollDown: "CommandOrControl+'",
+
+  moveUp: "CommandOrControl+Up",
+  moveDown: "CommandOrControl+Down",
+  moveLeft: "CommandOrControl+Left",
+  moveRight: "CommandOrControl+Right",
+
+  opacityDown: "CommandOrControl+[",
+  opacityUp: "CommandOrControl+]",
+  zoomOut: "CommandOrControl+-",
+  zoomReset: "CommandOrControl+0",
+  zoomIn: "CommandOrControl+=",
 };
 
 export function formatAccelerator(accelerator, mac = true) {
@@ -22,7 +37,10 @@ export function formatAccelerator(accelerator, mac = true) {
     Option: mac ? "⌥" : "Alt", Super: "⌘", Meta: "⌘", Space: "Space", Return: "Enter",
     Escape: "Esc", Backspace: "⌫", Delete: "⌦", Up: "↑", Down: "↓", Left: "←", Right: "→",
   };
-  return String(accelerator).split("+").map((key) => names[key] || key).join(mac ? "" : "+");
+  const parts = String(accelerator)
+    .split("+")
+    .map((token) => names[token] || token);
+  return mac ? parts.join("") : parts.join("+");
 }
 
 export function acceleratorFromEvent(event, mac = true) {

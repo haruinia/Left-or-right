@@ -3,10 +3,22 @@
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
 const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences } = require('electron');
-const { loadConfig } = require('./config');
-const { createWindow, moveWindow, toggleCompact, toggleVisible, beginHoldInteract, setClickThrough, isInteractive } = require('./window');
+const { loadConfig, saveConfig } = require('./config');
+const {
+  createWindow,
+  moveWindow,
+  toggleCompact,
+  toggleVisible,
+  beginHoldInteract,
+  setClickThrough,
+  isInteractive,
+  changeOpacity,
+  changeZoom,
+  resetZoom,
+} = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
+const { selectRegion } = require('./selector');
 const { startBackend, stopBackend, waitForHealth } = require('./backend');
 
 app.setName('左右');
@@ -16,6 +28,10 @@ let failedHotkeys = [];
 let currentBindings = BINDINGS;
 let permissionPaneOpened = false;
 let lastScreenshotTime = 0;
+// 一次截图流程（框选 → 抓 → 恢复窗口）进行中时，再按截图键直接忽略。
+// 之前第二次 ⌘⇧U 会先取消旧框选再立刻开新的，而旧流程的收尾
+// 会把主面板重新 show 到新覆盖层上面，下一次点击就被面板吃掉了。
+let screenBusy = false;
 
 const SCREEN_RECORDING_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
 
@@ -33,6 +49,9 @@ function screenAccessStatus() {
   }
 }
 
+// 每次按键挪 24px：比 32 更容易微调到贴边，按住方向键连发也不会冲过头。
+const STEP = 24;
+
 function hotkeyHandlers() {
   return {
     toggleVisible: () => beginHoldInteract(win),
@@ -41,18 +60,32 @@ function hotkeyHandlers() {
     clearShots: () => {
       if (win && !win.isDestroyed()) win.webContents.send('liuwa:clear-shots');
     },
+    // Gank 的 ⌘L 只删最后一张，不是清空全部。
+    deleteLastShot: () => {
+      if (win && !win.isDestroyed()) win.webContents.send('liuwa:delete-last-shot');
+    },
     toggleCompact: () => toggleCompact(win),
-    moveUp: () => moveWindow(win, 0, -32),
-    moveDown: () => moveWindow(win, 0, 32),
-    moveLeft: () => moveWindow(win, -32, 0),
-    moveRight: () => moveWindow(win, 32, 0),
+    opacityDown: () => changeOpacity(win, -0.1),
+    opacityUp: () => changeOpacity(win, 0.1),
+    zoomOut: () => changeZoom(win, -0.1),
+    zoomIn: () => changeZoom(win, 0.1),
+    zoomReset: () => resetZoom(win),
+    moveUp: () => moveWindow(win, 0, -STEP),
+    moveDown: () => moveWindow(win, 0, STEP),
+    moveLeft: () => moveWindow(win, -STEP, 0),
+    moveRight: () => moveWindow(win, STEP, 0),
 
     captureRegion: () => attachScreenshot({ interactive: true }),
-    captureScreen: () => attachScreenshot({ interactive: true }),
+    // 全屏截图不该弹框选十字：screencapture 不带 -i 直接抓当前显示器的完整画面。
+    captureScreen: () => attachScreenshot({ interactive: false }),
     sendChat: () => sendChat(),
     newQuestion: () => {
       if (win && !win.isDestroyed()) win.webContents.send('liuwa:new-question');
     },
+    readPrev: () => sendRead('prev'),
+    readNext: () => sendRead('next'),
+    scrollUp: () => sendScroll(-1),
+    scrollDown: () => sendScroll(1),
   };
 }
 
@@ -93,6 +126,16 @@ function sendChat() {
   }
 }
 
+// 翻节与滚动交给渲染层：滚动容器和分段表都在那边，主进程只转达方向，
+// 不猜当前读到哪。
+function sendRead(direction) {
+  if (win && !win.isDestroyed()) win.webContents.send('liuwa:read', direction);
+}
+
+function sendScroll(direction) {
+  if (win && !win.isDestroyed()) win.webContents.send('liuwa:scroll', direction);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -113,16 +156,29 @@ function restoreWindow(wasVisible) {
 }
 
 async function attachScreenshot({ interactive }) {
+  if (screenBusy) return;
   const now = Date.now();
   if (now - lastScreenshotTime < 800) {
     sendCaptureError("截图间隔太短，请稍后再试");
     return;
   }
-  lastScreenshotTime = now;
 
+  screenBusy = true;
   const wasVisible = await hideWindowForCapture();
   try {
-    const shot = await captureScreenshot({ interactive });
+    let rect = null;
+    if (interactive) {
+      // 两点式框选：先让用户点两个角，再按矩形截。
+      // 取消（Esc / 右键）返回 null，此时不该截图也不该报错。
+      rect = await selectRegion();
+      if (!rect) {
+        restoreWindow(wasVisible);
+        return;
+      }
+    }
+    // 节流只统计真正发生了的截图：取消/重选不该被 800ms 挡回去。
+    lastScreenshotTime = Date.now();
+    const shot = await captureScreenshot({ interactive: false, rect });
     restoreWindow(wasVisible);
     sendCapture({
       mime: shot.mime,
@@ -148,6 +204,8 @@ async function attachScreenshot({ interactive }) {
       return;
     }
     sendCaptureError(raw);
+  } finally {
+    screenBusy = false;
   }
 }
 
@@ -180,7 +238,21 @@ function registerIpc() {
   ipcMain.handle('liuwa:send', () => sendChat());
 }
 
-app.whenReady().then(async () => {
+// 单实例：两个实例会抢同一批全局快捷键，后一个还会因为 8001 被占用而
+// 起不来网关；退出其中一个时又可能把另一个正在用的网关杀掉。
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (win && !win.isDestroyed()) {
+      win.showInactive();
+      setClickThrough(win, !isInteractive());
+    }
+  });
+  app.whenReady().then(boot);
+}
+
+async function boot() {
   // Gank 式纯快捷键驱动：无条件隐藏 Dock 图标，不创建菜单栏托盘。
   // accessory 策略让应用不出现在 Dock、Cmd+Tab 和应用菜单中。
   if (process.platform === 'darwin') {
@@ -196,7 +268,9 @@ app.whenReady().then(async () => {
   });
   registerIpc();
   failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
-  win = createWindow(config);
+  win = createWindow(config, {
+    onMove: (bounds) => saveConfig({ windowBounds: bounds }),
+  });
   refreshUiHotkeys();
   setInterval(refreshUiHotkeys, 4000);
 
@@ -211,7 +285,7 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionCheckHandler((wc, permission) =>
     Boolean(wc) && allowMedia(wc, permission),
   );
-});
+}
 
 app.on('will-quit', () => {
   unregisterHotkeys();

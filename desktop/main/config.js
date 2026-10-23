@@ -2,11 +2,14 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { app } = require('electron');
 
 const DEFAULTS = {
   gatewayUrl: 'http://127.0.0.1:8001',
   gatewayApiKey: '',
-  spawnBackend: true,
+  // 打包后的 App 只做前端：网关是独立常驻进程（python scripts/run_gateway.py
+  // --port 8001），.venv 基于 conda 解释器、不可随包分发。开发态仍自动拉起。
+  spawnBackend: !app.isPackaged,
   pythonPath: '.venv/bin/python',
 };
 

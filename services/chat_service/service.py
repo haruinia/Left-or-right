@@ -38,15 +38,19 @@ _EXAM_GUIDES = {
     "会计": "按会计或财务管理题作答：先列公式和口径，再分步计算。",
     "教师资格": "按教师资格考试作答：先判断题型，再给要点和答题结构。",
 }
+# 系统提示词强制了「解题思路 / 详细解析 / 答案」的结构，这里只调整讲多深。
+# hints 是唯一会覆盖结构要求的选项——它必须明确说「不要写答案小节」，
+# 否则模型会同时看到「只给提示」和「必须有 ## 答案」两条互相否定的指令，
+# 实际表现就是设置成 hints 却仍然拿到完整答案。
 _CODE_STYLES = {
-    "hints": "只给分层提示和关键观察，先不提供完整代码或最终答案。",
-    "walkthrough": "先讲解题思路，再用小例子演示，最后分析复杂度和易错点；按需给代码。",
-    "solution": "给出解题思路、完整参考代码、时间和空间复杂度以及边界用例。",
+    "hints": "只给分层提示和关键观察。本条覆盖默认的输出结构：不要写最终答案，不要给出完整可运行代码，也不要生成「## 答案」小节。",
+    "walkthrough": "按题解结构完整讲解，代码给出可直接运行的实现。",
+    "solution": "按题解结构完整讲解，代码给出可直接运行的实现，并补充时间、空间复杂度和边界用例。",
 }
 _EXAM_STYLES = {
-    "hints": "只给分层提示和关键观察，先不给出最终答案。",
-    "walkthrough": "先讲题型和解题思路，再用小例子演示，最后点出易错点。",
-    "solution": "给出题型判断、解题步骤、答案和易错点。",
+    "hints": "只给分层提示和关键观察。本条覆盖默认的输出结构：不要给出最终答案，也不要生成「## 答案」小节。",
+    "walkthrough": "按题解结构完整讲解，最后给出答案。",
+    "solution": "按题解结构完整讲解，最后给出答案，并点出易错点。",
 }
 _LEGACY_GOAL = "力扣刷题与笔面试复习"
 _NEUTRAL_GOAL = "看懂眼前这段代码或报错"
@@ -77,11 +81,26 @@ def study_preface(study_settings: UiSettings) -> str:
     return "\n".join(lines)
 
 
+def _exam_prompt(study_settings: UiSettings | None) -> str:
+    # 行测、申论这类方向根本不该出现代码：设置页也明确告诉用户不会发送编程语言。
+    # 之前无论什么方向都填 Python，系统提示词就会要求「用 Python 提供完整实现」。
+    guide = _EXAM_GUIDES.get((study_settings.study_specialty.strip() if study_settings else ""))
+    if guide:
+        language = "中文"
+    else:
+        language = (study_settings.study_language.strip() if study_settings else "") or "Python"
+    # 语言名会被放进 ``` 代码围栏，含反引号或换行会破坏整个提示词结构。
+    language = " ".join(language.split())[:40].replace("`", "")
+    return load_prompt("liuwa_chat.md").replace("{language}", language or "Python")
+
+
 def build_chat_messages(
     payload: ChatStreamRequest, study_settings: UiSettings | None = None
 ) -> list[LLMMessage]:
     images = tuple(normalize_image_data_url(item) for item in payload.images)
-    messages = [LLMMessage(role="system", content=load_prompt("liuwa_chat.md"))]
+    messages = [
+        LLMMessage(role="system", content=_exam_prompt(study_settings))
+    ]
     if study_settings is not None:
         messages.append(LLMMessage(role="system", content=study_preface(study_settings)))
     for turn in payload.history:

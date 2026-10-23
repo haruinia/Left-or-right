@@ -9,6 +9,7 @@ def _isolated_runtime(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "mock")
     monkeypatch.setenv("LLM_API_KEY", "")
     monkeypatch.setenv("LLM_BASE_URL", "")
+    monkeypatch.setenv("VISION_ENABLED", "false")
     monkeypatch.setenv("ASR_PROVIDER", "stub")
     get_settings.cache_clear()
     yield

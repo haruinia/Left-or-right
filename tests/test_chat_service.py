@@ -22,7 +22,8 @@ def test_build_chat_messages_uses_liuwa_prompt_and_images(monkeypatch) -> None:
         ChatStreamRequest(text="", images=[data_url], history=[{"role": "user", "text": "上一问"}])
     )
     assert messages[0].role == "system"
-    assert messages[0].content == load_prompt("liuwa_chat.md")
+    assert messages[0].content == load_prompt("liuwa_chat.md").replace("{language}", "Python")
+    assert "{language}" not in messages[0].content
     assert messages[1].content == "上一问"
     assert messages[-1].images == (data_url,)
     assert "截图" in messages[-1].content

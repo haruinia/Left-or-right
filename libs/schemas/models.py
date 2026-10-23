@@ -1134,6 +1134,17 @@ _HOTKEY_TOKENS = {
     "Down",
     "Left",
     "Right",
+    # 标点键：Electron 全局快捷键按字面量注册，Gank 的翻页/滚动/透明度/缩放
+    # 就是 ⌘, ⌘. ⌘; ⌘' ⌘[ ⌘] ⌘- ⌘0 ⌘=。
+    ",",
+    ".",
+    ";",
+    "'",
+    "[",
+    "]",
+    "-",
+    "=",
+    "0",
 }
 
 
@@ -1146,6 +1157,9 @@ def _valid_accelerator(value: str) -> str:
         raise ValueError("hotkey must include a modifier")
     if sum(part not in modifiers for part in parts) != 1 or len(set(parts)) != len(parts):
         raise ValueError("hotkey requires exactly one key and distinct modifiers")
+    # 只有修饰键的弦（如 ⌘+,）会把所有 App 的「设置」抢走，直接拒绝。
+    if not any(part in _HOTKEY_TOKENS or (len(part) == 1 and part.isalnum()) or (part.startswith("F") and part[1:].isdigit()) for part in parts if part not in modifiers):
+        raise ValueError("hotkey must include a non-modifier key")
     for part in parts:
         if part in _HOTKEY_TOKENS:
             continue
@@ -1158,21 +1172,36 @@ def _valid_accelerator(value: str) -> str:
 
 
 class UiHotkeys(BaseModel):
-    moveUp: str = "CommandOrControl+Shift+Up"
-    moveDown: str = "CommandOrControl+Shift+Down"
-    moveLeft: str = "CommandOrControl+Shift+Left"
-    moveRight: str = "CommandOrControl+Shift+Right"
+    # 保持与 desktop/main/hotkeys.js、web/modules/shortcuts.js 一致。
+    # 桌面端每次拉 /api/ui/settings 都会用这里的值覆盖本地默认值，
+    # 三处不同步时改哪边都不生效。
+    moveUp: str = "CommandOrControl+Up"
+    moveDown: str = "CommandOrControl+Down"
+    moveLeft: str = "CommandOrControl+Left"
+    moveRight: str = "CommandOrControl+Right"
 
-    captureRegion: str = "CommandOrControl+Shift+U"
-    sendChat: str = "CommandOrControl+Shift+Enter"
-    toggleWindow: str = "CommandOrControl+Shift+H"
-    quitApp: str = "CommandOrControl+Shift+Q"
-    newQuestion: str = "CommandOrControl+Shift+N"
+    captureRegion: str = "CommandOrControl+H"
+    sendChat: str = "CommandOrControl+Enter"
+    toggleWindow: str = "CommandOrControl+B"
+    quitApp: str = "CommandOrControl+Q"
+    newQuestion: str = "CommandOrControl+N"
+    deleteLastShot: str = "CommandOrControl+L"
     clearShots: str = "CommandOrControl+Shift+Backspace"
 
     toggleVisible: str = "CommandOrControl+Shift+Space"
     captureScreen: str = "CommandOrControl+Shift+Y"
     toggleCompact: str = "CommandOrControl+Shift+J"
+
+    readPrev: str = "CommandOrControl+,"
+    readNext: str = "CommandOrControl+."
+    scrollUp: str = "CommandOrControl+;"
+    scrollDown: str = "CommandOrControl+'"
+
+    opacityDown: str = "CommandOrControl+["
+    opacityUp: str = "CommandOrControl+]"
+    zoomOut: str = "CommandOrControl+-"
+    zoomReset: str = "CommandOrControl+0"
+    zoomIn: str = "CommandOrControl+="
 
     @field_validator(
         "moveUp",
@@ -1187,7 +1216,17 @@ class UiHotkeys(BaseModel):
         "captureScreen",
         "sendChat",
         "newQuestion",
+        "deleteLastShot",
         "clearShots",
+        "readPrev",
+        "readNext",
+        "scrollUp",
+        "scrollDown",
+        "opacityDown",
+        "opacityUp",
+        "zoomOut",
+        "zoomReset",
+        "zoomIn",
     )
     @classmethod
     def accelerator_is_supported(cls, value: str) -> str:

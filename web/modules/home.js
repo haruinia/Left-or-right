@@ -1,8 +1,9 @@
 import { formatAccelerator } from "./shortcuts.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
 import { saveSessionRecord } from "./session-store.js";
-import { saveFeedback } from "./feedback-store.js";
-import { renderMarkdown } from "./markdown.js";
+import { renderAnswer } from "./answer-view.js";
+import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
+import { page, readingBox, resetReading } from "./reading.js";
 
 const thread = document.querySelector("#liuwaThread");
 const idle = document.querySelector("#liuwaIdle");
@@ -15,17 +16,41 @@ const stopBtn = document.querySelector("#liuwaStop");
 // scroll up to read, new tokens must not yank them back down (Gank's 24px rule).
 let stickBottom = true;
 thread?.addEventListener("scroll", () => {
-  stickBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight <= 24;
-});
+  const box = readingBox();
+  if (box) stickBottom = box.scrollHeight - box.scrollTop - box.clientHeight <= 24;
+}, true);
 function followTail() {
-  if (stickBottom && thread) thread.scrollTop = thread.scrollHeight;
+  if (!stickBottom || !thread) return;
+  thread.scrollTop = thread.scrollHeight;
+  const box = readingBox();
+  if (box) box.scrollTop = box.scrollHeight;
 }
 
 const pending = [];
 const history = [];
 let streaming = false;
+let savingSession = false;
 let nextShotId = 1;
 let currentModel = "";
+let activeShotId = "";
+let sessionStartedAt = new Date().toISOString();
+
+function syncActiveShot() {
+  if (pending.some((shot) => shot.id === activeShotId)) return;
+  activeShotId = pending.length ? pending[pending.length - 1].id : "";
+}
+
+function stepActiveShot(delta) {
+  if (pending.length < 2) return;
+  syncActiveShot();
+  const index = pending.findIndex((shot) => shot.id === activeShotId);
+  const next = pending[(Math.max(index, 0) + delta + pending.length) % pending.length];
+  activeShotId = next.id;
+  renderPending();
+  shots
+    ?.querySelector(`[data-shot="${activeShotId}"]`)
+    ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -41,32 +66,53 @@ function setStatus(text) {
 
 function syncEmpty() {
   const hasTurns = Boolean(thread && thread.querySelector(".liuwa-turn"));
-  const empty = pending.length === 0 && !hasTurns;
+  // 只有「一条对话都没有」才算空。截了图但还没发送时，之前也算非空——
+  // 结果 idle 被藏起来、thread 又是空的，整块区域一片空白，只剩 dock 里一张缩略图。
+  const empty = !hasTurns;
   document.body.classList.toggle("is-empty", empty);
   if (idle) idle.hidden = !empty;
 }
 
 function renderPending() {
   if (!shots) return;
-  const held = pending.some((shot) => shot.sent);
+  syncActiveShot();
   shots.hidden = pending.length === 0;
-  const caption = held ? `<p class="liuwa-shot-note">本题附图，追问会继续带上</p>` : "";
-  shots.innerHTML = caption + pending
-    .map(
-      (shot) =>
-        `<figure class="liuwa-thumb" data-shot="${escapeHtml(shot.id)}">
-          <img src="${escapeHtml(shot.dataUrl)}" alt="${shot.sent ? "本题截图" : "待发送截图"}" />
-          <button type="button" data-remove="${escapeHtml(shot.id)}" aria-label="去掉这张图">×</button>
-        </figure>`
-    )
-    .join("");
+  const chips =
+    pending.length > 1
+      ? `<div class="liuwa-shot-chips" aria-label="截图切换">${pending
+          .map((shot, index) => {
+            const classes = ["liuwa-shot-chip"];
+            if (shot.sent) classes.push("is-sent");
+            if (shot.id === activeShotId) classes.push("is-active");
+            return `<button type="button" class="${classes.join(" ")}" data-shot-chip="${escapeHtml(shot.id)}" aria-label="查看第 ${index + 1} 张截图" aria-pressed="${shot.id === activeShotId}">${index + 1}</button>`;
+          })
+          .join("")}</div>`
+      : "";
+  shots.innerHTML =
+    chips +
+    pending
+      .map((shot, index) => {
+        const classes = ["liuwa-thumb"];
+        if (shot.id === activeShotId) classes.push("is-active");
+        return `<figure class="${classes.join(" ")}" data-shot="${escapeHtml(shot.id)}">
+          <button type="button" class="liuwa-thumb-open" data-open="${escapeHtml(shot.id)}" aria-label="放大第 ${index + 1} 张截图">
+            <img src="${escapeHtml(shot.dataUrl)}" alt="${shot.sent ? `本题截图 ${index + 1}` : `待发送截图 ${index + 1}`}" />
+          </button>
+          <button type="button" class="liuwa-thumb-x" data-remove="${escapeHtml(shot.id)}" aria-label="去掉第 ${index + 1} 张图">×</button>
+        </figure>`;
+      })
+      .join("");
   syncEmpty();
 }
 
 function addShot(dataUrl) {
+  if (savingSession) {
+    setStatus("正在保存会话，请稍候。");
+    return;
+  }
   // 仅当真正在流式生成时才禁止添加截图；历史残留的 is-busy/is-stopped 样式不再阻塞。
   if (streaming) {
-    setStatus("请等当前回答结束后再添加截图。");
+    setStatus("");
     return;
   }
   if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) {
@@ -80,7 +126,7 @@ function addShot(dataUrl) {
   pending.push({ id: String(nextShotId), dataUrl });
   nextShotId += 1;
   renderPending();
-  setStatus(`已放入 ${pending.length} 张，发送时会一起带上。`);
+  setStatus("");
 }
 
 function addShotFromBase64(mime, data) {
@@ -92,6 +138,7 @@ function removeShot(id) {
   const index = pending.findIndex((shot) => shot.id === id);
   if (index < 0) return;
   pending.splice(index, 1);
+  if (activeShotId === id) activeShotId = "";
   renderPending();
 }
 
@@ -128,20 +175,15 @@ function authHeaders(headers = {}) {
   return state.gatewayApiKey ? { ...headers, "X-API-Key": state.gatewayApiKey } : headers;
 }
 
+// 截图已经在底部 dock 的缩略图里看得到，对话流里不再重复贴图，
+// 也不写「已发送截图」这类说明——用户刚按下发送，不需要再被告知一次。
+// 纯截图轮没有文字，就整条不插：一个空 <article> 还要占 14px 外边距，
+// 而正文区本来就靠这点高度吃饭。
 function appendUserTurn(images, text, carriedCount = 0) {
+  if (!text) return null;
   const article = document.createElement("article");
   article.className = "liuwa-turn is-user";
-  const gallery = images
-    .map((url) => `<img src="${escapeHtml(url)}" alt="截图" />`)
-    .join("");
-  const carried = carriedCount
-    ? `<p class="liuwa-carried">附上本题 ${carriedCount} 张截图</p>`
-    : "";
-  article.innerHTML = `
-    ${gallery ? `<div class="liuwa-gallery">${gallery}</div>` : ""}
-    ${carried}
-    ${text ? `<p>${escapeHtml(text)}</p>` : ""}
-  `;
+  article.innerHTML = `<p>${escapeHtml(text)}</p>`;
   thread.append(article);
   return article;
 }
@@ -156,37 +198,6 @@ function appendAssistantTurn() {
   return body;
 }
 
-// 为已完成的 AI 回答添加反馈按钮
-function addFeedbackButtons(assistantTurn, replyText) {
-  if (!assistantTurn || assistantTurn.querySelector(".liuwa-feedback")) return;
-  const footer = document.createElement("footer");
-  footer.className = "liuwa-feedback";
-  footer.innerHTML = `
-    <button type="button" class="liuwa-feedback-btn liuwa-feedback-up" data-feedback="up" aria-label="回答有用">👍 有用</button>
-    <button type="button" class="liuwa-feedback-btn liuwa-feedback-down" data-feedback="down" aria-label="回答无用">👎 无用</button>
-  `;
-  assistantTurn.append(footer);
-  footer.addEventListener("click", (event) => {
-    const btn = event.target.closest("[data-feedback]");
-    if (!btn) return;
-    const feedbackType = btn.dataset.feedback;
-    const userTurn = assistantTurn.previousElementSibling;
-    const questionText = userTurn?.querySelector("p")?.textContent || "";
-    saveFeedback({
-      answerText: replyText,
-      feedbackType,
-      questionText,
-      model: currentModel,
-    });
-    footer.classList.add("is-voted");
-    footer.querySelectorAll(".liuwa-feedback-btn").forEach((b) => {
-      b.disabled = true;
-      if (b === btn) b.classList.add("is-active");
-    });
-    setStatus(feedbackType === "up" ? "感谢反馈！" : "感谢反馈，我们会改进。");
-  });
-}
-
 async function readSse(response, onDelta, signal) {
   if (!response.body) {
     throw new Error("浏览器无法读取流式响应");
@@ -197,7 +208,7 @@ async function readSse(response, onDelta, signal) {
   let completed = false;
   try {
     while (!completed) {
-      if (signal?.aborted) return;
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       const { value, done } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -213,9 +224,11 @@ async function readSse(response, onDelta, signal) {
       }
     }
   } catch (error) {
-    // An abort surfaces as an AbortError here; keep whatever was decoded so far and
-    // let the caller decide whether to preserve it instead of dropping the turn.
-    if (signal?.aborted || error?.name === "AbortError") return;
+    // 用户主动停止时抛出 AbortError，让调用方走「保留已生成内容」的分支。
+    // 之前这里静默 return，停止被当成正常完成，界面上看不出区别。
+    if (signal?.aborted || error?.name === "AbortError") {
+      throw new DOMException("aborted", "AbortError");
+    }
     throw error;
   }
   if (!completed) throw new Error("回答中断，请重新发送。");
@@ -226,10 +239,12 @@ let activeAbort = null;
 // Preserve whatever the model produced before a stop/error and mark the turn, so the
 // user can keep reading the partial answer and continue from it (Gank keeps partial
 // responses instead of dropping the whole turn).
-function finalizeStopped(streamNode, reply, assistantTurn) {
-  streamNode.innerHTML = renderMarkdown(reply + (reply && !/\n$/.test(reply) ? "\n" : "") + "（已中断）");
-  assistantTurn.classList.remove("is-stream");
+function finalizeStopped(streamNode, reply, assistantTurn, marker = "（已中断）") {
+  // 中断标记挂在卡片上，正文保留模型已经生成的内容。
   assistantTurn.classList.add("is-stopped");
+  assistantTurn.dataset.stoppedLabel = marker;
+  renderAnswer(reply, streamNode);
+  assistantTurn.classList.remove("is-stream");
 }
 
 function sleep(ms) {
@@ -286,6 +301,10 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 }
 
 async function sendChat() {
+  if (savingSession) {
+    setStatus("正在保存会话，请稍候。");
+    return;
+  }
   // 自愈：如果上一次流式状态残留（例如中断后 activeAbort 已置空），直接重置，避免「发送没动作」。
   if (streaming && !activeAbort) {
     streaming = false;
@@ -296,22 +315,23 @@ async function sendChat() {
   }
   document.body.classList.remove("is-busy", "is-stopped");
   if (streaming) {
-    setStatus("正在生成回答，请稍候或点击停止后再发送。");
+    setStatus("");
     return;
   }
   const images = pending.map((shot) => shot.dataUrl);
   const unsent = pending.filter((shot) => !shot.sent).map((shot) => shot.dataUrl);
   renderPending();
   if (!unsent.length) {
-    setStatus(pending.length ? "本题截图已发过，再截一张新的即可追问。" : "先截一张屏。");
+    setStatus("先截一张屏。");
     return;
   }
   streaming = true;
-  activeAbort = new AbortController();
-  const timeoutGuard = setTimeout(() => activeAbort?.abort(), 180_000);
+  const controller = new AbortController();
+  activeAbort = controller;
+  const timeoutGuard = setTimeout(() => controller.abort(), 180_000);
   document.body.classList.add("is-busy");
   setStatus("正在分析题目…");
-  shots.querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  shots.querySelectorAll("[data-remove]").forEach((button) => { button.disabled = true; });
   if (stopBtn) stopBtn.hidden = false;
   const userTurn = appendUserTurn(unsent, "", images.length - unsent.length);
   const streamNode = appendAssistantTurn();
@@ -323,11 +343,12 @@ async function sendChat() {
   let flushTimer = null;
   const flush = () => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    streamNode.innerHTML = renderMarkdown(reply);
+    renderAnswer(reply, streamNode);
     followTail();
   };
-  const commitTurn = () => {
-    pending.forEach((shot) => { shot.sent = true; });
+  const commitTurn = (complete = true) => {
+    // 部分回答虽需保留，但不能把待处理截图标成完成，否则连接中断后再按处理键无效。
+    if (complete) pending.forEach((shot) => { shot.sent = true; });
     renderPending();
     history.push({
       role: "user",
@@ -347,7 +368,7 @@ async function sendChat() {
     await ensureGateway();
     const response = await fetchWithRetry(`${state.apiOrigin}/api/chat/stream`, {
       method: "POST",
-      signal: activeAbort.signal,
+      signal: controller.signal,
       headers: authHeaders({
         "content-type": "application/json",
         accept: "text/event-stream",
@@ -358,35 +379,43 @@ async function sendChat() {
         history: history.slice(-16).map((turn) => ({ ...turn, text: turn.text.slice(0, 8000) })),
       }),
     });
-    await readSse(response, onDelta, activeAbort.signal);
+    await readSse(response, onDelta, controller.signal);
     flush();
     assistantTurn.classList.remove("is-stream");
     commitTurn();
-    addFeedbackButtons(assistantTurn, reply);
-    setStatus(pending.length ? "这些截图会附在后续追问里，新对话时清掉。" : "");
+    setStatus("");
   } catch (error) {
     clearTimeout(flushTimer);
     flush();
-    const aborted = activeAbort?.signal.aborted || error?.name === "AbortError";
-    if (aborted && reply.trim()) {
-      finalizeStopped(streamNode, reply, assistantTurn);
-      commitTurn();
-      addFeedbackButtons(assistantTurn, reply);
-      setStatus("已停止，保留已生成的部分，可继续截图追问。");
+    const aborted = controller.signal.aborted || error?.name === "AbortError";
+    const rawMessage = error && error.message ? error.message : String(error);
+    const message = /RemoteProtocolError|incomplete chunked read|peer closed connection/i.test(rawMessage)
+      ? "模型连接中断，可重新处理当前截图。"
+      : rawMessage;
+    if (reply.trim()) {
+      // 已经流出一大段内容：不管是主动停止还是中途报错，都保留下来。
+      // 之前只有「主动停止」保留，报错会把用户眼看着生成的整段解析删掉。
+      finalizeStopped(streamNode, reply, assistantTurn, aborted ? "（已中断）" : `（中断：${message}）`);
+      commitTurn(false);
+      setStatus(aborted ? "已停止。" : message);
     } else {
-      userTurn.remove();
+      userTurn?.remove();
       assistantTurn.remove();
       syncEmpty();
-      const message = aborted ? "已停止。" : (error && error.message ? error.message : String(error));
-      setStatus(aborted ? message : `${message} 截图已保留，可再次发送。`);
+      setStatus(aborted ? "已停止。" : message);
     }
   } finally {
-    streaming = false;
     clearTimeout(timeoutGuard);
-    activeAbort = null;
-    document.body.classList.remove("is-busy", "is-stopped");
+    // 只有当前这轮还是「活跃请求」时才清全局状态。停止后立刻再发，
+    // 旧请求的 finally 晚到会把新请求的 streaming/stopBtn 一起清掉，
+    // 新回答看着像没在生成、也停不下来。
+    if (activeAbort === controller) {
+      streaming = false;
+      activeAbort = null;
+      if (stopBtn) stopBtn.hidden = true;
+      document.body.classList.remove("is-busy");
+    }
     if (assistantTurn.isConnected) assistantTurn.classList.remove("is-stream");
-    if (stopBtn) stopBtn.hidden = true;
     renderPending();
   }
 }
@@ -431,6 +460,7 @@ function wireDesktop(cockpit) {
   cockpit.onHotkeys?.(applyHotkeyHints);
   cockpit.onNewQuestion?.(newQuestion);
   cockpit.onClearShots?.(clearShots);
+  cockpit.onDeleteLastShot?.(deleteLastShot);
   cockpit.onTheme?.(applyTheme);
   if (typeof cockpit.onCapture === "function") {
     cockpit.onCapture((payload) => {
@@ -446,6 +476,18 @@ function wireDesktop(cockpit) {
   if (typeof cockpit.onSend === "function") {
     cockpit.onSend(() => {
       sendChat();
+    });
+  }
+  if (typeof cockpit.onRead === "function") {
+    cockpit.onRead((direction) => {
+      if (isLightboxOpen()) return;
+      page(direction === "prev" ? -1 : 1);
+    });
+  }
+  if (typeof cockpit.onScroll === "function") {
+    cockpit.onScroll((direction) => {
+      if (isLightboxOpen()) return;
+      page(direction);
     });
   }
   if (typeof cockpit.onCompact === "function") {
@@ -473,8 +515,37 @@ window.__liuwaSend = sendChat;
 window.__liuwaState = state;
 
 shots?.addEventListener("click", (event) => {
+  const chipId = event.target.closest("[data-shot-chip]")?.dataset.shotChip;
+  if (chipId) {
+    const index = pending.findIndex((shot) => shot.id === chipId);
+    if (index < 0) return;
+    activeShotId = chipId;
+    openLightbox(pending.map((shot) => shot.dataUrl), index);
+    renderPending();
+    return;
+  }
+  const openId = event.target.closest("[data-open]")?.dataset.open;
+  if (openId) {
+    const index = pending.findIndex((shot) => shot.id === openId);
+    if (index < 0) return;
+    activeShotId = openId;
+    openLightbox(pending.map((shot) => shot.dataUrl), index);
+    renderPending();
+    return;
+  }
   const id = event.target.closest("[data-remove]")?.dataset.remove;
   if (id && !streaming) removeShot(id);
+});
+
+// 只在焦点落在截图区时才接管方向键：正文是可滚动的，全局拦截会把翻读回答
+// 的方向键一起吞掉。
+shots?.addEventListener("keydown", (event) => {
+  if (isLightboxOpen()) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  if (pending.length < 2) return;
+  event.preventDefault();
+  stepActiveShot(event.key === "ArrowRight" ? 1 : -1);
 });
 
 stopBtn?.addEventListener("click", stopChat);
@@ -535,38 +606,72 @@ async function refreshContext() {
   }
 }
 
-function clearShots() {
+// Gank 的 ⌘L：只删最后一张截图，不是清空全部。截图发错了想换一张时，
+// 清空会连前面几张一起丢掉。
+function deleteLastShot() {
   if (streaming) {
-    setStatus("请等本次回答结束后再清空截图。");
+    setStatus("");
     return;
   }
   if (!pending.length) {
-    setStatus("没有待发送的截图。");
+    setStatus("");
+    return;
+  }
+  removeShot(pending[pending.length - 1].id);
+  setStatus("");
+}
+
+function clearShots() {
+  if (streaming) {
+    setStatus("");
+    return;
+  }
+  if (!pending.length) {
+    setStatus("");
     return;
   }
   pending.length = 0;
+  activeShotId = "";
+  // 历史轮次里的图片也要一起清掉，否则下一轮请求仍然会把这些 base64 发出去：
+  // 界面说「已清空」、模型却还看得到，而且每轮请求体积越滚越大。
+  history.forEach((turn) => {
+    if (turn.images) delete turn.images;
+    if (turn.imageCount) delete turn.imageCount;
+  });
   renderPending();
-  setStatus("已清空截图，对话还在。");
+  setStatus("");
 }
 
-function newQuestion() {
-  if (streaming) return;
-  // 保存当前会话到历史记录（如果有内容），数据沉淀到 localStorage，web 设置页可查看
-  if (history.length > 0) {
-    saveSessionRecord({
-      turns: history,
-      note: "",
-      startedAt: new Date(Date.now() - 60000).toISOString(),
-    }).then((record) => {
-      if (record) {
-        setStatus(`已保存 ${record.turnCount} 轮对话，开始新对话。`);
-      }
-    });
+async function newQuestion() {
+  if (savingSession) return;
+  if (streaming) {
+    setStatus("正在生成，稍候。");
+    return;
   }
+  const hadHistory = history.length > 0;
+  // 服务确认持久化之后再清空；离线或存储失败时原会话仍可阅读、重试。
+  if (hadHistory) {
+    savingSession = true;
+    setStatus("正在保存会话…");
+    try {
+      await saveSessionRecord({ turns: history, note: "", startedAt: sessionStartedAt });
+    } catch (error) {
+      setStatus(`会话保存失败，已保留当前内容：${error.message || error}`);
+      return;
+    } finally {
+      savingSession = false;
+    }
+  }
+  closeLightbox();
   thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   history.length = 0;
   pending.length = 0;
+  activeShotId = "";
+  nextShotId = 1;
+  sessionStartedAt = new Date().toISOString();
+  resetReading();
   renderPending();
+  setStatus("");
 }
 window.addEventListener("focus", refreshContext);
 document.addEventListener("visibilitychange", () => {

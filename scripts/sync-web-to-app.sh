@@ -15,12 +15,9 @@ if [ ! -d "$APP_WEB" ]; then
 fi
 
 echo "同步 web 文件到已安装应用…"
-cp "$REPO_ROOT/web/index.html" "$APP_WEB/index.html"
-cp "$REPO_ROOT/web/settings.html" "$APP_WEB/settings.html"
-cp "$REPO_ROOT/web/cockpit.html" "$APP_WEB/cockpit.html" 2>/dev/null || true
-cp "$REPO_ROOT/web/styles.css" "$APP_WEB/styles.css"
-cp "$REPO_ROOT/web/modules/"*.js "$APP_WEB/modules/"
-cp "$REPO_ROOT/web/modules/"*.svg "$APP_WEB/modules/" 2>/dev/null || true
+# 同步整个资源树，包括 selector 页面、公式字体、代码高亮及后续新增模块。
+# 逐个枚举文件曾漏掉 vendor/ 和 select.html，造成源码可用、安装版缺资源。
+rsync -a "$REPO_ROOT/web/" "$APP_WEB/"
 
 echo "重启 左右.app…"
 killall "左右" 2>/dev/null || true

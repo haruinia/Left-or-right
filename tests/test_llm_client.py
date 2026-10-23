@@ -580,13 +580,17 @@ def test_stream_text_surfaces_provider_error_body(monkeypatch) -> None:
 
 def test_stream_text_mock_mode_does_not_call_http(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mock")
+    monkeypatch.setenv("MOCK_REPLY_TEXT", "## 解题思路\n离线验证\n\n## 答案\n42")
     get_settings.cache_clear()
 
     async def collect() -> str:
-        client = LLMClient()
+        def reject_http(request: httpx.Request) -> httpx.Response:
+            raise AssertionError("mock mode must not contact the model provider")
+
+        client = LLMClient(async_transport=httpx.MockTransport(reject_http))
         bits: list[str] = []
         async for delta in client.stream_text([LLMMessage(role="user", content="hi")]):
             bits.append(delta)
         return "".join(bits)
 
-    assert "左右" in __import__("asyncio").run(collect())
+    assert __import__("asyncio").run(collect()) == "## 解题思路\n离线验证\n\n## 答案\n42"

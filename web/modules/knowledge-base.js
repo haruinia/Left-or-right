@@ -1,34 +1,9 @@
 // 本地知识库：从会话记录自动提取知识点，支持搜索、标签和导出。
 // 结构: { id, question, answer, tags, sourceSessionId, createdAt, reviewCount, lastReviewedAt }
-// 存储在 localStorage，key 为 liuwa_knowledge_base
+// 存储在共享本地服务，首次访问自动迁移旧 localStorage 数据。
 
-const KB_KEY = "liuwa_knowledge_base";
-const MAX_ITEMS = 500;
-
-function loadKB() {
-  try {
-    const raw = localStorage.getItem(KB_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveKB(items) {
-  try {
-    const trimmed = items.slice(-MAX_ITEMS);
-    localStorage.setItem(KB_KEY, JSON.stringify(trimmed));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function makeId() {
-  return `kb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
+import { createAssetStore } from "./asset-storage.js";
+const store = createAssetStore("knowledge", "liuwa_knowledge_base");
 
 // 从会话记录提取知识点：简单策略——用户提问 + AI 回答配对
 export function extractKnowledgeFromSession(record) {
@@ -41,7 +16,7 @@ export function extractKnowledgeFromSession(record) {
     // 跳过太短的问答（可能是闲聊）
     if (userTurn.text.length < 5 || assistantTurn.text.length < 20) continue;
     items.push({
-      id: makeId(),
+      id: `kb_${record.id}_${i}`,
       question: userTurn.text.slice(0, 2000),
       answer: assistantTurn.text.slice(0, 8000),
       tags: guessTags(userTurn.text + " " + assistantTurn.text),
@@ -79,9 +54,9 @@ function guessTags(text) {
 }
 
 // 批量导入会话记录到知识库
-export function importSessionRecords(records) {
-  const kb = loadKB();
-  let imported = 0;
+export async function importSessionRecords(records) {
+  const kb = await store.list();
+  const additions = [];
   for (const record of records) {
     const items = extractKnowledgeFromSession(record);
     // 去重：相同 question 的前 100 字符
@@ -90,17 +65,17 @@ export function importSessionRecords(records) {
         (existing) => existing.question.slice(0, 100) === item.question.slice(0, 100)
       );
       if (!exists) {
+        additions.push(item);
         kb.push(item);
-        imported += 1;
       }
     }
   }
-  saveKB(kb);
-  return imported;
+  // Stable source IDs plus insert-only writes prevent concurrent imports resetting reviews.
+  return additions.length ? store.insertMissing(additions) : 0;
 }
 
-export function listKnowledgeItems({ tag, search, limit = 100 } = {}) {
-  let items = loadKB().reverse(); // 最新在前
+export async function listKnowledgeItems({ tag, search, limit = 100 } = {}) {
+  let items = (await store.list()).reverse(); // 最新在前
   if (tag) {
     items = items.filter((item) => item.tags.includes(tag));
   }
@@ -116,17 +91,14 @@ export function listKnowledgeItems({ tag, search, limit = 100 } = {}) {
   return items.slice(0, limit);
 }
 
-export function getKnowledgeItem(id) {
-  return loadKB().find((item) => item.id === id) || null;
+export async function getKnowledgeItem(id) {
+  return (await store.list()).find((item) => item.id === id) || null;
 }
 
-export function deleteKnowledgeItem(id) {
-  const items = loadKB().filter((item) => item.id !== id);
-  return saveKB(items);
-}
+export function deleteKnowledgeItem(id) { return store.remove(id); }
 
-export function listTags() {
-  const items = loadKB();
+export async function listTags() {
+  const items = await store.list();
   const tagCounts = new Map();
   for (const item of items) {
     for (const tag of item.tags) {
@@ -139,18 +111,11 @@ export function listTags() {
 }
 
 // 标记为已复习（用于间隔重复）
-export function markReviewed(id) {
-  const items = loadKB();
-  const item = items.find((i) => i.id === id);
-  if (!item) return false;
-  item.reviewCount = (item.reviewCount || 0) + 1;
-  item.lastReviewedAt = new Date().toISOString();
-  return saveKB(items);
-}
+export function markReviewed(id) { return store.review(id); }
 
 // 导出知识库为 JSON
-export function exportKnowledgeBase() {
-  const items = loadKB();
+export async function exportKnowledgeBase() {
+  const items = await store.list();
   const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -161,8 +126,8 @@ export function exportKnowledgeBase() {
 }
 
 // 导出为 Markdown，按标签分组
-export function exportKnowledgeBaseAsMarkdown() {
-  const items = loadKB().reverse();
+export async function exportKnowledgeBaseAsMarkdown() {
+  const items = (await store.list()).reverse();
   let md = "# 左右 · 本地知识库\n\n";
   const byTag = new Map();
   for (const item of items) {
@@ -189,9 +154,9 @@ export function exportKnowledgeBaseAsMarkdown() {
 }
 
 // 统计
-export function getKBStats() {
-  const items = loadKB();
-  const tags = listTags();
+export async function getKBStats() {
+  const items = await store.list();
+  const tags = await listTags();
   const totalReviews = items.reduce((sum, i) => sum + (i.reviewCount || 0), 0);
   const reviewed = items.filter((i) => i.reviewCount > 0).length;
   return {

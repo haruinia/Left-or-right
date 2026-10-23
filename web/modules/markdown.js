@@ -1,6 +1,8 @@
 // 轻量 Markdown 渲染：把 AI 回答渲染成结构化 HTML（标题/列表/代码块/加粗等），
-// 参考 Gank 的回答卡片排版。仅支持模型实际会输出的语法子集，离线可用，无外部依赖。
+// 参考 Gank 的回答卡片排版。仅支持模型实际会输出的语法子集，离线可用。
 // 安全：所有文本先经 escapeHtml，再套标签，不会注入原始 HTML。
+//
+// 数学公式用 KaTeX（和 Gank 同一个方案），vendor 在 web/vendor/katex。
 
 function escapeHtml(value) {
   return String(value)
@@ -10,16 +12,69 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-// 行内语法：代码、加粗、斜体、删除线
+// 三种定界符都要认。提示词要求 $...$ / $$...$$，但模型经常改用 LaTeX 原生的
+// \( ... \) 和 \[ ... \]（Gank 用的 remark-math 默认也支持这两套），
+// 只认 $ 的话整篇公式会原样露出来。
+const MATH_INLINE = /(?<!\\)\$(?!\s)([^$\n]{1,200}?)(?<![\\\s])\$(?!\d)/g;
+const MATH_INLINE_PAREN = /\\\((.+?)\\\)/g;
+const MATH_BLOCK = /^\s*\$\$\s*$/;
+const MATH_BLOCK_BRACKET = /^\s*\\\[\s*$/;
+const MATH_BLOCK_END = /^\s*\\\]\s*$/;
+
+// KaTeX 由 index.html 提前加载（<script src="vendor/katex/katex.min.js">）。
+// 加载失败时返回 null，公式退回纯文本显示——总比整段回答渲染不出来好。
+function tex(expr, displayMode) {
+  const katex = typeof window !== "undefined" ? window.katex : null;
+  if (!katex || typeof katex.renderToString !== "function") {
+    return `<span class="md-math-fallback">${escapeHtml(expr)}</span>`;
+  }
+  try {
+    return katex.renderToString(expr, {
+      displayMode,
+      throwOnError: false,
+      // 流式输出时公式常常只到一半（\frac{ 少了右括号），
+      // 别把半截公式染成红色错误提示。
+      strict: "ignore",
+      trust: false,
+      output: "html",
+    });
+  } catch {
+    return `<span class="md-math-fallback">${escapeHtml(expr)}</span>`;
+  }
+}
+
 function renderInline(text) {
-  let out = escapeHtml(text);
-  out = out.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
+  // 先在「未转义」的原文上把公式抠出来，再做 HTML 转义。
+  // 反过来的话 `h > m` 会先变成 `h &gt; m`，KaTeX 收到 `&gt;` 直接报解析错误。
+  const slots = [];
+  const stash = (rendered) => {
+    slots.push(rendered);
+    return `\u0000${slots.length - 1}\u0000`;
+  };
+
+  let source = String(text);
+  // 反引号里的内容不是公式，先保护起来（只存内部文本，还原时再补标签）。
+  source = source.replace(/`([^`\n]+)`/g, (_match, inner) => stash(`\u0001${inner}\u0001`));
+  source = source.replace(MATH_INLINE, (_match, expr) => {
+    // $6$ / $0$ 也是合法数学表达式；金额通常只有左侧一个美元符号。
+    if (!/[\\^_{}=<>+\-*/()A-Za-z0-9]/.test(expr)) return _match;
+    return stash(tex(expr, false));
+  });
+  source = source.replace(MATH_INLINE_PAREN, (_match, expr) => stash(tex(expr.trim(), false)));
+
+  let out = escapeHtml(source);
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   out = out.replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, "<em>$1</em>");
   out = out.replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, "<em>$1</em>");
   out = out.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-  return out;
+
+  // 还原占位：公式原样放回，行内代码补上正常标签。
+  return out.replace(/\u0000(\d+)\u0000/g, (_m, i) => {
+    const value = slots[Number(i)];
+    const code = value.match(/^\u0001(.*)\u0001$/s);
+    return code ? `<code class="md-inline-code">${escapeHtml(code[1])}</code>` : value;
+  });
 }
 
 // 块级渲染：按行扫描，识别代码块、标题、列表、表格、引用、分隔线、段落。
@@ -40,13 +95,28 @@ export function renderMarkdown(source) {
   const flushList = () => {
     if (!list) return;
     const tag = list.type;
-    html.push(`<${tag}>${list.items.map((item) => `<li>${renderInline(item)}</li>`).join("")}</${tag}>`);
+    // 保留作者写的起始编号：答案常写成 1./2./3./4. 且各题之间空行分隔，
+    // 不传 start 的话每组都从 1 重新数，四道题全变成「1.」。
+    const start = list.start && list.start !== 1 ? ` start="${list.start}"` : "";
+    html.push(`<${tag}${start}>${list.items.map((item) => `<li>${renderInline(item)}</li>`).join("")}</${tag}>`);
     list = null;
+  };
+  // 代码块用 highlight.js 上色（Gank 用的也是它）。vendor 在 web/vendor/highlight，
+  // 加载失败时退回纯文本，不能让整段回答渲染不出来。
+  const highlightCode = (source, lang) => {
+    const hljs = typeof window !== "undefined" ? window.hljs : null;
+    if (!hljs || !lang || !hljs.getLanguage(lang)) return escapeHtml(source);
+    try {
+      return hljs.highlight(source, { language: lang, ignoreIllegals: true }).value;
+    } catch {
+      return escapeHtml(source);
+    }
   };
   const flushCode = () => {
     if (!codeFence) return;
     const lang = codeFence.lang ? ` data-lang="${escapeHtml(codeFence.lang)}"` : "";
-    html.push(`<pre class="md-code"${lang}><code>${escapeHtml(codeFence.lines.join("\n"))}</code></pre>`);
+    const raw = codeFence.lines.join("\n");
+    html.push(`<pre class="md-code"${lang}><code class="hljs">${highlightCode(raw, codeFence.lang)}</code></pre>`);
     codeFence = null;
   };
   const flushTable = () => {
@@ -68,11 +138,14 @@ export function renderMarkdown(source) {
   const isTableDivider = (line) =>
     /^\s*\|?[\s:|-]+\|?\s*$/.test(line) && line.includes("-");
 
+  let mathBlock = null; // 块级公式 $$ ... $$，可能跨行
+
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    // 代码围栏
+
+    // 围栏里的公式定界符也是代码；必须先处理围栏，再识别数学块。
     const fence = line.match(/^```(\S*)\s*$/);
-    if (fence) {
+    if (!mathBlock && fence) {
       if (codeFence) {
         flushCode();
       } else {
@@ -85,6 +158,42 @@ export function renderMarkdown(source) {
     }
     if (codeFence) {
       codeFence.lines.push(line);
+      continue;
+    }
+
+    // 单行写完的块级公式：`$$ ... $$`（模型经常这么写，虽然提示词要求独占行）。
+    const oneLine = line.trim().match(/^\$\$(.+)\$\$$/);
+    if (oneLine && !mathBlock) {
+      flushParagraph();
+      flushList();
+      flushTable();
+      html.push(`<div class="md-math-block">${tex(oneLine[1].trim(), true)}</div>`);
+      continue;
+    }
+
+    // 跨行的块级公式：开头 $$（或 \[）独占一行，结尾也独占一行。
+    if (MATH_BLOCK.test(line) || MATH_BLOCK_BRACKET.test(line)) {
+      if (mathBlock) {
+        html.push(`<div class="md-math-block">${tex(mathBlock.lines.join("\n"), true)}</div>`);
+        mathBlock = null;
+      } else {
+        flushParagraph();
+        flushList();
+        flushTable();
+        mathBlock = { lines: [] };
+      }
+      continue;
+    }
+    // 块级公式的收尾：`\]` 独占一行，或者 `$$` / `\]` 和最后一行挤在一起。
+    if (mathBlock && (MATH_BLOCK_END.test(line) || /\$\$\s*$/.test(line) || /\\\]\s*$/.test(line))) {
+      const body = line.replace(MATH_BLOCK_END, "").replace(/\$\$\s*$/, "").replace(/\\\]\s*$/, "");
+      if (body.trim()) mathBlock.lines.push(body);
+      html.push(`<div class="md-math-block">${tex(mathBlock.lines.join("\n"), true)}</div>`);
+      mathBlock = null;
+      continue;
+    }
+    if (mathBlock) {
+      mathBlock.lines.push(line);
       continue;
     }
 
@@ -143,7 +252,10 @@ export function renderMarkdown(source) {
     const ol = line.match(/^\s*(\d+)[.、)]\s+(.+)$/);
     if (ol) {
       flushParagraph();
-      if (!list || list.type !== "ol") { flushList(); list = { type: "ol", items: [] }; }
+      if (!list || list.type !== "ol") {
+        flushList();
+        list = { type: "ol", items: [], start: Number(ol[1]) };
+      }
       list.items.push(ol[2]);
       continue;
     }
@@ -161,6 +273,10 @@ export function renderMarkdown(source) {
   }
 
   flushCode(); // 流式未闭合代码块也渲染
+  if (mathBlock) {
+    // 流式时右半边 $$ 还没到，先把已有内容渲染出来，不要吞掉。
+    html.push(`<div class="md-math-block">${tex(mathBlock.lines.join("\n"), true)}</div>`);
+  }
   flushParagraph();
   flushList();
   flushTable();

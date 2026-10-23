@@ -832,6 +832,27 @@ def test_gateway_allows_local_dev_cors_origins(tmp_path: Path, monkeypatch) -> N
     assert preflight.headers["access-control-allow-origin"] == "http://127.0.0.1:8000"
 
 
+def test_gateway_preflight_with_auth_allows_browser_but_protects_assets(tmp_path, monkeypatch):
+    client = _client(tmp_path, monkeypatch, gateway_api_key="local-test-key")
+    for origin in ("null", "http://127.0.0.1:9958"):
+        response = client.options(
+            "/api/learning-assets/sessions/upsert",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-api-key",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+    assert client.get("/api/learning-assets/sessions").status_code == 401
+    authenticated = client.get(
+        "/api/learning-assets/sessions", headers={"X-API-Key": "local-test-key"}
+    )
+    assert authenticated.status_code == 200
+    assert authenticated.json() == {"items": []}
+
+
 def test_gateway_config_status_hides_secrets(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "super-secret")
     # 模型就绪状态取决于本地是否已下载模型；把模型目录指到不存在的路径，保证
@@ -3744,7 +3765,8 @@ def test_gateway_root_is_liuwa_home(tmp_path: Path, monkeypatch) -> None:
     assert 'src="modules/home.js"' in page.text
     assert "结束并评分" not in page.text
     assert '<button' not in page.text
-    assert page.text.count('src="modules/pangsi-mark.svg"') == 1
+    # favicon 用 link href；正文里不再重复挂 logo 图片。
+    assert page.text.count('modules/pangsi-mark.svg') == 1
     assert 'aria-label="全部快捷键"' in page.text
     assert 'data-key-action="newQuestion"' in page.text
     assert 'data-key-action="toggleWindow"' in page.text
@@ -3768,7 +3790,7 @@ def test_gateway_settings_page_hosts_interview_workbench(tmp_path: Path, monkeyp
     assert 'id="resumeText"' in page.text
     assert 'id="saveUiSettings"' in page.text
     assert 'src="modules/settings.js"' in page.text
-    assert 'href="/cockpit"' in page.text
+    assert 'href="http://127.0.0.1:8001/cockpit"' in page.text
     assert "<iframe" not in page.text
     assert 'id="studySpecialty"' in page.text
     assert 'id="studySpecialtyOptions"' in page.text
@@ -3785,12 +3807,12 @@ def test_ui_settings_roundtrip_persists_briefing_and_hotkeys(
     client = _client(tmp_path, monkeypatch)
     empty = client.get("/api/ui/settings")
     assert empty.status_code == 200
-    assert empty.json()["hotkeys"]["captureRegion"] == "CommandOrControl+Shift+U"
-    assert empty.json()["hotkeys"]["sendChat"] == "CommandOrControl+Shift+Enter"
-    assert empty.json()["hotkeys"]["toggleWindow"] == "CommandOrControl+Shift+H"
+    assert empty.json()["hotkeys"]["captureRegion"] == "CommandOrControl+H"
+    assert empty.json()["hotkeys"]["sendChat"] == "CommandOrControl+Enter"
+    assert empty.json()["hotkeys"]["toggleWindow"] == "CommandOrControl+B"
     assert empty.json()["hotkeys"]["clearShots"] == "CommandOrControl+Shift+Backspace"
-    assert empty.json()["hotkeys"]["quitApp"] == "CommandOrControl+Shift+Q"
-    assert empty.json()["hotkeys"]["newQuestion"] == "CommandOrControl+Shift+N"
+    assert empty.json()["hotkeys"]["quitApp"] == "CommandOrControl+Q"
+    assert empty.json()["hotkeys"]["newQuestion"] == "CommandOrControl+N"
 
     payload = {
         "study_specialty": "电子信息",
@@ -3841,7 +3863,7 @@ def test_study_settings_flow_into_chat_without_legacy_personal_data(tmp_path, mo
     assert "解题思路" in response.text
     context = "\n".join(message.content for message in captured)
     assert "电子信息" in context and "C++" in context
-    assert "先举例" in context and "先不提供完整代码" in context
+    assert "先举例" in context and "不要给出完整可运行代码" in context
     assert "不应发送" not in context
     assert captured[-1].images == (image,)
 
@@ -3917,7 +3939,7 @@ def test_gateway_chat_stream_mock_sse(tmp_path: Path, monkeypatch) -> None:
             pieces.append(payload["delta"])
         if payload.get("done"):
             done = True
-    assert "我是左右" in "".join(pieces)
+    assert "解题思路" in "".join(pieces)
     assert done is True
 
 

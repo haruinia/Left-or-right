@@ -5,7 +5,9 @@ const path = require('node:path');
 const { app, BrowserWindow, shell, screen } = require('electron');
 
 const COMPACT = { width: 320, height: 240 };
-const EXPANDED = { width: 440, height: 720 };
+// 780 = Gank 解答区的 740px 上限 + 窗口与卡片两层内边距（约 40px）。
+// 560 时卡片内宽只有 460，长代码行仍然折；对齐 Gank 的实际阅读宽度。
+const EXPANDED = { width: 780, height: 760 };
 
 let compact = false;
 
@@ -18,11 +20,17 @@ const RENDERER_INDEX = app.isPackaged
   ? path.join(process.resourcesPath, 'web', 'index.html')
   : path.resolve(__dirname, '..', '..', 'web', 'index.html');
 
-function createWindow(config) {
+function createWindow(config, { onMove } = {}) {
   const isMac = process.platform === 'darwin';
+  // 记住上次的位置：透明无边框窗口没有标题栏可以拖，每次启动都回默认位置
+  // 时用户得重新按快捷键挪一遍。
+  const saved = config && config.windowBounds;
   const win = new BrowserWindow({
     title: '左右',
     icon: path.join(__dirname, '..', 'assets', 'icon.png'),
+    ...(saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)
+      ? { x: Math.round(saved.x), y: Math.round(saved.y) }
+      : {}),
     width: EXPANDED.width,
     height: EXPANDED.height,
     minWidth: COMPACT.width,
@@ -108,7 +116,68 @@ function createWindow(config) {
     if (pid && pid !== String(process.pid)) previousPid = pid;
   }, 1000);
   win.on('closed', () => clearInterval(rememberFrontApp));
+
+  // 位置变化后落盘，下次启动接着用。防抖是因为拖动/连按方向键会连续触发。
+  let saveTimer = null;
+  const persistBounds = () => {
+    if (!onMove) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      if (win.isDestroyed()) return;
+      const { x, y } = win.getBounds();
+      onMove({ x, y });
+    }, 400);
+  };
+  win.on('move', persistBounds);
+  win.on('closed', () => clearTimeout(saveTimer));
   return win;
+}
+
+// 不透明度：Gank 用 ⌘[ / ⌘] 调，范围 0.3–1，默认 1。
+// 悬浮窗挡在题目上时，调低一点能看清底下的原文。
+const OPACITY_MIN = 0.3;
+const OPACITY_MAX = 1;
+const OPACITY_STEP = 0.1;
+let opacity = 1;
+
+function setOpacity(win, value) {
+  opacity = Math.max(OPACITY_MIN, Math.min(OPACITY_MAX, Math.round(value * 10) / 10));
+  if (win && !win.isDestroyed()) win.setOpacity(opacity);
+  return opacity;
+}
+
+function changeOpacity(win, delta) {
+  return setOpacity(win, opacity + delta);
+}
+
+// 字号缩放：Gank 用 ⌘- / ⌘0 / ⌘=。用 webContents 的 zoomFactor，
+// 正文、代码块、标签栏一起缩放，比改 CSS 变量稳。
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 1.6;
+const ZOOM_STEP = 0.1;
+let zoomFactor = 1;
+
+function setZoom(win, value) {
+  zoomFactor = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(value * 10) / 10));
+  if (win && !win.isDestroyed()) win.webContents.setZoomFactor(zoomFactor);
+  return zoomFactor;
+}
+
+function changeZoom(win, delta) {
+  return setZoom(win, zoomFactor + delta);
+}
+
+function resetZoom(win) {
+  return setZoom(win, 1);
+}
+
+function clampToArea(win) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const area = screen.getDisplayMatching(bounds).workArea;
+  const x = Math.max(area.x, Math.min(bounds.x, area.x + Math.max(0, area.width - bounds.width)));
+  const y = Math.max(area.y, Math.min(bounds.y, area.y + Math.max(0, area.height - bounds.height)));
+  if (x !== bounds.x || y !== bounds.y) win.setPosition(x, y, false);
 }
 
 function moveWindow(win, dx, dy) {
@@ -125,6 +194,8 @@ function toggleCompact(win) {
   compact = !compact;
   const size = compact ? COMPACT : EXPANDED;
   win.setSize(size.width, size.height, true);
+  // 贴在屏幕右下角时展开，大半截会跑到屏幕外——重设尺寸后重新夹一次。
+  clampToArea(win);
   win.webContents.send('cockpit:compact', compact);
   return compact;
 }
@@ -220,6 +291,11 @@ function beginHoldInteract(win) {
 module.exports = {
   createWindow,
   moveWindow,
+  setOpacity,
+  changeOpacity,
+  setZoom,
+  changeZoom,
+  resetZoom,
   toggleCompact,
   toggleVisible,
   showWindow,

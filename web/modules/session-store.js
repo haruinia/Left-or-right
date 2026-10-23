@@ -1,31 +1,9 @@
-// 会话记录：每次「新对话」时把当前轮次保存到 localStorage，支持回看和导出。
+// 会话记录：保存到共享本地服务，支持桌面与设置中心回看和导出。
 // 结构: { id, startedAt, endedAt, turns: [{role, text, images?}], note }
-// images 只存缩略图 dataUrl（如果太大则只存数量），避免 localStorage 爆掉。
+// images 只存缩略图 dataUrl；历史回看不保存源截图。
 
-const STORAGE_KEY = "liuwa_session_records";
-const MAX_RECORDS = 100;
-
-function loadRecords() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecords(records) {
-  try {
-    // 保留最近 MAX_RECORDS 条，避免无限增长
-    const trimmed = records.slice(-MAX_RECORDS);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { createAssetStore } from "./asset-storage.js";
+const store = createAssetStore("sessions", "liuwa_session_records");
 
 function makeRecordId() {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -36,15 +14,17 @@ function compressImage(dataUrl, maxWidth = 200, quality = 0.6) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
-      const canvas = document.createElement("canvas");
-      const scale = Math.min(1, maxWidth / img.width);
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL("image/jpeg", quality));
+      try {
+        const canvas = document.createElement("canvas");
+        const scale = Math.min(1, maxWidth / img.width);
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch { resolve(null); }
     };
-    img.onerror = () => resolve(dataUrl.slice(0, 500)); // 失败则截断
+    img.onerror = () => resolve(null); // 无法解码时只保留原图数量
     img.src = dataUrl;
   });
 }
@@ -52,7 +32,6 @@ function compressImage(dataUrl, maxWidth = 200, quality = 0.6) {
 // 把一轮对话保存为一条记录
 export async function saveSessionRecord({ turns, note, startedAt }) {
   if (!turns || !turns.length) return null;
-  const records = loadRecords();
   const record = {
     id: makeRecordId(),
     startedAt: startedAt || new Date().toISOString(),
@@ -68,43 +47,28 @@ export async function saveSessionRecord({ turns, note, startedAt }) {
       return {
         role: turn.role,
         text: String(turn.text || "").slice(0, 12000),
-        images: thumbnails,
-        imageCount: images.length,
+        images: thumbnails.filter(Boolean),
+        imageCount: turn.imageCount ?? images.length,
       };
     })),
   };
-  records.push(record);
-  if (saveRecords(records)) {
-    return record;
-  }
-  return null;
+  return store.put(record);
 }
 
-export function listSessionRecords() {
-  return loadRecords().reverse(); // 最新的在前面
+export async function listSessionRecords() {
+  return (await store.list()).reverse();
 }
 
-export function getSessionRecord(id) {
-  return loadRecords().find((r) => r.id === id) || null;
+export async function getSessionRecord(id) {
+  return (await store.list()).find((r) => r.id === id) || null;
 }
 
-export function deleteSessionRecord(id) {
-  const records = loadRecords().filter((r) => r.id !== id);
-  return saveRecords(records);
-}
-
-export function clearSessionRecords() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
+export function deleteSessionRecord(id) { return store.remove(id); }
+export function clearSessionRecords() { return store.clear(); }
 
 // 导出为 JSON 文件
-export function exportSessionRecords() {
-  const records = loadRecords();
+export async function exportSessionRecords() {
+  const records = await store.list();
   const blob = new Blob([JSON.stringify(records, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -115,8 +79,8 @@ export function exportSessionRecords() {
 }
 
 // 导出为 Markdown，方便粘贴到笔记软件
-export function exportSessionRecordsAsMarkdown() {
-  const records = loadRecords().reverse();
+export async function exportSessionRecordsAsMarkdown() {
+  const records = await listSessionRecords();
   let md = "# 左右 · 会话记录\n\n";
   for (const record of records) {
     md += `## ${new Date(record.startedAt).toLocaleString()}\n\n`;

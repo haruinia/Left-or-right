@@ -15,6 +15,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.datastructures import Headers
 
@@ -72,6 +73,7 @@ from services.asr_service.service import (
 from services.document_service import parse_document
 from services.chat_service import iter_chat_deltas
 from services.chat_service.service import build_chat_messages
+from services.gateway.learning_assets import router as learning_assets_router
 from services.exam_service import solve_exam_screenshot
 from services.memory_service import (
     delete_candidate_memories,
@@ -319,8 +321,10 @@ async def lifespan(fastapi_app: FastAPI):
 
 
 app = FastAPI(title="Shuihuo Killer", version="0.1.0", lifespan=lifespan)
+app.include_router(learning_assets_router)
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=["null", "file://"],  # Electron loadFile 的本地页面来源
     allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
@@ -329,6 +333,7 @@ WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 WEB_INDEX = WEB_ROOT / "index.html"
 WEB_SETTINGS = WEB_ROOT / "settings.html"
 WEB_COCKPIT = WEB_ROOT / "cockpit.html"
+app.mount("/vendor", StaticFiles(directory=WEB_ROOT / "vendor"), name="vendor")
 WEB_ASSET_MEDIA_TYPES = {
     ".css": "text/css; charset=utf-8",
     ".js": "text/javascript; charset=utf-8",
@@ -392,7 +397,7 @@ async def observe_and_rate_limit(request: Request, call_next):
     request_id = request_id_from_header(request.headers.get("x-request-id"))
     trace_context = trace_context_from_header(request.headers.get("traceparent"))
     path = request.url.path
-    if request.url.path.startswith("/api/") and not _gateway_authorized(
+    if request.method != "OPTIONS" and request.url.path.startswith("/api/") and not _gateway_authorized(
         request.headers,
         settings.gateway_api_key,
         request.query_params.get("api_key"),
@@ -807,15 +812,48 @@ def _ui_settings_path() -> Path:
     return Path("data") / "ui_settings.json"
 
 
+# 旧版默认键位。存档里出现这些值，说明用户从没改过、只是旧默认被写进去了；
+# 不迁移的话新默认（⌘H / ⌘Enter / ⌘B …）会被旧值覆盖，改代码等于没改。
+_LEGACY_HOTKEYS = {
+    "captureRegion": "CommandOrControl+Shift+U",
+    "sendChat": "CommandOrControl+Shift+Enter",
+    "toggleWindow": "CommandOrControl+Shift+H",
+    "quitApp": "CommandOrControl+Shift+Q",
+    "newQuestion": "CommandOrControl+Shift+N",
+    "clearShots": "CommandOrControl+Shift+Backspace",
+    "readPrev": "CommandOrControl+Shift+Left",
+    "readNext": "CommandOrControl+Shift+Right",
+    "scrollUp": "CommandOrControl+Shift+Up",
+    "scrollDown": "CommandOrControl+Shift+Down",
+    "moveUp": "CommandOrControl+Shift+Alt+Up",
+    "moveDown": "CommandOrControl+Shift+Alt+Down",
+    "moveLeft": "CommandOrControl+Shift+Alt+Left",
+    "moveRight": "CommandOrControl+Shift+Alt+Right",
+}
+
+
 def _read_ui_settings() -> UiSettings:
     path = _ui_settings_path()
-    if not path.is_file():
-        settings = UiSettings()
-    else:
+    raw: dict = {}
+    if path.is_file():
         try:
-            settings = UiSettings.model_validate_json(path.read_text(encoding="utf-8"))
+            raw = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            settings = UiSettings()
+            raw = {}
+    hotkeys = raw.get("hotkeys")
+    if isinstance(hotkeys, dict) and raw.get("_hotkeys_version", 1) < 2:
+        # 只丢掉「还是旧默认值」的项，用户真改过的不动。
+        migrated = {
+            action: value
+            for action, value in hotkeys.items()
+            if _LEGACY_HOTKEYS.get(action) != value
+        }
+        if migrated != hotkeys:
+            raw["hotkeys"] = migrated
+    try:
+        settings = UiSettings.model_validate(raw) if raw else UiSettings()
+    except Exception:
+        settings = UiSettings()
     if settings.study_goal.strip() == "力扣刷题与笔面试复习":
         settings.study_goal = "看懂眼前这段代码或报错"
     return settings
@@ -834,7 +872,9 @@ def save_ui_settings(payload: UiSettings) -> UiSettings:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     path = _ui_settings_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(payload.model_dump_json(indent=2), encoding="utf-8")
+    # 只迁移旧版默认值；用户在新版显式保存旧组合键时，读取不能再把它改掉。
+    stored = {**payload.model_dump(), "_hotkeys_version": 2}
+    path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
     return payload
 
 

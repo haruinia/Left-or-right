@@ -226,5 +226,5 @@ refreshStatus?.addEventListener("click", checkRuntime);
 checkModel?.addEventListener("click", checkLlmConnection);
 checkAsr?.addEventListener("click", checkAsrReadiness);
 
-checkRuntime();
-loadUiSettings();
+// 9958 只托管静态页；先完成服务发现，再读取8001上的配置。
+checkRuntime().then(loadUiSettings);

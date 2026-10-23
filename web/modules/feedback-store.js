@@ -1,37 +1,15 @@
 // 回答反馈存储：记录用户对 AI 回答的 👍/👎 反馈，用于改进提示词和评估质量。
 // 结构: { id, answerText, feedbackType, questionText, timestamp, model, preset }
 
-const FEEDBACK_KEY = "liuwa_answer_feedback";
-const MAX_FEEDBACK = 500;
-
-function loadFeedback() {
-  try {
-    const raw = localStorage.getItem(FEEDBACK_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveFeedbackList(items) {
-  try {
-    const trimmed = items.slice(-MAX_FEEDBACK);
-    localStorage.setItem(FEEDBACK_KEY, JSON.stringify(trimmed));
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { createAssetStore } from "./asset-storage.js";
+const store = createAssetStore("feedback", "liuwa_answer_feedback");
 
 function makeId() {
   return `fb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // 保存一条反馈
-export function saveFeedback({ answerText, feedbackType, questionText = "", model = "", preset = "" }) {
-  const items = loadFeedback();
+export async function saveFeedback({ answerText, feedbackType, questionText = "", model = "", preset = "" }) {
   const item = {
     id: makeId(),
     answerText: String(answerText || "").slice(0, 4000),
@@ -41,16 +19,12 @@ export function saveFeedback({ answerText, feedbackType, questionText = "", mode
     preset,
     timestamp: new Date().toISOString(),
   };
-  items.push(item);
-  if (saveFeedbackList(items)) {
-    return item;
-  }
-  return null;
+  return store.put(item);
 }
 
 // 获取反馈统计
-export function getFeedbackStats() {
-  const items = loadFeedback();
+export async function getFeedbackStats() {
+  const items = await store.list();
   const up = items.filter((i) => i.feedbackType === "up").length;
   const down = items.filter((i) => i.feedbackType === "down").length;
   return {
@@ -62,20 +36,20 @@ export function getFeedbackStats() {
 }
 
 // 获取最近的负面反馈（用于改进）
-export function listRecentNegativeFeedback(limit = 20) {
-  return loadFeedback()
+export async function listRecentNegativeFeedback(limit = 20) {
+  return (await store.list())
     .filter((i) => i.feedbackType === "down")
     .reverse()
     .slice(0, limit);
 }
 
 // 导出为 Markdown
-export function exportFeedbackAsMarkdown() {
-  const items = loadFeedback().reverse();
+export async function exportFeedbackAsMarkdown() {
+  const items = (await store.list()).reverse();
   let md = "# 左右 · 回答反馈记录\n\n";
   md += `> 共 ${items.length} 条反馈，导出时间：${new Date().toLocaleString("zh-CN")}\n\n`;
 
-  const stats = getFeedbackStats();
+  const stats = await getFeedbackStats();
   md += `## 统计\n\n`;
   md += `- 👍 有用：${stats.up} 条\n`;
   md += `- 👎 无用：${stats.down} 条\n`;
@@ -102,11 +76,4 @@ export function exportFeedbackAsMarkdown() {
 }
 
 // 清空反馈
-export function clearFeedback() {
-  try {
-    localStorage.removeItem(FEEDBACK_KEY);
-    return true;
-  } catch {
-    return false;
-  }
-}
+export function clearFeedback() { return store.clear(); }

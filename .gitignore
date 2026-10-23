@@ -17,3 +17,13 @@ desktop/config.json
 desktop/dist/
 
 .ai-tracker
+
+# Gank Interview 逆向产物（第三方应用包，仅本地参照，不入库）
+reference/gank/
+
+# 本机预览/编辑器配置
+.claude/launch.json
+
+# 本地验收产物（含第三方分析结果和浏览器调试记录）
+.playwright-cli/
+output/

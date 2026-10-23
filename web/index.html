@@ -9,7 +9,12 @@
       if (window.cockpit) document.documentElement.classList.add("liuwa-host");
     </script>
     <link rel="icon" href="modules/pangsi-mark.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="vendor/katex/katex.min.css" />
+    <link rel="stylesheet" href="vendor/highlight/github-dark.min.css" />
     <link rel="stylesheet" href="styles.css" />
+    <!-- KaTeX + highlight.js 与 Gank 用同一套；本地 vendor，不依赖网络。 -->
+    <script defer src="vendor/katex/katex.min.js"></script>
+    <script defer src="vendor/highlight/highlight.min.js"></script>
   </head>
   <body class="liuwa-page is-empty">
     <main class="liuwa-orb">
@@ -24,23 +29,33 @@
         <div class="liuwa-shots" id="liuwaShots" hidden></div>
         <section class="liuwa-shortcuts" id="liuwaKeys">
           <div class="liuwa-shortcut-primary">
-            <span>截图 <kbd id="hintCapture" data-key-action="captureRegion">⌘⇧U</kbd></span>
-            <span>发送 <kbd id="hintSend" data-key-action="sendChat">⌘⇧Enter</kbd></span>
-            <span>隐藏/显示 <kbd data-key-action="toggleWindow">⌘⇧H</kbd></span>
-            <span>新对话 <kbd data-key-action="newQuestion">⌘⇧N</kbd></span>
+            <span>截图 <kbd id="hintCapture" data-key-action="captureRegion">⌘H</kbd></span>
+            <span>处理 <kbd id="hintSend" data-key-action="sendChat">⌘Enter</kbd></span>
+            <span>显示/隐藏 <kbd data-key-action="toggleWindow">⌘B</kbd></span>
+            <span>删除最后一张 <kbd data-key-action="deleteLastShot">⌘L</kbd></span>
           </div>
           <details>
             <summary aria-label="全部快捷键">全部快捷键</summary>
             <div class="liuwa-shortcut-grid">
+              <span>上一页 <kbd data-key-action="readPrev">⌘,</kbd></span>
+              <span>下一页 <kbd data-key-action="readNext">⌘.</kbd></span>
+              <span>内容上滚 <kbd data-key-action="scrollUp">⌘;</kbd></span>
+              <span>内容下滚 <kbd data-key-action="scrollDown">⌘'</kbd></span>
+              <span>窗口上移 <kbd data-key-action="moveUp">⌘↑</kbd></span>
+              <span>窗口下移 <kbd data-key-action="moveDown">⌘↓</kbd></span>
+              <span>窗口左移 <kbd data-key-action="moveLeft">⌘←</kbd></span>
+              <span>窗口右移 <kbd data-key-action="moveRight">⌘→</kbd></span>
+              <span>降低不透明度 <kbd data-key-action="opacityDown">⌘[</kbd></span>
+              <span>提高不透明度 <kbd data-key-action="opacityUp">⌘]</kbd></span>
+              <span>缩小字号 <kbd data-key-action="zoomOut">⌘−</kbd></span>
+              <span>还原字号 <kbd data-key-action="zoomReset">⌘0</kbd></span>
+              <span>放大字号 <kbd data-key-action="zoomIn">⌘=</kbd></span>
+              <span>新对话 <kbd data-key-action="newQuestion">⌘N</kbd></span>
+              <span>清空截图 <kbd data-key-action="clearShots">⌘⇧⌫</kbd></span>
               <span>操作面板 <kbd id="hintInteract" data-key-action="toggleVisible">⌘⇧Space</kbd></span>
               <span>全屏截图 <kbd data-key-action="captureScreen">⌘⇧Y</kbd></span>
               <span>紧凑 / 展开 <kbd data-key-action="toggleCompact">⌘⇧J</kbd></span>
-              <span>清空截图 <kbd data-key-action="clearShots">⌘⇧⌫</kbd></span>
-              <span>退出 <kbd data-key-action="quitApp">⌘⇧Q</kbd></span>
-              <span>窗口上移 <kbd data-key-action="moveUp">⌘⇧↑</kbd></span>
-              <span>窗口下移 <kbd data-key-action="moveDown">⌘⇧↓</kbd></span>
-              <span>窗口左移 <kbd data-key-action="moveLeft">⌘⇧←</kbd></span>
-              <span>窗口右移 <kbd data-key-action="moveRight">⌘⇧→</kbd></span>
+              <span>退出 <kbd data-key-action="quitApp">⌘Q</kbd></span>
             </div>
           </details>
           <p class="liuwa-hotkey-warning" id="liuwaHotkeyWarning" role="status" hidden></p>

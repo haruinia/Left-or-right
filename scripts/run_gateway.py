@@ -38,8 +38,8 @@ def local_port_warning_lines(host: str, port: int) -> list[str]:
         return []
     return [
         f"Note: port {DOCKER_COMPOSE_PORT} is already in use on {host}.",
-        f"Open {display_url(host, port)} for this local gateway, not "
-        f"{display_url(host, DOCKER_COMPOSE_PORT)}.",
+        (f"Open {display_url(host, port)} for this local gateway, not "
+         f"{display_url(host, DOCKER_COMPOSE_PORT)}."),
     ]
 
 
@@ -61,7 +61,7 @@ def _redirect_handler(target_url: str):
         def do_OPTIONS(self) -> None:
             self._redirect()
 
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
+        def log_message(self, format: str, *args) -> None:
             return
 
         def _redirect(self, *, body: bool = True) -> None:
@@ -71,7 +71,7 @@ def _redirect_handler(target_url: str):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             if body:
-                self.wfile.write(f"Redirecting to {location}\n".encode("utf-8"))
+                self.wfile.write(f"Redirecting to {location}\n".encode())
 
     return LocalRedirectHandler
 
@@ -113,7 +113,12 @@ def start_settings_server(host: str, port: int = SETTINGS_PORT) -> tuple[Threadi
                 self.path = "/settings.html"
             super().do_GET()
 
-        def log_message(self, format: str, *args) -> None:  # noqa: A002
+        def end_headers(self) -> None:
+            # 页面固定 URL，升级后必须重新读取模块，避免浏览器沿用旧版交互。
+            self.send_header("Cache-Control", "no-store")
+            super().end_headers()
+
+        def log_message(self, format: str, *args) -> None:
             return
 
     try:
@@ -128,6 +133,8 @@ def start_settings_server(host: str, port: int = SETTINGS_PORT) -> tuple[Threadi
 def port_is_available(host: str, port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            # 与 uvicorn 一致，允许重启时复用 TIME_WAIT 连接留下的端口。
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind((host, port))
     except OSError:
         return False
@@ -159,8 +166,8 @@ def runtime_summary_lines(status) -> list[str]:
         and status.llm_api_key_configured
     )
     lines = [
-        f"Model: {status.llm_provider} / {status.llm_model} "
-        f"{mode_label(status.llm_provider, llm_ready)}",
+        (f"Model: {status.llm_provider} / {status.llm_model} "
+         f"({mode_label(status.llm_provider, llm_ready)})"),
     ]
     if status.asr_provider == "aliyun_nls_ws":
         asr_ready = (
@@ -194,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         from libs.common.runtime import get_runtime_status
 
         status = get_runtime_status()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - report startup config failures at the CLI boundary
         print(f"Runtime configuration error: {exc}", file=sys.stderr)
         return 3
 

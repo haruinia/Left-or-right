@@ -26,13 +26,34 @@ function tempPngPath() {
 
 // Uses the macOS `screencapture` binary rather than desktopCapturer: it gives the
 // native crosshair, correct Retina scale, and never needs a renderer media stream.
-async function captureScreenshot({ interactive = true } = {}) {
+//
+// 矩形截图不用 `screencapture -R`：macOS 26 上它稳定报 could not create image
+// from rect，而全屏截图正常。改成先整屏抓、再用 sips 裁，两段都稳定。
+async function captureScreenshot({ interactive = true, rect = null } = {}) {
   if (process.platform !== 'darwin') {
     throw new Error('截图目前只支持 macOS');
   }
   const file = tempPngPath();
-  const args = interactive ? ['-x', '-i', '-t', 'png', file] : ['-x', '-t', 'png', file];
+  // 传了 rect 就不要再走 -i：两点框选的坐标已经拿到了，交互模式反而会再弹一次十字。
+  const args = interactive && !rect ? ['-x', '-i', '-t', 'png', file] : ['-x', '-t', 'png', file];
   await run('/usr/sbin/screencapture', args);
+
+  if (rect) {
+    const cropped = file.replace(/\.png$/, '-crop.png');
+    await run('/usr/bin/sips', [
+      '--cropToHeightWidth',
+      String(rect.height),
+      String(rect.width),
+      '--cropOffset',
+      String(rect.y),
+      String(rect.x),
+      file,
+      '--out',
+      cropped,
+    ]);
+    fs.unlinkSync(file);
+    fs.renameSync(cropped, file);
+  }
   if (!fs.existsSync(file)) {
     throw new Error('截图已取消');
   }

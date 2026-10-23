@@ -1946,12 +1946,18 @@ html.transparent-white {
 /* 悬浮窗基座：矩形半圆（大圆角矩形），内边距加大让文字远离边缘 */
 .liuwa-orb {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 14px;
-  width: min(440px, calc(100% - 24px));
-  height: min(720px, calc(100dvh - 24px));
-  margin: 12px auto;
-  padding: 22px 24px 18px;
+  /* 只有 thread + dock 两个子元素，写成三行会让 thread 落进 auto 行、
+     高度被内容撑死，dock 反而吃掉 1fr——回答区就是这么被压小的。 */
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 8px;
+  width: min(780px, calc(100% - 16px));
+  /* 不再写 min(760px, …)：窗口被用户拉高之后，orb 卡在 760 不动，
+     多出来的高度全是透明死空间。Gank 的解答面板是 flex 吃满高度的，
+     这里让 orb 直接跟着窗口走。 */
+  height: calc(100dvh - 16px);
+  margin: 8px auto;
+  /* 内边距从 16/12 收到 12/8：窗口高度固定，边框吃掉多少，正文就少多少。 */
+  padding: 12px 12px 8px;
   border: 1px solid #fff;
   border-radius: 28px;
   background: var(--frost-card);
@@ -2027,6 +2033,7 @@ html.transparent-white {
 
 .liuwa-turn {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin: 0 0 14px;
 }
@@ -2042,12 +2049,15 @@ html.transparent-white {
   justify-content: flex-end;
 }
 
+/* 128×72 + contain（对齐 Gank v2.4.0 的缩略图规范）：单选题与算法题的长宽比差得远，
+   cover 会把代码区和样例输入裁掉，所以按原始比例完整可见，留白交给底色。 */
 .liuwa-gallery img,
 .liuwa-thumb img {
   display: block;
-  width: 72px;
+  width: 128px;
   height: 72px;
-  object-fit: cover;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: 10px;
 }
@@ -2076,9 +2086,44 @@ html.transparent-white {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
   color: var(--ink);
-  padding: 18px 20px;
-  line-height: 1.7;
+  padding: 14px 15px;
+  font-size: 13.5px;
+  line-height: 1.75;
   overflow-wrap: anywhere;
+}
+
+/* 高度分配链（对齐 Gank 的 solution-panel：body flex:1 → scroll height:100%）。
+   orb 是 grid(minmax(0,1fr) + auto)，thread 拿到确定高度；thread 再纵向 flex，
+   最后一条回答吃满剩余高度，正文在卡片内部滚动。
+
+   之前只在「有结构化小节」时这么做，普通回答由内容撑高——窗口一拉高，
+   卡片下面全是空白，就是「能看的地方太小」。 */
+/* 只在有内容时切成 flex：空状态仍走上面的 grid 居中，
+   否则 .liuwa-page.is-empty .liuwa-thread 的 place-items:center 会被覆盖掉。 */
+.liuwa-page:not(.is-empty) .liuwa-thread {
+  display: flex;
+  flex-direction: column;
+}
+
+.liuwa-turn {
+  flex: 0 0 auto;
+}
+
+.liuwa-turn.is-assistant:last-child {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.liuwa-turn.is-assistant:last-child .liuwa-stream {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 整篇回答由卡片滚动，翻页键与鼠标使用同一个容器。 */
+.liuwa-turn.is-assistant:last-child .liuwa-stream {
+  overflow-y: auto;
 }
 
 .liuwa-turn.is-stream .liuwa-stream::after {
@@ -2168,6 +2213,28 @@ html.transparent-white {
   font-size: 0.88em;
 }
 
+/* 公式由 KaTeX 排版（katex.min.css 已在 index.html 引入）。
+   这里只管块级公式的外边距和溢出——长公式在窄卡片里要能横向滚动。 */
+.md .md-math-block {
+  margin: 10px 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.md .md-math-block .katex-display {
+  margin: 0;
+}
+
+/* KaTeX 没加载出来时的退路：至少别把 $...$ 原样显示。 */
+.md .md-math-fallback {
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0 3px;
+  border-radius: var(--radius-sm);
+  background: var(--line-soft);
+}
+
 .md .md-code {
   margin: 8px 0;
   padding: 12px 14px;
@@ -2217,30 +2284,200 @@ html.transparent-white {
   gap: 6px;
 }
 
-.liuwa-shot-note {
-  flex: 1 0 100%;
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
-}
-
 .liuwa-thumb {
   position: relative;
   margin: 0;
 }
 
-.liuwa-thumb button {
+.liuwa-thumb-open {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  box-shadow: none;
+  cursor: zoom-in;
+  transition: transform var(--dur-base) var(--ease-out-strong), opacity var(--dur-base) ease;
+}
+
+.liuwa-thumb-open:hover {
+  background: none;
+  transform: scale(1.04);
+}
+
+.liuwa-thumb-open:active {
+  transform: scale(1.01);
+}
+
+.liuwa-thumb.is-active .liuwa-thumb-open img {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+
+.liuwa-thumb-x {
   position: absolute;
   top: -6px;
   right: -6px;
   min-height: 20px;
+  min-width: 20px;
   padding: 0 6px;
   border: 0;
   border-radius: 999px;
   background: var(--ink);
   color: #fff;
   box-shadow: none;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+
+.liuwa-thumb:hover .liuwa-thumb-x,
+.liuwa-thumb-x:focus-visible {
+  opacity: 1;
+}
+
+/* 编号条：多选题里两张图铺开就分不清哪张是哪张，编号给出稳定锚点。 */
+.liuwa-shot-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1 0 100%;
+}
+
+.liuwa-shot-chip {
+  min-height: 20px;
+  min-width: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  box-shadow: none;
+}
+
+.liuwa-shot-chip:hover {
+  border-color: var(--accent);
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.liuwa-shot-chip.is-sent {
+  border-style: solid;
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.liuwa-shot-chip.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.liuwa-shot-chip.is-active.is-sent {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+/* 放大层铺满整个浮窗（窗口本身只有 780×760），压在对话流之上。
+   半透明黑底是 Gank 的做法：既能看清图，又不至于把身后的题目完全挡死。 */
+.liuwa-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(12, 18, 32, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  animation: liuwa-lightbox-in var(--dur-base) var(--ease-out-strong);
+}
+
+@keyframes liuwa-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.liuwa-lightbox-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.liuwa-lightbox-stage.is-zoomed {
+  cursor: grab;
+}
+
+.liuwa-lightbox-stage.is-dragging {
+  cursor: grabbing;
+}
+
+.liuwa-lightbox-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius);
+  box-shadow: 0 18px 48px rgba(6, 12, 26, 0.45);
+  transform-origin: center center;
+  transition: transform var(--dur-fast) ease-out;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.liuwa-lightbox-stage.is-dragging img {
+  transition: none;
+}
+
+.liuwa-lightbox-counter {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(6, 12, 26, 0.62);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.liuwa-lightbox-counter:empty {
+  display: none;
+}
+
+.liuwa-lightbox-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(6, 12, 26, 0.62);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: none;
+}
+
+.liuwa-lightbox-close:hover {
+  background: rgba(6, 12, 26, 0.82);
+}
+
+body.is-lightbox {
+  overflow: hidden;
 }
 
 .liuwa-note {
@@ -2265,6 +2502,11 @@ html.transparent-white {
 .liuwa-orb button.secondary { background: rgba(255, 255, 255, 0.2); border-color: rgba(86, 108, 137, 0.18); box-shadow: none; }
 .liuwa-orb button.secondary:hover { background: rgba(255, 255, 255, 0.48); }
 .liuwa-orb button { border-radius: 10px; box-shadow: none; }
+/* 有回答之后，四行快捷键面板让位给正文：只留一行「全部快捷键」，
+   需要时展开即可。Gank 的命令区在有内容时也只占一行。 */
+body:not(.is-empty) .liuwa-shortcut-primary { display: none; }
+body:not(.is-empty) .liuwa-shortcuts { margin-top: 2px; padding-top: 8px; }
+
 .liuwa-shortcuts { border-top: 1px solid rgba(66, 89, 120, 0.1); margin-top: 6px; padding-top: 12px; color: var(--muted); font-size: 11px; }
 .liuwa-shortcut-primary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-bottom: 4px; }
 .liuwa-shortcut-primary > span { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
@@ -2276,7 +2518,6 @@ html.transparent-white {
 .liuwa-shortcut-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 .liuwa-shortcut-grid > span { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
 .liuwa-shortcut-note { margin: 4px 0 12px; line-height: 1.6; }
-.liuwa-carried { margin: 0; color: var(--muted); font-size: 12px; }
 .liuwa-hotkey-warning { margin: 10px 0 0; color: #922f35; line-height: 1.6; }
 .liuwa-shortcuts kbd.is-conflict { color: #922f35; border-color: currentColor; }
 
@@ -2307,43 +2548,14 @@ html.transparent-white {
   border-color: var(--faint);
 }
 
-/* 回答反馈按钮 */
-.liuwa-feedback {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.liuwa-feedback-btn {
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--muted);
+/* 中断标记挂在卡片顶部：结构化视图一次只显示一个小节，
+   跟在 markdown 末尾会藏进「代码」等用户看不见的标签里。 */
+.liuwa-turn.is-stopped[data-stopped-label]::before {
+  content: attr(data-stopped-label);
+  display: block;
+  margin-bottom: 4px;
+  color: var(--faint);
   font-size: 12px;
-  padding: 4px 10px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-
-.liuwa-feedback-btn:hover:not(:disabled) {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.liuwa-feedback-btn:disabled {
-  cursor: default;
-  opacity: 0.7;
-}
-
-.liuwa-feedback-btn.is-active {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, transparent);
-  opacity: 1;
-}
-
-.liuwa-feedback.is-voted .liuwa-feedback-btn:not(.is-active) {
-  opacity: 0.45;
 }
 
 html.liuwa-host,

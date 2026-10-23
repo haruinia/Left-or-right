@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
     <title>左右 · 设置</title>
+    <link rel="icon" href="modules/pangsi-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="settings-page">
@@ -207,9 +208,59 @@
             <span class="small hotkey-preview" data-preview="clearShots"></span>
           </label>
           <label>
-            发送给模型
+            删除最后一张截图
+            <input id="hotkeyDeleteLastShot" data-hotkey="deleteLastShot" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="deleteLastShot"></span>
+          </label>
+          <label>
+            处理截图
             <input id="hotkeySendChat" data-hotkey="sendChat" spellcheck="false" />
             <span class="small hotkey-preview" data-preview="sendChat"></span>
+          </label>
+          <label>
+            回答上一页
+            <input id="hotkeyReadPrev" data-hotkey="readPrev" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="readPrev"></span>
+          </label>
+          <label>
+            回答下一页
+            <input id="hotkeyReadNext" data-hotkey="readNext" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="readNext"></span>
+          </label>
+          <label>
+            回答内容上滚
+            <input id="hotkeyScrollUp" data-hotkey="scrollUp" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="scrollUp"></span>
+          </label>
+          <label>
+            回答内容下滚
+            <input data-hotkey="scrollDown" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="scrollDown"></span>
+          </label>
+          <label>
+            降低不透明度
+            <input data-hotkey="opacityDown" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="opacityDown"></span>
+          </label>
+          <label>
+            提高不透明度
+            <input data-hotkey="opacityUp" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="opacityUp"></span>
+          </label>
+          <label>
+            缩小字号
+            <input data-hotkey="zoomOut" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="zoomOut"></span>
+          </label>
+          <label>
+            还原字号
+            <input data-hotkey="zoomReset" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="zoomReset"></span>
+          </label>
+          <label>
+            放大字号
+            <input data-hotkey="zoomIn" spellcheck="false" />
+            <span class="small hotkey-preview" data-preview="zoomIn"></span>
           </label>
         </div>
         <button type="button" class="secondary" id="resetHotkeys">恢复默认快捷键</button>
