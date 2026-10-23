@@ -33,6 +33,7 @@ async(page)=>{
   await page.goto('http://127.0.0.1:9958/index.html');
   await page.waitForFunction(()=>!!window.__liuwaSend);
   if(!await page.locator('.liuwa-reader').isHidden())throw Error('idle still occupies a reading window');
+  if(!await page.locator('#liuwaQuestions').isHidden())throw Error('question selector is visible with no questions');
   const barHeight=await page.locator('.liuwa-command-bar').evaluate(e=>e.getBoundingClientRect().height);
   const barWidth=await page.locator('.liuwa-command-bar').evaluate(e=>e.getBoundingClientRect().width);
   if(barWidth<530)throw Error('the idle toolbar does not fill its narrow window');

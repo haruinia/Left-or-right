@@ -3,6 +3,43 @@ import { splitAnswer } from './answer-sections.js';
 
 const readers = new WeakMap();
 
+// 复制按钮的点击落在每次重绘后的新节点上，所以在容器上委托一次即可。
+// 流式生成中也可能被点，读的是当时已经渲染出来的那部分代码。
+export function wireCodeCopy(root) {
+  if (!root?.addEventListener || root.dataset?.copyWired) return;
+  root.dataset.copyWired = 'true';
+  root.addEventListener('click', async (event) => {
+    const button = event.target.closest?.('.md-copy');
+    if (!button || !root.contains(button)) return;
+    const source = button.closest('.md-code-block')?.querySelector('.md-code')?.textContent || '';
+    if (!source) return;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(source);
+      copied = true;
+    } catch {
+      // 没有剪贴板权限（或非安全上下文）时退回旧接口，Electron 里通常走得到。
+      const area = root.ownerDocument?.createElement?.('textarea');
+      if (area) {
+        area.value = source;
+        area.style.position = 'fixed';
+        area.style.left = '-9999px';
+        root.ownerDocument.body.append(area);
+        area.select();
+        try { copied = root.ownerDocument.execCommand('copy'); } catch { copied = false; }
+        area.remove();
+      }
+    }
+    button.textContent = copied ? '已复制' : '复制失败';
+    button.classList.toggle('is-done', copied);
+    clearTimeout(button.__copyTimer);
+    button.__copyTimer = setTimeout(() => {
+      button.textContent = '复制';
+      button.classList.remove('is-done');
+    }, 1500);
+  });
+}
+
 export function renderAnswer(markdown, root, {complete = false} = {}) {
   if (!root) return;
   let reader = readers.get(root);
@@ -10,6 +47,7 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
     reader = {selected:null, manual:false, positions:new Map(), model:null};
     readers.set(root, reader);
   }
+  wireCodeCopy(root);
   const model = splitAnswer(markdown);
   reader.positions.set(reader.selected, root.scrollTop || 0);
   reader.model = model;

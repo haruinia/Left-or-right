@@ -106,7 +106,17 @@ def _exam_prompt(study_settings: UiSettings | None) -> str:
         language = (study_settings.study_language.strip() if study_settings else "") or "Python"
     # 语言名会被放进 ``` 代码围栏，含反引号或换行会破坏整个提示词结构。
     language = " ".join(language.split())[:40].replace("`", "")
-    return load_prompt("liuwa_chat.md").replace("{language}", language or "Python")
+    # 作答语言写在首页提示词里：只在复习预设那一段提一句时，模型实际仍会整篇用中文作答。
+    answer_language = (
+        "English"
+        if study_settings and study_settings.answer_language == "en-US"
+        else "中文"
+    )
+    return (
+        load_prompt("liuwa_chat.md")
+        .replace("{language}", language or "Python")
+        .replace("{answer_language}", answer_language)
+    )
 
 
 def build_chat_messages(

@@ -68,3 +68,19 @@ test('the current answer remains the reading target before it becomes scrollable
     assert.equal(readingBox(), card);
   } finally { delete globalThis.document; }
 });
+
+test('code blocks keep the line numbers and copy button outside the code itself', () => {
+  const rendered = renderMarkdown('```java\nint a = 1;\nint b = 2;\n```');
+  const gutter = rendered.match(/md-code-gutter[^>]*>([^<]+)</)?.[1] || '';
+  assert.equal(gutter, '1\n2');
+  const code = rendered.match(/<pre class="md-code"[^>]*>(.*)<\/pre>/)?.[1] || '';
+  assert.doesNotMatch(code, /md-copy|md-code-gutter/);
+  assert.match(rendered, /md-code-lang">java</);
+  assert.match(rendered, /aria-label="复制代码"/);
+});
+
+test('an unterminated fence still renders a block while streaming', () => {
+  const rendered = renderMarkdown('## 代码\n```python\nfor i in range(3):');
+  assert.match(rendered, /md-code-block/);
+  assert.match(rendered, /for i in range\(3\):/);
+});
