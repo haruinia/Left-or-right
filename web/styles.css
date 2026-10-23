@@ -3175,7 +3175,7 @@ body.liuwa-compact .liuwa-dock { min-height: 0; }
 
 /* 阅读时把辅助操作收成一行；显示面板浮在正文上，不挤占阅读高度。 */
 .liuwa-toolbar { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.liuwa-toolbar button, .liuwa-display summary {
+.liuwa-toolbar button, .liuwa-display > summary {
   min-height: 28px;
   padding: 4px 8px;
   border: 1px solid var(--line);
@@ -3213,7 +3213,6 @@ body.liuwa-compact .liuwa-dock { min-height: 0; }
 .liuwa-display-panel p:empty, .liuwa-status:empty { display: none; }
 .liuwa-page:not(.is-empty) .liuwa-dock { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .liuwa-page:not(.is-empty) .liuwa-toolbar { grid-column: 1; grid-row: 1; }
-.liuwa-page:not(.is-empty) .liuwa-shortcuts { grid-column: 2; grid-row: 1; border: 0; padding: 0; }
 .liuwa-page:not(.is-empty) .liuwa-shortcut-primary { display: none; }
 .liuwa-page:not(.is-empty) .liuwa-shots,
 .liuwa-page:not(.is-empty) .liuwa-status,
@@ -3258,7 +3257,8 @@ html.liuwa-host .liuwa-orb {
 .liuwa-page .liuwa-shots { grid-row: 1; min-height: 0; max-height: 76px; padding: 3px; gap: 8px; }
 body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
 .liuwa-page .liuwa-shots .liuwa-thumb { background: transparent; }
-.liuwa-page .liuwa-thumb img { width: 112px; height: 64px; background: #fff; border: 2px solid #fff; border-radius: 9px; box-shadow: var(--shadow-sm); }
+.liuwa-page .liuwa-thumb img { width: 112px; height: 64px; background: #fff; border: 0; border-radius: 9px; box-shadow: none; }
+.liuwa-page .liuwa-thumb.is-active .liuwa-thumb-open img { border: 0; box-shadow: none; }
 .liuwa-page .liuwa-thumb-x { top: -2px; right: -2px; }
 .liuwa-command-bar {
   grid-row: 2;
@@ -3269,10 +3269,10 @@ body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
   gap: 2px;
   min-height: 50px;
   padding: 6px 9px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 15px;
   background: rgba(var(--panel-rgb, 255,255,255), var(--panel-opacity));
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
   -webkit-app-region: drag;
 }
 .liuwa-command-bar > button,
@@ -3301,7 +3301,8 @@ body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
   grid-row: 3;
   background: rgba(var(--panel-rgb,255,255,255), var(--panel-opacity));
   border-radius: 15px;
-  border-color: var(--line);
+  border: 0;
+  box-shadow: none;
 }
 .liuwa-feedback { grid-row: 4; display: flex; align-items: center; gap: 12px; min-height: 0; }
 .liuwa-feedback:has(.liuwa-status:empty):has(.liuwa-stop[hidden]) { display: none; }
@@ -3313,11 +3314,12 @@ body.liuwa-page.liuwa-compact .liuwa-shots { display: flex; }
   display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
   align-items: center; gap: 10px 12px;
   padding: 16px;
-  background: var(--menu-bg, #f7f9fd);
-  border-color: var(--line);
+  background: rgba(var(--panel-rgb,255,255,255), var(--panel-opacity));
+  border: 0;
+  outline: none;
   color: var(--ink);
   overflow: auto;
-  box-shadow: var(--shadow);
+  box-shadow: none;
 }
 .liuwa-display-panel input:not([type="range"]), .liuwa-display-panel select {
   min-width: 0; width: 100%; min-height: 30px; padding: 5px 7px;
@@ -3343,19 +3345,42 @@ html[data-theme="dark"], html.liuwa-host[data-theme="dark"],
 html[data-theme="transparent-white"], html.liuwa-host[data-theme="transparent-white"] {
   color-scheme: dark;
   --panel-rgb: 22,30,46;
-  --menu-bg: #192338;
   --ink: #f1f5fd; --muted: #b6c1d7; --faint: #99a9c6;
   --surface: #26334a; --surface-2: #1f2b40;
   --line: #3a4963; --line-soft: #334159;
   --accent: #8eb3ff; --accent-soft: #2b3c5b; --accent-ring: #628ddd50;
 }
+.liuwa-page {
+  --surface: transparent;
+  --surface-2: transparent;
+  --accent-soft: color-mix(in srgb, var(--ink) 8%, transparent);
+  --line: color-mix(in srgb, var(--ink) 18%, transparent);
+  --line-soft: color-mix(in srgb, var(--ink) 10%, transparent);
+}
 body.liuwa-shell { color: var(--ink); }
+.liuwa-reader .md-code, .liuwa-reader .md-code code { background: transparent; color: var(--ink); }
+.liuwa-reader .md-table th, .liuwa-reader .md-table tbody tr { background: transparent; }
+.liuwa-pagination button { color: var(--ink); }
+.liuwa-pagination button:hover:not(:disabled) { background: var(--accent-soft); }
+.liuwa-display-panel .liuwa-shortcuts summary { border: 0; padding: 0; background: transparent; }
+.liuwa-display-panel input:focus-visible, .liuwa-display-panel select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+html[data-theme="light"] .md-code :is(.hljs-doctag, .hljs-keyword, .hljs-template-tag, .hljs-template-variable, .hljs-type, .hljs-variable.language_) { color: #cf222e; }
+html[data-theme="light"] .md-code :is(.hljs-string, .hljs-regexp) { color: #0a3069; }
+html[data-theme="light"] .md-code :is(.hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-selector-attr, .hljs-selector-class, .hljs-selector-id, .hljs-variable) { color: #0550ae; }
+html[data-theme="light"] .md-code :is(.hljs-title) { color: #8250df; }
+html[data-theme="light"] .md-code :is(.hljs-built_in, .hljs-symbol) { color: #953800; }
+html[data-theme="light"] .md-code :is(.hljs-code, .hljs-comment, .hljs-formula) { color: var(--muted); }
+html[data-theme="light"] .md-code :is(.hljs-name, .hljs-quote, .hljs-selector-pseudo, .hljs-selector-tag) { color: #116329; }
+html[data-theme="light"] .md-code :is(.hljs-subst, .hljs-emphasis, .hljs-strong) { color: var(--ink); }
+html[data-theme="light"] .md-code :is(.hljs-bullet) { color: #9a6700; }
 html[data-theme^="transparent-"] .liuwa-command-bar,
-html[data-theme^="transparent-"] .liuwa-reader {
+html[data-theme^="transparent-"] .liuwa-reader,
+html[data-theme^="transparent-"] .liuwa-display-panel {
   background: transparent !important; border-color: transparent !important; box-shadow: none;
 }
 html[data-theme^="transparent-"] .liuwa-command-bar > button,
 html[data-theme^="transparent-"] .liuwa-display > summary { text-shadow: 0 1px 2px #7774; }
+html[data-theme^="transparent-"] .liuwa-answer-tabs button[aria-selected="true"] { background: transparent; border-color: transparent; color: var(--ink); text-decoration: underline; text-underline-offset: 5px; }
 html[data-theme^="transparent-"] .md-code,
 html[data-theme^="transparent-"] .md-inline-code,
 html[data-theme^="transparent-"] .md-table th,

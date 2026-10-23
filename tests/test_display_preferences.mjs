@@ -47,6 +47,10 @@ test('opacity changes the background state while native text remains fully opaqu
   assert.equal(api.getDisplayState(win).opacity,.5);
   assert.ok(events.some(([event,value])=>event==='nativeOpacity'&&value===1));
   assert.ok(events.some(([event,value])=>event==='cockpit:display'&&value.opacity===.5));
+  const revision=api.getDisplayState(win).revision;
+  api.setOpacity(win,.37);
+  assert.equal(api.getDisplayState(win).opacity,.37);
+  assert.ok(api.getDisplayState(win).revision>revision);
   api.changeOpacity(win,-10);
   assert.equal(api.getDisplayState(win).opacity,0);
   api.setOpacity(win,NaN);

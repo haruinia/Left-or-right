@@ -14,6 +14,7 @@ let compact = false;
 let layout = 'standard';
 let expandedSize = {...EXPANDED};
 let onDisplayChange = null;
+let displayRevision = 0;
 let theme = 'light';
 let surface = {answer:false, shotCount:0, settingsOpen:false, notice:false};
 
@@ -155,7 +156,7 @@ function createWindow(config, { onMove, onDisplay } = {}) {
   return win;
 }
 
-// 不透明度：Gank 用 ⌘[ / ⌘] 调，范围 0.3–1，默认 1。
+// 背景不透明度：滑块按 1% 调整，⌘[ / ⌘] 每次调 10%。
 // 悬浮窗挡在题目上时，调低一点能看清底下的原文。
 const OPACITY_MIN = 0;
 const OPACITY_MAX = 1;
@@ -163,10 +164,11 @@ const OPACITY_STEP = 0.1;
 let opacity = .9;
 
 function getDisplayState(win) {
-  return {opacity, layout, compact, theme, ...surface, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
+  return {revision:displayRevision, opacity, layout, compact, theme, ...surface, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
 }
 
 function notifyDisplay(win) {
+  displayRevision += 1;
   const display = getDisplayState(win);
   if (win && !win.isDestroyed()) win.webContents.send('cockpit:display', display);
   onDisplayChange?.({panelOpacity: opacity, windowLayout: layout, panelTheme:theme, surfaceVersion:1});
@@ -175,7 +177,7 @@ function notifyDisplay(win) {
 
 function setOpacity(win, value) {
   if (!Number.isFinite(value)) return opacity;
-  opacity = Math.max(OPACITY_MIN, Math.min(OPACITY_MAX, Math.round(value * 10) / 10));
+  opacity = Math.max(OPACITY_MIN, Math.min(OPACITY_MAX, Math.round(value * 100) / 100));
   // 保持字与代码清晰，只调整 CSS 背景；不让整个窗口一起褪色。
   if (win && !win.isDestroyed()) win.setOpacity(1);
   notifyDisplay(win);

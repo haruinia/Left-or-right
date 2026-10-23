@@ -49,7 +49,8 @@ async(page)=>{
   await page.screenshot({path:'output/playwright/toolbar-answer-light.png'});
   await page.locator('#liuwaDisplay > summary').click();
   await page.waitForFunction(()=>!document.querySelector('#quickProgrammingLanguage').disabled);
-  await page.locator('#quickProgrammingLanguage').fill('Java');await page.locator('#quickProgrammingLanguage').dispatchEvent('change');
+  if(await page.locator('#quickProgrammingLanguage').evaluate(e=>e.tagName)!=='SELECT')throw Error('programming language is not a directly selectable dropdown');
+  await page.locator('#quickProgrammingLanguage').selectOption('Java');
   await page.waitForFunction(()=>document.querySelector('#quickProgrammingLanguage').value==='Java'&&!document.querySelector('#quickProgrammingLanguage').disabled);
   await page.locator('#quickAnswerLanguage').selectOption('en-US');
   await page.waitForFunction(()=>!document.querySelector('#quickAnswerLanguage').disabled);

@@ -30,8 +30,27 @@
           <div class="liuwa-display-panel">
             <header class="liuwa-settings-title"><strong>快捷设置</strong><button type="button" id="liuwaCloseSettings" aria-label="关闭快捷设置">×</button></header>
             <label for="quickProgrammingLanguage">编程语言</label>
-            <input id="quickProgrammingLanguage" list="quickLanguages" maxlength="80" disabled />
-            <datalist id="quickLanguages"><option value="Python"><option value="Java"><option value="C++"><option value="JavaScript"><option value="TypeScript"><option value="Go"><option value="Rust"><option value="C"><option value="SQL"></datalist>
+            <select id="quickProgrammingLanguage" disabled>
+              <option value="Python">Python</option>
+              <option value="Java">Java</option>
+              <option value="C++">C++</option>
+              <option value="C">C</option>
+              <option value="JavaScript">JavaScript</option>
+              <option value="TypeScript">TypeScript</option>
+              <option value="Go">Go</option>
+              <option value="Rust">Rust</option>
+              <option value="C#">C#</option>
+              <option value="Kotlin">Kotlin</option>
+              <option value="Swift">Swift</option>
+              <option value="PHP">PHP</option>
+              <option value="Ruby">Ruby</option>
+              <option value="SQL">SQL</option>
+              <option value="R">R</option>
+              <option value="Scala">Scala</option>
+              <option value="Dart">Dart</option>
+              <option value="Objective-C">Objective-C</option>
+              <option value="Bash">Bash</option>
+            </select>
             <label for="quickAnswerLanguage">回答语言</label>
             <select id="quickAnswerLanguage" disabled><option value="zh-CN">中文</option><option value="en-US">English</option></select>
             <div class="liuwa-theme-options" role="group" aria-label="外观模式">
@@ -49,7 +68,7 @@
             <label for="quickCaptureMode">截图方式</label><select id="quickCaptureMode" disabled><option value="area">局部截图</option><option value="full">全屏截图</option></select>
             <label for="quickDisplay">显示器</label><select id="quickDisplay" disabled><option>正在读取…</option></select>
             <label for="liuwaOpacity">背景不透明度 <output id="liuwaOpacityValue">90%</output></label>
-            <input type="range" id="liuwaOpacity" min="0" max="100" step="10" value="90" />
+            <input type="range" id="liuwaOpacity" min="0" max="100" step="1" value="90" />
             <label for="liuwaLayout">回答窗口</label><select id="liuwaLayout"><option value="narrow">窄长</option><option value="standard">标准</option><option value="wide">宽屏</option></select>
             <button type="button" id="liuwaCompact">收起回答</button>
             <p id="liuwaDisplayStatus" role="status"></p>
