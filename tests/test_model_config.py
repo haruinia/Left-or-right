@@ -1,0 +1,109 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from libs.common.config import get_settings
+from services.gateway import model_config
+
+
+@pytest.fixture(autouse=True)
+def _isolated_store(tmp_path: Path, monkeypatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LLM_PROFILES_PATH", str(tmp_path / "model_profiles.json"))
+    get_settings.cache_clear()
+    yield tmp_path / "model_profiles.json"
+    get_settings.cache_clear()
+
+
+def _save(**overrides):
+    base = {
+        "name": "测试接入",
+        "llm_model": "model-a",
+        "llm_base_url": "https://api.example.test/v1",
+        "llm_protocol": "openai_chat",
+        "llm_api_key": "secret-key",
+    }
+    base.update(overrides)
+    return model_config.save_profile(model_config.ProfileInput(**base))
+
+
+def test_saved_profile_drives_runtime_settings_and_hides_key(tmp_path) -> None:
+    data = _save()
+    active = next(item for item in data["profiles"] if item["id"] == data["active_profile_id"])
+    assert active["llm_model"] == "model-a"
+    assert active["llm_api_key_configured"] is True
+    assert "llm_api_key" not in active
+    assert "secret-key" not in json.dumps(data)
+
+    settings = get_settings()
+    assert settings.llm_base_url == "https://api.example.test/v1"
+    assert settings.llm_protocol == "openai_chat"
+    assert settings.llm_max_tokens == 16384
+
+    stored = json.loads((tmp_path / "model_profiles.json").read_text(encoding="utf-8"))
+    assert stored["profiles"][0]["llm_api_key"] == "secret-key"
+
+
+def test_new_connection_does_not_inherit_the_old_key() -> None:
+    _save()
+    data = _save(
+        name="另一家",
+        llm_base_url="https://other.example.test/v1",
+        llm_model="model-b",
+        llm_api_key="",
+        profile_id="",
+    )
+    active = next(item for item in data["profiles"] if item["id"] == data["active_profile_id"])
+    assert active["llm_api_key_configured"] is False
+    assert get_settings().llm_api_key == ""
+
+
+def test_empty_key_on_same_connection_keeps_the_saved_key() -> None:
+    _save()
+    data = _save(llm_model="model-c", llm_api_key="")
+    active = next(item for item in data["profiles"] if item["id"] == data["active_profile_id"])
+    assert active["llm_api_key_configured"] is True
+    assert get_settings().llm_api_key == "secret-key"
+
+
+def test_import_accepts_common_aliases_without_activating(tmp_path) -> None:
+    before = get_settings().llm_base_url
+    data = model_config.import_profiles(
+        [
+            {"base_url": "https://imported.example.test/v1", "model": "model-x", "api_key": "k"},
+            {"llm_base_url": "https://two.example.test", "llm_model": "model-y", "max_tokens": 4096},
+        ]
+    )
+    assert data["imported"] == 2
+    assert len(data["profiles"]) == 3
+    assert get_settings().llm_base_url == before
+    assert '"api_key":"k"' not in json.dumps(data)
+    assert not any(item.get("llm_api_key") for item in data["profiles"])
+    imported = next(item for item in data["profiles"] if item["llm_model"] == "model-y")
+    assert imported["llm_max_tokens"] == 4096
+
+
+def test_import_rejects_bad_input_without_writing(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        model_config.import_profiles({"model": "only-model"})
+    with pytest.raises(ValueError):
+        model_config.import_profiles("not json data")
+    with pytest.raises(ValueError):
+        model_config.import_profiles({"base_url": "https://user:pass@host/v1", "model": "m"})
+    assert not (tmp_path / "model_profiles.json").exists()
+
+
+def test_invalid_extra_body_and_protocol_are_rejected() -> None:
+    with pytest.raises(ValueError):
+        _save(llm_extra_body_json="{bad")
+    with pytest.raises(ValueError):
+        _save(llm_protocol="grpc")
+
+
+def test_delete_keeps_at_least_one_profile() -> None:
+    data = _save()
+    with pytest.raises(ValueError):
+        model_config.delete_profile(data["active_profile_id"])

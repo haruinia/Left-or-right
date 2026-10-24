@@ -20,13 +20,18 @@ async function waitForHealth(gatewayUrl, { timeoutMs = 30000, intervalMs = 500 }
   return false;
 }
 
+function backendArgs(config) {
+  const url = new URL(config.gatewayUrl);
+  return ['scripts/run_gateway.py', '--host', url.hostname, '--port', url.port || '9958'];
+}
+
 function startBackend(config) {
   if (child) return child;
   const root = repoRoot();
   const python = path.isAbsolute(config.pythonPath)
     ? config.pythonPath
     : path.join(root, config.pythonPath);
-  child = spawn(python, ['scripts/run_gateway.py'], {
+  child = spawn(python, backendArgs(config), {
     cwd: root,
     stdio: 'inherit',
     env: process.env,
@@ -43,4 +48,4 @@ function stopBackend() {
   child = null;
 }
 
-module.exports = { startBackend, stopBackend, waitForHealth };
+module.exports = { backendArgs, startBackend, stopBackend, waitForHealth };

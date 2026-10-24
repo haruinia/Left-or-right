@@ -28,6 +28,15 @@ def test_settings_rejects_out_of_range_runtime_thresholds() -> None:
         Settings(probe_min_interval_ms=-1)
 
 
+def test_settings_validates_llm_output_budget_and_protocol() -> None:
+    assert Settings().llm_max_tokens == 16384
+    assert Settings(llm_max_tokens=0).llm_max_tokens == 0
+    with pytest.raises(ValidationError):
+        Settings(llm_max_tokens=-1)
+    with pytest.raises(ValidationError):
+        Settings(llm_protocol="grpc")
+
+
 def test_settings_rejects_invalid_llm_extra_body_json() -> None:
     with pytest.raises(ValidationError, match="LLM_EXTRA_BODY_JSON must be valid JSON"):
         Settings(llm_extra_body_json="{bad-json")

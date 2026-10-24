@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 const local = new Map();
-globalThis.window = { location: { origin: 'http://127.0.0.1:9958', search: '' }, __GATEWAY_KEY__: 'shell-key' };
+globalThis.window = { location: { origin: 'file://', protocol: 'file:', search: '' }, __GATEWAY_KEY__: 'shell-key' };
 globalThis.sessionStorage = { getItem: () => null };
 globalThis.localStorage = {
   getItem: key => local.get(key) ?? null,
@@ -19,7 +19,7 @@ test('legacy migration only acknowledges durable success, retries failure and ne
   globalThis.fetch = async (url, options) => {
     calls.push({ url, options });
     if (unavailable) throw new TypeError('offline');
-    if (url.endsWith('/health')) return { ok: true, json: async () => ({ service: url.includes(':9958') ? 'static-settings' : 'shuihuo-killer-gateway' }) };
+    if (url.endsWith('/health')) return { ok: true, json: async () => ({ service: 'shuihuo-killer-gateway' }) };
     return { ok: true, json: async () => url.endsWith('/migrate') ? { ok: true } : { items: old } };
   };
   await assert.rejects(store.list(), /启动网关后重试/);
@@ -31,7 +31,7 @@ test('legacy migration only acknowledges durable success, retries failure and ne
   const migrated = calls.find(call => call.url.endsWith('/migrate') && call.options.body);
   assert.deepEqual(JSON.parse(migrated.options.body), { items: old });
   assert.equal(migrated.options.headers['X-API-Key'], 'shell-key');
-  assert.match(migrated.url, /^http:\/\/127\.0\.0\.1:8001\//);
+  assert.match(migrated.url, /^http:\/\/127\.0\.0\.1:9958\//);
 });
 
 test('per-record writes and deletes do not send stale collection snapshots', async () => {

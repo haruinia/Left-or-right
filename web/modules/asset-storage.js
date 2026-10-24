@@ -14,6 +14,14 @@ async function gatewayOrigin() {
       .filter((origin, index, values) => origin && values.indexOf(origin) === index);
     for (const candidate of candidates) {
       const origin = candidate.replace(/\/$/, "");
+      if (!/^https?:\/\//.test(origin)) continue;
+      // 设置页和学习资产同源：直接使用页面来源，静态页不能再冒充网关。
+      if (typeof window !== "undefined" && window.location?.origin === origin
+          && /^https?:$/.test(window.location.protocol)) {
+        discoveredOrigin = origin;
+        state.apiOrigin = origin;
+        return origin;
+      }
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 2500);
       try {

@@ -1,4 +1,4 @@
-const defaultGatewayOrigin = "http://127.0.0.1:8001";
+const defaultGatewayOrigin = "http://127.0.0.1:9958";
 
 // Under the desktop shell the page is loaded from disk, so window.location.origin
 // is "null" and cannot locate the gateway; the shell injects its configured URL.
@@ -165,10 +165,10 @@ const supportedDocumentMimeTypes = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]);
 const fallbackGatewayOrigins = [
-  readStoredGatewayOrigin(),
   shellGatewayOrigin(),
+  readStoredGatewayOrigin(),
   defaultGatewayOrigin,
-  "http://localhost:8001",
+  "http://localhost:9958",
 ].filter((origin, index, origins) => origin && origins.indexOf(origin) === index);
 
 

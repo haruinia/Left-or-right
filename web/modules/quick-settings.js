@@ -1,4 +1,4 @@
-import {state, fallbackGatewayOrigins} from './state.js';
+import {state} from './state.js';
 import {applyDisplay} from './display.js';
 
 const byId = id => document.getElementById(id);
@@ -7,23 +7,19 @@ const reader = document.querySelector('.liuwa-reader');
 const status = byId('quickSettingsStatus');
 const notice = text => { if(status) status.textContent = text; };
 const fields = {study_language:'quickProgrammingLanguage',answer_language:'quickAnswerLanguage',assistant_role:'quickIdentity'};
-let initialized = false;
 let modelsLoading = false;
 let ui = null;
 let origin = '';
 
-async function gateway() {
-  if(origin)return origin;
-  for(const candidate of [...new Set([state.apiOrigin,window.__GATEWAY_URL__,...fallbackGatewayOrigins].filter(Boolean))]) {
-    try {const response=await fetch(`${candidate}/health`,{signal:AbortSignal.timeout(2000)});if(response.ok&&(await response.json()).service==='shuihuo-killer-gateway'){origin=candidate;state.apiOrigin=origin;return origin;}}
-    catch{}
-  }
-  throw Error('本地服务未连接');
+function gateway() {
+  // 页面与 API 同源：直接用当前 origin，避免重复探测拖慢每次打开。
+  origin = state.apiOrigin || window.location.origin;
+  return origin;
 }
 
 async function request(path, body, method = 'POST') {
   const key = state.gatewayApiKey || window.__GATEWAY_KEY__ || '';
-  const response = await fetch(`${await gateway()}${path}`, {method:body === undefined?'GET':method,cache:'no-store',
+  const response = await fetch(`${gateway()}${path}`, {method:body === undefined?'GET':method,cache:'no-store',
     headers:{...(key?{'X-API-Key':key}:{}),...(body===undefined?{}:{'Content-Type':'application/json'})},
     ...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(9000)});
   const data=await response.json();
@@ -37,7 +33,9 @@ function hydrateUi(data) {
     const input=byId(id), value=data[key] || '';
     // Preserve languages configured in advanced settings, even outside the common list.
     if(key==='study_language' && value && ![...input.options].some(option=>option.value===value)) input.add(new Option(value,value));
-    input.value=value;input.disabled=false;
+    input.value=value;
+    if(key==='study_language' && value==='') input.selectedIndex=-1;
+    input.disabled=false;
   }
 }
 function hydrateCapture(config) {
@@ -50,37 +48,30 @@ function hydrateCapture(config) {
   byId('quickDisplay').replaceChildren(...options.displays.map(d=>new Option(`${d.label} · ${d.width}×${d.height}`,d.id)));
   byId('quickDisplay').value=options.displayId;byId('quickDisplay').disabled=false;
 }
-function syncActiveModelPreset(currentModel) {
-  const container = byId('quickModelPresets');
-  if(!container) return;
-  for(const btn of container.querySelectorAll('button[data-model]')) {
-    btn.setAttribute('aria-pressed', btn.dataset.model === currentModel ? 'true' : 'false');
-  }
-}
 async function loadModels() {
   if(modelsLoading)return;modelsLoading=true;byId('quickRefreshModels').disabled=true;
   try {
     const data=await request('/api/config/models');
-    byId('quickScreenshotModel').value=data.screenshot_model;
-    byId('quickInterviewModel').value=data.interview_model;
-    const knownModels = ['antigravity/claude-opus-4-6-thinking','antigravity/gemini-3.8-flash-high','workbuddy/deepseek-v4.1-flash','qoder/dfmodel'];
-    const allModels = [...new Set([...(data.models || []), ...knownModels])];
-    byId('quickModelOptions').replaceChildren(...allModels.map(name=>new Option(name,name)));
-    syncActiveModelPreset(data.interview_model);
-    for(const id of ['quickScreenshotModel','quickInterviewModel','quickSaveModels'])byId(id).disabled=false;
+    const summary=byId('quickModelSummary');
+    if(summary) summary.textContent = data.interview_model
+      ? `${data.interview_model}${data.screenshot_model && data.screenshot_model !== data.interview_model ? ` · 截图 ${data.screenshot_model}` : ''}`
+      : '尚未配置模型';
     if(data.warning)notice(data.warning);
-  } catch(error) {notice(`模型列表读取失败：${error.message}`);}
+  } catch(error) {notice(`模型状态读取失败：${error.message}`);}
   finally {modelsLoading=false;byId('quickRefreshModels').disabled=false;}
 }
-export async function loadQuickSettings() {
-  if(initialized)return;
-  try {hydrateUi(await request('/api/ui/settings'));initialized=true;notice('修改后自动保存。');}
+async function reloadSettings() {
+  try {hydrateUi(await request('/api/ui/settings'));notice('修改后自动保存。');}
   catch(error){notice(`读取失败：${error.message}`);}
   if(window.cockpit?.getConfig) {
     try {const config=await window.cockpit.getConfig();hydrateCapture(config);applyDisplay(config.display || {});}
     catch {notice('桌面设置读取失败，请重试。');}
   } else hydrateCapture({});
   await loadModels();
+}
+export async function loadQuickSettings() {
+  // 每次打开都重读：设置页或其他窗口改了语言、模型、显示器后，这里必须跟上。
+  await reloadSettings();
 }
 for(const [key,id] of Object.entries(fields))byId(id)?.addEventListener('change',async()=>{
   const input=byId(id), previous=ui?.[key];input.disabled=true;
@@ -94,35 +85,14 @@ for(const [id,key] of [['quickCaptureMode','mode'],['quickDisplay','displayId']]
   catch(error){notice(error.message);try{hydrateCapture(await window.cockpit.getConfig());}catch{}}
   finally {input.disabled=false;}
 });
-byId('quickModelPresets')?.addEventListener('click',async(event)=>{
-  const btn = event.target.closest('button[data-model]');
-  if(!btn) return;
-  const model = btn.dataset.model;
-  byId('quickScreenshotModel').value = model;
-  byId('quickInterviewModel').value = model;
-  syncActiveModelPreset(model);
-  const saveBtn = byId('quickSaveModels');
-  if(saveBtn) saveBtn.disabled = true;
-  try {
-    await request('/api/config/models', {screenshot_model: model, interview_model: model});
-    notice(`已切换模型为：${btn.textContent.trim()}`);
-  } catch(error) {
-    notice(error.message);
-  } finally {
-    if(saveBtn) saveBtn.disabled = false;
-  }
-});
-byId('quickSaveModels')?.addEventListener('click',async()=>{
-  const button=byId('quickSaveModels');button.disabled=true;
-  const interviewModel = byId('quickInterviewModel').value.trim();
-  try {
-    await request('/api/config/models',{screenshot_model:byId('quickScreenshotModel').value.trim(),interview_model:interviewModel});
-    syncActiveModelPreset(interviewModel);
-    notice('模型已保存，下次调用生效。');
-  } catch(error){notice(error.message);}finally{button.disabled=false;}
-});
+byId('quickManageModels')?.addEventListener('click',()=>openSettings('models'));
 byId('quickRefreshModels')?.addEventListener('click',loadModels);
-byId('quickAdvancedSettings')?.addEventListener('click',()=>window.cockpit?.openSettings ? window.cockpit.openSettings() : window.open('settings.html','_blank','noopener'));
+function openSettings(section = '') {
+  const url = `/settings${section ? `#${section}` : ''}`;
+  return window.cockpit?.openSettings ? window.cockpit.openSettings(section) : window.open(url,'_blank','noopener');
+}
+byId('quickAdvancedSettings')?.addEventListener('click',()=>openSettings('study'));
+byId('quickManageAssets')?.addEventListener('click',()=>openSettings('assets'));
 byId('liuwaCloseSettings')?.addEventListener('click',()=>{menu.open=false;});
 function fitPanel() {
   // Exclude the area behind the popover so translucent backgrounds do not stack

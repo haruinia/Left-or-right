@@ -19,7 +19,7 @@
             <p>在这里设好复习偏好，回到左右专心看题。</p>
           </div>
         </div>
-        <a class="button secondary" href="http://127.0.0.1:8001/">打开左右</a>
+        <a class="button secondary" href="/">打开左右</a>
       </header>
 
       <form id="studySettingsForm">
@@ -43,11 +43,37 @@
               <option value="教师资格"></option>
             </datalist>
           </label>
-          <label>语言偏好
-            <input id="studyLanguage" maxlength="80" placeholder="编程题填 Python、Java、C++；行测等可留空" />
+          <label>编程语言
+            <input id="studyLanguage" list="studyLanguageOptions" maxlength="80" placeholder="可留空，按题目指定语言；也可填写其他语言" />
+            <datalist id="studyLanguageOptions">
+              <option value="Python"></option>
+              <option value="Java"></option>
+              <option value="C++"></option>
+              <option value="C"></option>
+              <option value="JavaScript"></option>
+              <option value="TypeScript"></option>
+              <option value="Go"></option>
+              <option value="Rust"></option>
+              <option value="C#"></option>
+              <option value="Kotlin"></option>
+              <option value="Swift"></option>
+              <option value="SQL"></option>
+            </datalist>
+          </label>
+          <label>回答语言
+            <select id="studyAnswerLanguage">
+              <option value="zh-CN">中文</option>
+              <option value="en-US">English</option>
+            </select>
+          </label>
+          <label>我的身份
+            <select id="studyAssistantRole">
+              <option value="candidate">面试者</option>
+              <option value="interviewer">面试官</option>
+            </select>
           </label>
         </div>
-        <p class="small" id="studySpecialtyHint" hidden>这个方向按中文题型讲解，不会把编程语言发给模型。</p>
+        <p class="small" id="studySpecialtyHint" hidden>这个方向按考试题型作答，不会把编程语言发给模型。</p>
         <label>复习目标
           <textarea id="studyGoal" rows="2" maxlength="1000" placeholder="例如：看懂报错和当前代码；或行测数量关系与判断推理"></textarea>
         </label>
@@ -63,103 +89,92 @@
         </label>
       </section>
 
-      <section class="panel settings-card">
+      <section class="panel settings-card" id="models">
         <h2>大模型接入</h2>
-        <p class="small">截图由本地服务转发给当前模型。填写 OpenAI 兼容的模型信息，保存后立即生效并写入 .env（重启服务不丢失）。</p>
+        <p class="small">在这里管理接入方式和密钥。保存后立即生效；密钥只保存在本机，页面不会回显。</p>
         <label>
-          本地服务地址
-          <input
-            id="gatewayOrigin"
-            type="url"
-            inputmode="url"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="http://127.0.0.1:8001"
-            aria-label="Gateway 地址"
-          />
+          已保存的接入
+          <select id="llmProfileSelect"></select>
         </label>
-        <label>
-          服务访问密钥（选填）
-          <input
-            id="gatewayKey"
-            type="password"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            aria-label="Gateway Key"
-            placeholder="Gateway Key"
-          />
-        </label>
-        <label>
-          接口预设
-        </label>
-        <div class="preset-chips" id="providerPresetChips" role="group" aria-label="服务接入预设" style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button type="button" class="button secondary" id="presetLan" style="font-size:12px;padding:4px 10px;">局域网测试 (192.168.2.251)</button>
-          <button type="button" class="button secondary" id="presetSiliconFlow" style="font-size:12px;padding:4px 10px;">SiliconFlow (备用)</button>
+        <div class="settings-actions">
+          <button type="button" class="secondary" id="llmNewProfile">新建接入</button>
+          <button type="button" class="secondary" id="llmDeleteProfile">删除所选接入</button>
         </div>
-        <label>
-          模型
-          <input
-            id="llmModel"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="例如 deepseek-chat"
-            aria-label="模型名"
-            list="llmModelOptions"
-          />
-          <datalist id="llmModelOptions">
-            <option value="antigravity/claude-opus-4-6-thinking">Claude Opus 4.6 Thinking</option>
-            <option value="antigravity/gemini-3.8-flash-high">Gemini 3.8 Flash High</option>
-            <option value="workbuddy/deepseek-v4.1-flash">DeepSeek V4.1 Flash</option>
-            <option value="qoder/dfmodel">Qoder dfmodel (上游暂不可用)</option>
-            <option value="deepseek-ai/DeepSeek-V4.1-Flash">SiliconFlow DeepSeek</option>
-          </datalist>
-        </label>
-        <div class="preset-chips" id="modelPresetChips" role="group" aria-label="快速选择模型" style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button type="button" class="button secondary" data-preset-model="antigravity/claude-opus-4-6-thinking" style="font-size:11px;padding:3px 8px;">Claude Opus 4.6</button>
-          <button type="button" class="button secondary" data-preset-model="antigravity/gemini-3.8-flash-high" style="font-size:11px;padding:3px 8px;">Gemini 3.8 Flash</button>
-          <button type="button" class="button secondary" data-preset-model="workbuddy/deepseek-v4.1-flash" style="font-size:11px;padding:3px 8px;">DeepSeek V4.1</button>
-          <button type="button" class="button secondary" data-preset-model="qoder/dfmodel" style="font-size:11px;padding:3px 8px;opacity:0.6;">Qoder (异常)</button>
-          <button type="button" class="button secondary" data-preset-model="deepseek-ai/DeepSeek-V4.1-Flash" style="font-size:11px;padding:3px 8px;">SiliconFlow</button>
+        <div class="hotkey-grid">
+          <label>配置名称
+            <input id="llmProfileName" maxlength="60" placeholder="例如：局域网网关、云端备用" />
+          </label>
+          <label>接入方式
+            <select id="llmProtocol">
+              <option value="auto">自动识别</option>
+              <option value="openai_chat">OpenAI Chat Completions</option>
+              <option value="openai_responses">OpenAI Responses</option>
+              <option value="anthropic_messages">Anthropic Messages</option>
+            </select>
+          </label>
         </div>
-        <label>
-          模型接口地址（OpenAI 兼容）
-          <input
-            id="llmBaseUrl"
-            type="url"
-            inputmode="url"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="https://api.deepseek.com/v1"
-            aria-label="模型接口地址"
-          />
+        <label>接口地址
+          <input id="llmBaseUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1 或完整的 /chat/completions 地址" />
         </label>
-        <label>
-          模型 API Key（留空表示不修改）
-          <input
-            id="llmApiKey"
-            type="password"
-            autocomplete="off"
-            autocapitalize="off"
-            spellcheck="false"
-            placeholder="已配置则留空即可"
-            aria-label="模型 API Key"
-          />
+        <div class="hotkey-grid">
+          <label>模型
+            <input id="llmModel" list="llmModelOptions" maxlength="160" placeholder="例如 deepseek-chat" />
+            <datalist id="llmModelOptions"></datalist>
+          </label>
+          <label>截图模型（选填）
+            <input id="llmVisionModel" list="llmModelOptions" maxlength="160" placeholder="留空则用上面的模型" />
+          </label>
+        </div>
+        <div class="hotkey-grid">
+          <label>单次输出额度（tokens）
+            <input id="llmMaxTokens" type="number" min="0" max="1000000" step="1024" value="16384" />
+          </label>
+          <label>API Key（留空表示不修改）
+            <input id="llmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="未配置" />
+          </label>
+        </div>
+        <label class="consent-row">
+          <input type="checkbox" id="llmClearKey" />
+          <span>清除已保存的密钥<span class="small">切换供应商时不会自动沿用旧密钥。</span></span>
         </label>
-        <p class="small" id="connectedModel">等待读取模型配置</p>
-        <p class="small">服务地址与访问密钥只用于当前浏览器会话；模型鉴权方式（LLM_AUTH_HEADER）等高级选项仍在 .env 中维护。</p>
-        <p class="small">本地 Codex：待接入。接入后继续使用同一个截图提问入口。</p>
-        <div class="settings-status-row">
-          <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
+        <p class="small" id="llmProfileState">正在读取接入配置…</p>
+        <details class="settings-disclosure" id="llmAdvanced">
+          <summary>高级选项 <span>路径、鉴权头和附加请求体</span></summary>
+          <div class="hotkey-grid">
+            <label>接口路径<input id="llmApiPath" maxlength="200" placeholder="/chat/completions" /></label>
+            <label>鉴权头<input id="llmAuthHeader" maxlength="60" placeholder="Authorization" /></label>
+            <label>鉴权前缀<input id="llmAuthScheme" maxlength="60" placeholder="Bearer" /></label>
+            <label>响应内容字段<input id="llmResponsePath" maxlength="200" placeholder="choices.0.message.content" /></label>
+          </div>
+          <label>附加请求体（JSON 对象）
+            <textarea id="llmExtraBody" rows="3" maxlength="20000" placeholder="仅填写服务商要求的其他参数"></textarea>
+          </label>
+        </details>
+        <div class="settings-actions">
+          <button type="button" id="saveLlmProfile" title="保存并启用这套接入">保存并启用</button>
+          <button class="secondary" type="button" id="saveLlmApiOnly">只保存密钥</button>
+          <button class="secondary" type="button" id="checkModel" title="用已保存的配置调用一次真实模型">检查连接</button>
           <span class="status-pill" id="modelStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>模型检查中</span></span>
         </div>
+        <p class="small" id="connectedModel">等待读取模型配置</p>
+        <details class="settings-disclosure" id="llmImport">
+          <summary>导入配置 <span>粘贴或选择 JSON</span></summary>
+          <p class="small">支持单条或数组，字段可为 llm_base_url / llm_model / llm_api_key，也支持 base_url、model、api_key、max_tokens 等常见写法。导入后需手动保存并启用。</p>
+          <label>配置 JSON
+            <textarea id="llmImportText" rows="5" maxlength="60000" placeholder='{"base_url":"https://api.example.com/v1","model":"model-name","api_key":"..."}'></textarea>
+          </label>
+          <label>或选择文件
+            <input type="file" id="llmImportFile" accept="application/json,.json" />
+          </label>
+          <div class="settings-actions">
+            <button type="button" class="secondary" id="importLlmProfile">解析并导入</button>
+          </div>
+          <p class="small" id="llmImportState" role="status"></p>
+        </details>
         <div class="settings-actions">
-          <button type="button" id="saveLlmConfig" title="保存模型配置到本地服务，立即生效并写入 .env">保存模型</button>
-          <button type="button" id="saveGatewayKey" title="保存当前浏览器会话使用的 Gateway Key">保存接入</button>
           <button class="secondary" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
-          <button class="secondary" type="button" id="checkModel" title="调用真实模型检查连接">检查模型</button>
-          <a class="button secondary" href="http://127.0.0.1:8001/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
+          <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
+          <a class="button secondary" href="/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
         </div>
       </section>
 
@@ -344,7 +359,7 @@
         <h2>面试工作台</h2>
         <p class="small">原来的实时面试、语音转写、追问和评分仍可单独使用。</p>
         <div class="settings-actions">
-          <a class="button secondary" href="http://127.0.0.1:8001/cockpit" target="_blank" rel="noopener">打开旧版工作台</a>
+          <a class="button secondary" href="/cockpit" target="_blank" rel="noopener">打开旧版工作台</a>
           <button class="secondary" type="button" id="checkAsr">检查语音服务</button>
           <span class="status-pill" id="asrStatus" role="status"><span class="status-dot"></span><span>待检查</span></span>
           <button class="secondary" type="button" id="loadSampleSettings">填入岗位与简历样例</button>

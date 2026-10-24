@@ -27,6 +27,8 @@ class RuntimeStatus(BaseModel):
     llm_base_url: str
     llm_base_url_configured: bool
     llm_api_path: str
+    llm_protocol: str
+    llm_max_tokens: int
     llm_api_key_configured: bool
     llm_auth_header: str
     llm_auth_scheme_configured: bool
@@ -112,6 +114,8 @@ def get_runtime_status() -> RuntimeStatus:
         llm_base_url=settings.llm_base_url,
         llm_base_url_configured=bool(settings.llm_base_url),
         llm_api_path=settings.llm_api_path,
+        llm_protocol=settings.llm_protocol,
+        llm_max_tokens=settings.llm_max_tokens,
         llm_api_key_configured=bool(settings.llm_api_key),
         llm_auth_header=settings.llm_auth_header,
         llm_auth_scheme_configured=bool(settings.llm_auth_scheme),

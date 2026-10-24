@@ -37,10 +37,12 @@ def test_load_next_options_prompt_reads_prompt_file() -> None:
 def test_load_liuwa_chat_prompt_reads_prompt_file() -> None:
     prompt = load_prompt("liuwa_chat.md")
 
-    assert prompt.startswith("你是一位通用解题助手")
+    assert prompt.startswith("你是一名解题助手")
     assert "## 解题思路" in prompt
-    assert "{language}" in prompt
+    assert "{code_line}" in prompt
     assert "{answer_language}" in prompt
+    assert "liuwa:type=choice" in prompt
+    assert "## 代码" in prompt
     assert prompt == prompt.strip()
 
 

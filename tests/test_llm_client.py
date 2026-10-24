@@ -444,6 +444,7 @@ def test_text_only_payload_is_unchanged_by_vision_support(monkeypatch) -> None:
     monkeypatch.setenv("LLM_MODEL", "text-model")
     monkeypatch.setenv("VISION_MODEL", "vision-model")
     monkeypatch.setenv("LLM_EXTRA_BODY_JSON", "")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "0")
     get_settings.cache_clear()
 
     assert _text_payload_regression_case() == {
@@ -455,6 +456,76 @@ def test_text_only_payload_is_unchanged_by_vision_support(monkeypatch) -> None:
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
     }
+
+
+def test_output_budget_is_sent_and_extra_body_cannot_override_core_fields(monkeypatch) -> None:
+    from libs.llm_client.client import _request_payload
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_MODEL", "text-model")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "16384")
+    monkeypatch.setenv("LLM_EXTRA_BODY_JSON", '{"top_p":0.9}')
+    get_settings.cache_clear()
+    payload = _request_payload([LLMMessage(role="user", content="hi")], stream=True, json_object=False)
+    assert payload["max_tokens"] == 16384
+    assert payload["top_p"] == 0.9
+
+    monkeypatch.setenv("LLM_EXTRA_BODY_JSON", '{"max_tokens":1}')
+    get_settings.cache_clear()
+    import pytest
+
+    with pytest.raises(ValueError, match="max_tokens"):
+        _request_payload([LLMMessage(role="user", content="hi")], stream=True, json_object=False)
+
+
+def test_protocol_is_inferred_from_full_endpoint_and_explicit_choice_wins(monkeypatch) -> None:
+    from libs.llm_client.client import _endpoint_url, resolve_protocol
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/v1/chat/completions")
+    monkeypatch.setenv("LLM_API_PATH", "/chat/completions")
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert resolve_protocol(settings) == "openai_chat"
+    assert _endpoint_url(settings) == "https://llm.example.test/v1/chat/completions"
+
+    monkeypatch.setenv("LLM_PROTOCOL", "anthropic_messages")
+    get_settings.cache_clear()
+    assert resolve_protocol(get_settings()) == "anthropic_messages"
+
+
+def test_stream_length_finish_reports_incomplete_and_unexpected_eof_is_not_success(monkeypatch) -> None:
+    import asyncio
+
+    import pytest
+
+    from libs.llm_client import LLMStreamIncomplete
+
+    monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/v1")
+    monkeypatch.setenv("LLM_API_KEY", "secret")
+    monkeypatch.setenv("LLM_AUTH_HEADER", "Authorization")
+    monkeypatch.setenv("LLM_AUTH_SCHEME", "Bearer")
+    monkeypatch.setenv("LLM_PROTOCOL", "openai_chat")
+    get_settings.cache_clear()
+
+    def run(content: bytes) -> list[str]:
+        def handler(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=content)
+
+        async def collect() -> list[str]:
+            client = LLMClient(async_transport=httpx.MockTransport(handler))
+            return [piece async for piece in client.stream_text([LLMMessage(role="user", content="hi")])]
+
+        return asyncio.run(collect())
+
+    with pytest.raises(LLMStreamIncomplete):
+        run(
+            'data: {"choices":[{"delta":{"content":"一半"},"finish_reason":"length"}]}\n\n'.encode()
+        )
+    with pytest.raises(LLMStreamIncomplete):
+        run('data: {"choices":[{"delta":{"content":"half"}}]}\n\n'.encode())
+    assert "".join(run('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'.encode())) == "ok"
 
 
 def test_image_message_becomes_content_parts_and_selects_vision_model(monkeypatch) -> None:

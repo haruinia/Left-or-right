@@ -4,7 +4,9 @@ import asyncio
 import base64
 import binascii
 import json
+import os
 import re
+import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,6 +76,7 @@ from services.document_service import parse_document
 from services.chat_service import iter_chat_deltas
 from services.chat_service.service import build_chat_messages
 from services.gateway.learning_assets import router as learning_assets_router
+from services.gateway import model_config
 from services.exam_service import solve_exam_screenshot
 from services.memory_service import (
     delete_candidate_memories,
@@ -317,6 +320,14 @@ async def lifespan(fastapi_app: FastAPI):
     configure_opentelemetry(fastapi_app, get_settings())
     configure_asr_runtime()
     init_db()
+    try:
+        profiles, active = model_config.load_store()
+        profile = next((item for item in profiles if item.id == active), None)
+        if profile is not None:
+            model_config.apply_profile(profile)
+    except (OSError, ValueError):
+        # A damaged profile store must not stop the gateway; .env remains usable.
+        pass
     yield
 
 
@@ -326,7 +337,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["null", "file://"],  # Electron loadFile 的本地页面来源
     allow_origin_regex=LOCAL_DEV_ORIGIN_REGEX,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
@@ -496,45 +507,63 @@ def config_status() -> RuntimeStatus:
     return get_runtime_status()
 
 
-class LlmConfigUpdate(BaseModel):
-    llm_model: str
-    llm_base_url: str
-    llm_api_key: str = ""
+@app.get("/api/config/llm/profiles")
+def llm_profiles():
+    return model_config.list_response()
 
 
 @app.post("/api/config/llm", response_model=RuntimeStatus)
-def update_llm_config(payload: LlmConfigUpdate) -> RuntimeStatus:
-    """保存设置页提交的模型接入配置：立即生效，并写回 .env 以便重启后保留。"""
-    model = payload.llm_model.strip()
-    base_url = payload.llm_base_url.strip()
-    if not model:
+def update_llm_config(payload: model_config.ProfileInput) -> RuntimeStatus:
+    """保存并启用一套模型接入配置；密钥只写在本机私有存储。"""
+    if not payload.llm_model.strip():
         raise HTTPException(status_code=422, detail="模型名不能为空")
-    if not base_url.startswith(("http://", "https://")):
+    if not payload.llm_base_url.startswith(("http://", "https://")):
         raise HTTPException(status_code=422, detail="接口地址必须以 http:// 或 https:// 开头")
-    settings = get_settings()
-    settings.llm_provider = "openai_compatible"
-    settings.llm_model = model
-    settings.llm_base_url = base_url.rstrip("/")
-    new_api_key = payload.llm_api_key.strip()
-    if new_api_key:
-        settings.llm_api_key = new_api_key
-    _persist_llm_env(
-        llm_model=settings.llm_model,
-        llm_base_url=settings.llm_base_url,
-        llm_api_key=new_api_key,
-    )
+    try:
+        model_config.save_profile(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="模型配置保存失败，请重试") from exc
+    # 兼容只读 .env 的旧路径：主配置仍以模型配置文件为准。
+    updates = {
+        "LLM_PROVIDER": "openai_compatible",
+        "LLM_MODEL": payload.llm_model.strip(),
+        "LLM_BASE_URL": payload.llm_base_url.strip().rstrip("/"),
+    }
+    if payload.llm_api_key.strip():
+        updates["LLM_API_KEY"] = payload.llm_api_key.strip()
+    try:
+        _persist_env_updates(updates)
+    except OSError:
+        pass
     return get_runtime_status()
 
 
-def _persist_llm_env(*, llm_model: str, llm_base_url: str, llm_api_key: str) -> None:
-    updates = {
-        "LLM_PROVIDER": "openai_compatible",
-        "LLM_MODEL": llm_model,
-        "LLM_BASE_URL": llm_base_url,
-    }
-    if llm_api_key:
-        updates["LLM_API_KEY"] = llm_api_key
-    _persist_env_updates(updates)
+@app.post("/api/config/llm/activate")
+def activate_llm_profile(payload: dict):
+    try:
+        return model_config.activate_profile(str(payload.get("profile_id", "")))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.delete("/api/config/llm/profiles/{profile_id}")
+def delete_llm_profile(profile_id: str):
+    try:
+        return model_config.delete_profile(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/config/llm/import")
+def import_llm_profiles(payload: model_config.ImportPayload):
+    try:
+        return model_config.import_profiles(payload.config)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=503, detail="导入保存失败，请重试") from exc
 
 
 def _persist_env_updates(updates: dict[str, str]) -> None:
@@ -553,7 +582,15 @@ def _persist_env_updates(updates: dict[str, str]) -> None:
     for key, value in updates.items():
         if key not in replaced:
             output.append(f"{key}={value}")
-    path.write_text("\n".join(output) + "\n", encoding="utf-8")
+    handle, temp_name = tempfile.mkstemp(dir=path.parent or Path("."), prefix=".env-")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write("\n".join(output) + "\n")
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, path)
+    except BaseException:
+        Path(temp_name).unlink(missing_ok=True)
+        raise
 
 
 class ModelSelection(BaseModel):
@@ -584,12 +621,18 @@ def select_models(payload: ModelSelection):
     if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,159}", value) for value in values.values()):
         raise HTTPException(422, "请输入有效的模型名称")
     try:
-        _persist_env_updates({"VISION_MODEL": values["screenshot_model"], "LLM_MODEL": values["interview_model"]})
+        model_config.update_models(values["screenshot_model"], values["interview_model"])
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except OSError as exc:
         raise HTTPException(503, "模型设置保存失败，请重试") from exc
-    settings = get_settings()
-    settings.vision_model = values["screenshot_model"]
-    settings.llm_model = values["interview_model"]
+    # 模型名同时写回 .env：旧脚本和未迁移的部署仍按这两个变量读取。
+    try:
+        _persist_env_updates(
+            {"VISION_MODEL": values["screenshot_model"], "LLM_MODEL": values["interview_model"]}
+        )
+    except OSError as exc:
+        raise HTTPException(503, "模型设置保存失败，请重试") from exc
     return _model_selection()
 
 
@@ -835,6 +878,7 @@ def index() -> str:
 
 
 @app.get("/settings", response_class=HTMLResponse)
+@app.get("/settings.html", response_class=HTMLResponse)
 def settings_page() -> str:
     return WEB_SETTINGS.read_text(encoding="utf-8")
 
@@ -1434,7 +1478,7 @@ async def api_parse_document(request: Request, kind: str = "resume", filename: s
 
 
 @app.post("/api/chat/stream")
-async def api_chat_stream(payload: ChatStreamRequest):
+async def api_chat_stream(request: Request, payload: ChatStreamRequest):
     study_settings = _read_ui_settings()
     try:
         build_chat_messages(payload, study_settings)
@@ -1442,12 +1486,20 @@ async def api_chat_stream(payload: ChatStreamRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def events():
+        stream = iter_chat_deltas(payload, study_settings)
         try:
-            async for delta in iter_chat_deltas(payload, study_settings):
+            async for delta in stream:
+                if await request.is_disconnected():
+                    return
                 yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'done': True})}\n\n"
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:  # noqa: BLE001 - stream errors to the client as SSE
+            # 出错时不再发送 done：前端据此保留已生成内容并标记为中断。
             yield f"data: {json.dumps({'error': _safe_public_error(str(exc))}, ensure_ascii=False)}\n\n"
+        finally:
+            await stream.aclose()
 
     return StreamingResponse(
         events(),

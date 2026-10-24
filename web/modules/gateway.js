@@ -226,7 +226,7 @@ function saveGatewayConnection() {
       if (originInput) originInput.value = origin;
       appendEvent("API 接入", `已使用网关地址 ${escapeHtml(origin)}。`, "green");
     } catch (error) {
-      appendEvent("API 接入", "网关地址无效，请填写形如 http://127.0.0.1:8001 的地址。", "red");
+      appendEvent("API 接入", "网关地址无效，请填写形如 http://127.0.0.1:9958 的地址。", "red");
       return;
     }
   }

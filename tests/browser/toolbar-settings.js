@@ -58,9 +58,7 @@ async(page)=>{
   await page.locator('#quickIdentity').selectOption('interviewer');
   await page.waitForFunction(()=>!document.querySelector('#quickIdentity').disabled);
   await page.locator('#quickCaptureMode').selectOption('full');await page.locator('#quickDisplay').selectOption('2');
-  await page.locator('#quickScreenshotModel').fill('model-c');await page.locator('#quickSaveModels').click();
-  await page.waitForFunction(()=>!document.querySelector('#quickSaveModels').disabled);
-  if(models[0]?.screenshot_model!=='model-c'||models[0]?.interview_model!=='text-b')throw Error('separate model choices were not saved');
+  await page.waitForFunction(()=>/vision-a|text-b/.test(document.querySelector('#quickModelSummary')?.textContent||''));
   await page.locator('[data-theme-mode="dark"]').click();
   const dark=await page.locator('.liuwa-reader').evaluate(e=>({bg:getComputedStyle(e).backgroundColor,ink:getComputedStyle(e).color}));
   if(!dark.bg.includes('22, 30, 46'))throw Error('dark appearance is not applied');

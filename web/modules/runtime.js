@@ -97,27 +97,12 @@ function setRuntimeStatusFromGateway(status) {
 function applyRuntimeConfig(config) {
   state.debugTextInputEnabled = config.debug_text_input_enabled !== false;
   applyDebugTextVisibility();
+  // 模型表单由 model-config.js 负责填充；这里只刷新状态，避免覆盖未保存的草稿。
   const connectedModel = document.querySelector("#connectedModel");
   if (connectedModel) {
     connectedModel.textContent = config.llm_model
       ? `${config.llm_provider} · ${config.llm_model}`
       : "未配置模型";
-  }
-  const llmModel = document.querySelector("#llmModel");
-  if (llmModel && document.activeElement !== llmModel) {
-    llmModel.value = config.llm_model || "";
-  }
-  const llmBaseUrl = document.querySelector("#llmBaseUrl");
-  if (llmBaseUrl && document.activeElement !== llmBaseUrl) {
-    llmBaseUrl.value = config.llm_base_url || "";
-  }
-  const llmApiKey = document.querySelector("#llmApiKey");
-  if (llmApiKey) {
-    llmApiKey.placeholder = config.llm_api_key_configured ? "已配置，留空保持不变" : "尚未配置";
-  }
-  const originInput = document.querySelector("#gatewayOrigin");
-  if (originInput && document.activeElement !== originInput) {
-    originInput.value = state.apiOrigin;
   }
 }
 

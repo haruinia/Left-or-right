@@ -275,7 +275,11 @@ function registerIpc() {
     const saved = saveConfig({screenshotMode:config.screenshotMode || 'area',captureDisplayId:config.captureDisplayId || ''});
     return {...captureOptions(),saved};
   });
-  ipcMain.handle('cockpit:openSettings', () => shell.openExternal('http://127.0.0.1:9958/settings.html'));
+  ipcMain.handle('cockpit:openSettings', (_event, section) => {
+    // 只接受固定分区的深链接，避免渲染层可导航到任意地址。
+    const anchor = ['study', 'models', 'assets'].includes(section) ? `#${section}` : '';
+    return shell.openExternal(`${config.gatewayUrl}/settings${anchor}`);
+  });
   ipcMain.handle('liuwa:reset-view', () => { if(win && !win.isDestroyed()) win.webContents.send('liuwa:reset-view'); });
   ipcMain.handle('cockpit:toggleVisible', () => {
     toggleVisible(win);

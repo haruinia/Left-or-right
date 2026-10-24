@@ -29,11 +29,11 @@ def test_build_chat_messages_uses_liuwa_prompt_and_images(monkeypatch) -> None:
     assert messages[0].role == "system"
     expected = (
         load_prompt("liuwa_chat.md")
-        .replace("{language}", "Python")
+        .replace("{code_line}", "编程题按题目要求的语言给出完整可运行实现")
         .replace("{answer_language}", "中文")
     )
     assert messages[0].content == expected
-    assert "{language}" not in messages[0].content
+    assert "{code_line}" not in messages[0].content
     assert "{answer_language}" not in messages[0].content
     assert messages[1].content == "上一问"
     assert messages[-1].images == (data_url,)
@@ -52,6 +52,15 @@ def test_study_preface_enforces_selected_answer_and_code_language() -> None:
     preface = study_preface(UiSettings(study_language="Go", answer_language="en-US"))
     assert "所有自然语言正文必须使用 English" in preface
     assert "所有代码必须使用该语言" in preface
+    blank = study_preface(UiSettings(study_language="", answer_language="zh-CN"))
+    assert "编程语言：按题目要求。" in blank
+
+
+def test_english_direction_does_not_force_chinese_explanation() -> None:
+    settings = UiSettings(study_specialty="英语", answer_language="en-US")
+    assert "讲解用中文" not in _exam_prompt(settings)
+    assert "正文语言：English" in _exam_prompt(settings)
+    assert "编程题按题目要求的语言" in _exam_prompt(settings)
 
 
 def test_normalize_image_rejects_empty_and_oversize(monkeypatch) -> None:

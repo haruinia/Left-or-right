@@ -1,5 +1,5 @@
 {
-  "gatewayUrl": "http://127.0.0.1:9527",
+  "gatewayUrl": "http://127.0.0.1:9958",
   "gatewayApiKey": "dev",
   "spawnBackend": true,
   "pythonPath": ".venv/bin/python"

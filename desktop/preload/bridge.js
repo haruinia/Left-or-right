@@ -11,7 +11,7 @@ const api = {
   setDisplay: (patch) => ipcRenderer.invoke('cockpit:setDisplay', patch),
   setSurface: (patch) => ipcRenderer.invoke('cockpit:setSurface', patch),
   setCaptureOptions: (patch) => ipcRenderer.invoke('cockpit:setCaptureOptions', patch),
-  openSettings: () => ipcRenderer.invoke('cockpit:openSettings'),
+  openSettings: (section) => ipcRenderer.invoke('cockpit:openSettings', section),
   resetView: () => ipcRenderer.invoke('liuwa:reset-view'),
   onReset: (callback) => ipcRenderer.on('liuwa:reset-view', () => callback()),
   onDisplay: (callback) => ipcRenderer.on('cockpit:display', (_event, value) => callback(value)),

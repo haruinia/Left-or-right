@@ -3792,7 +3792,7 @@ def test_gateway_settings_page_hosts_interview_workbench(tmp_path: Path, monkeyp
     assert 'id="resumeText"' in page.text
     assert 'id="saveUiSettings"' in page.text
     assert 'src="modules/settings.js"' in page.text
-    assert 'href="http://127.0.0.1:8001/cockpit"' in page.text
+    assert 'href="/cockpit"' in page.text
     assert "<iframe" not in page.text
     assert 'id="studySpecialty"' in page.text
     assert 'id="studySpecialtyOptions"' in page.text
@@ -3980,6 +3980,7 @@ def test_quick_settings_patch_preserves_unrelated_fields(tmp_path, monkeypatch):
 def test_separate_models_are_persisted_and_route_to_the_actual_payload(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     client = _client(tmp_path, monkeypatch)
+    monkeypatch.setenv("LLM_PROFILES_PATH", str(tmp_path / "model_profiles.json"))
     (tmp_path/'.env').write_text('LLM_API_KEY=keep-existing-key\nLLM_BASE_URL=https://existing.test/v1\n')
     saved=client.post('/api/config/models',json={'screenshot_model':'provider/vision-v2','interview_model':'provider/text-v3'})
     assert saved.status_code == 200

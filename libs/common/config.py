@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     llm_model: str = "mimo-v2.5-pro"
     llm_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
     llm_api_path: str = "/chat/completions"
+    # auto: infer from the endpoint path; explicit values override it.
+    llm_protocol: Literal[
+        "auto", "openai_chat", "openai_responses", "anthropic_messages"
+    ] = "auto"
+    # 0 means "do not send an output budget"; providers then apply their own default.
+    llm_max_tokens: int = Field(default=16384, ge=0, le=1_000_000)
     llm_api_key: str = ""
     llm_auth_header: str = "api-key"
     llm_auth_scheme: str = ""

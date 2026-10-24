@@ -65,20 +65,20 @@ function showQuestion(entry) {
   }
   body.scrollTop = entry.scrollTop || 0;
   // 顶部的题图属于当前这道题：切题时换成它当时的截图，避免图和答案对不上。
-  // 这些截图已经发送过，不参与下一次请求。
-  if (pending.length || entry.shots?.length) {
-    pending.length = 0;
-    (entry.shots || []).forEach((dataUrl) => pending.push({id: String(nextShotId++), dataUrl, sent: true}));
-    activeShotId = "";
-    shotsExpanded = true;
-    renderPending();
-  }
+  // 只替换「已发送」的历史截图，用户还没发的新截图必须保留。
+  const drafts = pending.filter((shot) => !shot.sent);
+  pending.length = 0;
+  (entry.shots || []).forEach((dataUrl) => pending.push({ id: String(nextShotId++), dataUrl, sent: true }));
+  drafts.forEach((shot) => pending.push(shot));
+  activeShotId = "";
+  if (pending.length) shotsExpanded = true;
+  renderPending();
   syncQuestionSelector();
   syncReadingControls();
   syncEmpty();
 }
 
-// 截图题解固定在当前阅读位置。Gank 的24px自动追尾属于语音面板，不能套到这里。
+// 截图题解固定在当前阅读位置；自动追尾只适用于实时语音面板。
 function syncReadingControls() {
   const hasAnswer = thread?.querySelector(".liuwa-stream")?.dataset.hasAnswer === 'true';
   const tabs = document.querySelector("#liuwaAnswerTabs");
@@ -199,7 +199,9 @@ function renderPending() {
   syncEmpty();
 }
 
-function addShot(dataUrl) {
+function addShot(dataUrl, generation = sessionGeneration) {
+  // 截图和文件读取是异步的：重置后到达的旧结果不能落进新会话。
+  if (generation !== sessionGeneration) return;
   if (savingSession) {
     setStatus("正在保存会话，请稍候。");
     return;
@@ -224,9 +226,16 @@ function addShot(dataUrl) {
   setStatus("");
 }
 
-function addShotFromBase64(mime, data) {
+function addShotFromBase64(mime, data, generation = sessionGeneration) {
   const type = mime || "image/png";
-  addShot(`data:${type};base64,${data}`);
+  addShot(`data:${type};base64,${data}`, generation);
+}
+
+function readImageFile(file) {
+  const generation = sessionGeneration;
+  const reader = new FileReader();
+  reader.onload = () => addShot(String(reader.result || ""), generation);
+  reader.readAsDataURL(file);
 }
 
 function removeShot(id) {
@@ -243,11 +252,12 @@ function uniqueOrigins() {
   );
 }
 
-async function ensureGateway() {
+async function ensureGateway(signal) {
   const failures = [];
   for (const origin of uniqueOrigins()) {
     try {
-      const response = await fetch(`${origin}/health`, { cache: "no-store", signal: AbortSignal.timeout(3500) });
+      const timeout = AbortSignal.timeout(3500);
+      const response = await fetch(`${origin}/health`, { cache: "no-store", signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
       if (!response.ok) {
         failures.push(`${origin}: HTTP ${response.status}`);
         continue;
@@ -260,6 +270,7 @@ async function ensureGateway() {
       state.apiOrigin = new URL(response.url).origin;
       return;
     } catch (error) {
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
       failures.push(`${origin}: ${error && error.message ? error.message : error}`);
     }
   }
@@ -323,6 +334,8 @@ async function readSse(response, onDelta, signal) {
         if (payload.delta) onDelta(payload.delta);
         if (payload.done) completed = true;
       }
+      // 读完这一块后如果用户已经按下停止，立即退出，不再等待下一段。
+      if (signal?.aborted) throw new DOMException("aborted", "AbortError");
     }
   } catch (error) {
     // 用户主动停止时抛出 AbortError，让调用方走「保留已生成内容」的分支。
@@ -331,15 +344,18 @@ async function readSse(response, onDelta, signal) {
       throw new DOMException("aborted", "AbortError");
     }
     throw error;
+  } finally {
+    // 主动停止或出错时释放读取锁，避免连接一直挂在后台。
+    reader.cancel().catch(() => {});
   }
   if (!completed) throw new Error("回答中断，请重新发送。");
 }
 
 let activeAbort = null;
+// 会话世代：重置后递增，迟到完成的截图和文件读取结果据此丢弃。
+let sessionGeneration = 0;
 
-// Preserve whatever the model produced before a stop/error and mark the turn, so the
-// user can keep reading the partial answer and continue from it (Gank keeps partial
-// responses instead of dropping the whole turn).
+// 停止或出错时保留模型已经生成的内容，并标记这一轮，方便用户继续阅读。
 function finalizeStopped(streamNode, reply, assistantTurn, marker = "（已中断）") {
   // 中断标记挂在卡片上，正文保留模型已经生成的内容。
   assistantTurn.classList.add("is-stopped");
@@ -348,8 +364,23 @@ function finalizeStopped(streamNode, reply, assistantTurn, marker = "（已中�
   assistantTurn.classList.remove("is-stream");
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// 停止生成要能打断重试等待，否则最长还要再等 7 秒才退出。
+function abortableSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(new DOMException("aborted", "AbortError"));
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 // 判断错误是否可重试：网络错误、5xx 服务器错误、超时、限流
@@ -382,7 +413,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
       if (attempt < maxRetries && (response.status >= 500 || response.status === 429)) {
         const delay = Math.pow(2, attempt) * 1000;
         setStatus(`服务暂时不可用，${delay / 1000} 秒后重试（${attempt + 1}/${maxRetries}）…`);
-        await sleep(delay);
+        await abortableSleep(delay, options?.signal);
         continue;
       }
       throw new Error(detail || `发送失败，请检查服务后重试（${response.status}）。`);
@@ -392,7 +423,7 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000;
         setStatus(`网络异常，${delay / 1000} 秒后重试（${attempt + 1}/${maxRetries}）…`);
-        await sleep(delay);
+        await abortableSleep(delay, options?.signal);
         continue;
       }
       throw error;
@@ -426,8 +457,10 @@ async function runChat() {
     setStatus("");
     return;
   }
-  const images = pending.map((shot) => shot.dataUrl);
-  const unsent = pending.filter((shot) => !shot.sent).map((shot) => shot.dataUrl);
+  // 只发送本次还没发过的截图。切回历史题只是为了查看，旧图不能混进新请求。
+  const unsentShots = pending.filter((shot) => !shot.sent);
+  const images = unsentShots.map((shot) => shot.dataUrl);
+  const unsent = images;
   renderPending();
   if (!unsent.length) {
     setStatus("先截一张屏。");
@@ -436,7 +469,12 @@ async function runChat() {
   streaming = true;
   const controller = new AbortController();
   activeAbort = controller;
-  const timeoutGuard = setTimeout(() => controller.abort(), 180_000);
+  // 长答案现在可以输出到 16k tokens，给足时间；超时和手动停止要区分开。
+  let timedOut = false;
+  const timeoutGuard = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 600_000);
   document.body.classList.add("is-busy");
   syncQuestionSelector();
   setStatus("正在分析题目…");
@@ -488,7 +526,8 @@ async function runChat() {
     if (!flushTimer) flushTimer = setTimeout(flush, 90);
   };
   try {
-    await ensureGateway();
+    await ensureGateway(controller.signal);
+    if (controller.signal.aborted) throw new DOMException("aborted", "AbortError");
     const response = await fetchWithRetry(`${state.apiOrigin}/api/chat/stream`, {
       method: "POST",
       signal: controller.signal,
@@ -503,6 +542,7 @@ async function runChat() {
       }),
     });
     await readSse(response, onDelta, controller.signal);
+    if (!reply.trim()) throw new Error("模型没有返回内容，请重试或检查模型接入配置。");
     flush(true);
     assistantTurn.classList.remove("is-stream");
     commitTurn();
@@ -510,11 +550,13 @@ async function runChat() {
   } catch (error) {
     clearTimeout(flushTimer);
     flush(true);
-    const aborted = controller.signal.aborted || error?.name === "AbortError";
+    const aborted = (controller.signal.aborted || error?.name === "AbortError") && !timedOut;
     const rawMessage = error && error.message ? error.message : String(error);
-    const message = /RemoteProtocolError|incomplete chunked read|peer closed connection/i.test(rawMessage)
-      ? "模型连接中断，可重新处理当前截图。"
-      : rawMessage;
+    const message = timedOut
+      ? "生成时间过长已停止，已生成的内容会保留。"
+      : /RemoteProtocolError|incomplete chunked read|peer closed connection/i.test(rawMessage)
+        ? "模型连接中断，可重新处理当前截图。"
+        : rawMessage;
     if (reply.trim()) {
       // 已经流出一大段内容：不管是主动停止还是中途报错，都保留下来。
       // 之前只有「主动停止」保留，报错会把用户眼看着生成的整段解析删掉。
@@ -589,9 +631,11 @@ function wireDesktop(cockpit) {
   cockpit.onDeleteLastShot?.(deleteLastShot);
   cockpit.onTheme?.(applyTheme);
   if (typeof cockpit.onCapture === "function") {
+    // 主进程截图可能晚于重置返回：记录发起时的世代，重置后丢弃。
+    const generation = sessionGeneration;
     cockpit.onCapture((payload) => {
       if (!payload || !payload.data) return;
-      addShotFromBase64(payload.mime, payload.data);
+      addShotFromBase64(payload.mime, payload.data, generation);
     });
   }
   if (typeof cockpit.onCaptureError === "function") {
@@ -703,9 +747,7 @@ document.addEventListener('keydown',event=>{
 });
 document.querySelector('#liuwaCapture')?.addEventListener('click',()=>window.cockpit?.captureExam ? window.cockpit.captureExam() : document.querySelector('#liuwaImageImport').click());
 document.querySelector('#liuwaImageImport')?.addEventListener('change',event=>{
-  Array.from(event.target.files || []).filter(file=>file.type.startsWith('image/')).forEach(file=>{
-    const reader=new FileReader();reader.onload=()=>addShot(String(reader.result || ''));reader.readAsDataURL(file);
-  });
+  Array.from(event.target.files || []).filter(file=>file.type.startsWith('image/')).forEach(readImageFile);
   event.target.value='';
 });
 sections?.addEventListener('change', () => jumpToSection(thread?.querySelector('.liuwa-stream'), sections.value));
@@ -725,11 +767,6 @@ toggleShots?.addEventListener('click', () => {
   shotsExpanded = !shotsExpanded;
   renderPending();
 });
-stopBtn?.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter" && event.key !== " ") return;
-  event.preventDefault();
-  stopChat();
-});
 
 document.addEventListener("paste", (event) => {
   const items = event.clipboardData ? Array.from(event.clipboardData.items) : [];
@@ -738,10 +775,7 @@ document.addEventListener("paste", (event) => {
   event.preventDefault();
   images.forEach((item) => {
     const blob = item.getAsFile();
-    if (!blob) return;
-    const reader = new FileReader();
-    reader.onload = () => addShot(String(reader.result || ""));
-    reader.readAsDataURL(blob);
+    if (blob) readImageFile(blob);
   });
 });
 
@@ -750,11 +784,7 @@ document.addEventListener("drop", (event) => {
   event.preventDefault();
   Array.from(event.dataTransfer?.files || [])
     .filter((file) => file.type.startsWith("image/"))
-    .forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => addShot(String(reader.result || ""));
-      reader.readAsDataURL(file);
-    });
+    .forEach(readImageFile);
 });
 
 if (typeof window.__GATEWAY_KEY__ === "string" && window.__GATEWAY_KEY__.trim()) {
@@ -782,7 +812,7 @@ async function refreshContext() {
   }
 }
 
-// Gank 的 ⌘L：只删最后一张截图，不是清空全部。截图发错了想换一张时，
+// ⌘L 只删最后一张截图，不是清空全部。截图发错了想换一张时，
 // 清空会连前面几张一起丢掉。
 function deleteLastShot() {
   if (streaming) {
@@ -841,9 +871,11 @@ async function newQuestion() {
     }
   }
   closeLightbox();
+  // 清空之后才递增世代，让此前发起的截图/读图结果全部失效。
   thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   history.length = 0;
   pending.length = 0;
+  sessionGeneration += 1;
   activeShotId = "";
   nextShotId = 1;
   // 题目选择器只覆盖当前这次会话；会话保存后新题从空列表重新开始。

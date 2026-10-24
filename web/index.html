@@ -59,24 +59,10 @@
               <button type="button" data-theme-mode="transparent-black" aria-label="透明黑字模式">透明黑字</button>
               <button type="button" data-theme-mode="transparent-white" aria-label="透明白字模式">透明白字</button>
             </div>
-            <label>快速选择模型</label>
-            <div class="liuwa-model-options" id="quickModelPresets" role="group" aria-label="快速选择模型">
-              <button type="button" data-model="antigravity/claude-opus-4-6-thinking" title="Claude Opus 4.6 Thinking（全能推荐）">Claude Opus</button>
-              <button type="button" data-model="antigravity/gemini-3.8-flash-high" title="Gemini 3.8 Flash High（极速）">Gemini Flash</button>
-              <button type="button" data-model="workbuddy/deepseek-v4.1-flash" title="DeepSeek V4.1 Flash">DeepSeek V4.1</button>
-              <button type="button" data-model="qoder/dfmodel" class="is-unavailable" title="Qoder dfmodel（上游暂不可用）">Qoder (异常)</button>
-            </div>
-            <label for="quickScreenshotModel">截图模型</label><input id="quickScreenshotModel" list="quickModelOptions" maxlength="160" disabled />
-            <label for="quickInterviewModel">面试模型</label><input id="quickInterviewModel" list="quickModelOptions" maxlength="160" disabled />
-            <datalist id="quickModelOptions">
-              <option value="antigravity/claude-opus-4-6-thinking">Claude Opus 4.6 Thinking</option>
-              <option value="antigravity/gemini-3.8-flash-high">Gemini 3.8 Flash High</option>
-              <option value="workbuddy/deepseek-v4.1-flash">DeepSeek V4.1 Flash</option>
-              <option value="qoder/dfmodel">Qoder dfmodel</option>
-              <option value="deepseek-ai/DeepSeek-V4.1-Flash">SiliconFlow DeepSeek</option>
-            </datalist>
-            <div class="liuwa-settings-actions"><button type="button" id="quickSaveModels" disabled>保存模型</button><button type="button" id="quickRefreshModels">刷新列表</button></div>
-            <p class="liuwa-setting-note">使用已配置的模型接口；截图模型需要支持图片。</p>
+            <label>当前模型</label>
+            <p class="liuwa-setting-note" id="quickModelSummary">正在读取模型配置…</p>
+            <div class="liuwa-settings-actions"><button type="button" id="quickManageModels">管理模型接入 ↗</button><button type="button" id="quickRefreshModels">刷新</button></div>
+            <p class="liuwa-setting-note">接入地址、密钥和协议在设置页管理；截图需要支持图片的模型。</p>
             <label for="quickIdentity">我的身份</label><select id="quickIdentity" disabled><option value="candidate">面试者</option><option value="interviewer">面试官</option></select>
             <label for="quickCaptureMode">截图方式</label><select id="quickCaptureMode" disabled><option value="area">局部截图</option><option value="full">全屏截图</option></select>
             <label for="quickDisplay">显示器</label><select id="quickDisplay" disabled><option>正在读取…</option></select>
@@ -120,7 +106,8 @@
           <p class="liuwa-hotkey-warning" id="liuwaHotkeyWarning" role="status" hidden></p>
         </section>
 
-            <button type="button" id="quickAdvancedSettings">更多设置与学习资产 ↗</button>
+            <button type="button" id="quickAdvancedSettings">更多设置 ↗</button>
+            <button type="button" id="quickManageAssets">学习资产 ↗</button>
             <p id="quickSettingsStatus" role="status">正在读取设置…</p>
           </div>
         </details>
@@ -142,7 +129,7 @@
       </div>
       </section>
 
-      <div class="liuwa-feedback"><p class="liuwa-status" id="liuwaStatus" role="status"></p><span role="button" tabindex="0" class="liuwa-stop" id="liuwaStop" aria-label="停止生成" hidden>停止生成</span></div>
+      <div class="liuwa-feedback"><p class="liuwa-status" id="liuwaStatus" role="status"></p><button type="button" class="liuwa-stop" id="liuwaStop" aria-label="停止生成" hidden>停止生成</button></div>
     </main>
     <input type="file" id="liuwaImageImport" accept="image/*" multiple hidden />
     <script type="module" src="modules/home.js"></script>

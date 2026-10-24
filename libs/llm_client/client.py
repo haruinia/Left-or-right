@@ -5,6 +5,7 @@ import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, TypeVar
+from urllib.parse import urlsplit
 
 import httpx
 from pydantic import BaseModel
@@ -15,12 +16,61 @@ from libs.common.observability import SlidingWindowRateLimiter, log_event
 T = TypeVar("T", bound=BaseModel)
 _llm_rate_limiter = SlidingWindowRateLimiter(requests_per_minute=60)
 
+_PROTOCOL_SUFFIXES = {
+    "openai_chat": "/chat/completions",
+    "openai_responses": "/responses",
+    "anthropic_messages": "/messages",
+}
+
+
+class LLMStreamIncomplete(RuntimeError):
+    """The provider ended the stream without a complete answer."""
+
 
 @dataclass(frozen=True)
 class LLMMessage:
     role: str
     content: str
     images: tuple[str, ...] = ()
+
+
+def resolve_protocol(settings=None) -> str:
+    """Pick the wire protocol from an explicit choice or the endpoint path."""
+    settings = settings or get_settings()
+    configured = str(getattr(settings, "llm_protocol", "auto") or "auto")
+    if configured in _PROTOCOL_SUFFIXES:
+        return configured
+    path = urlsplit(_endpoint_url(settings)).path.rstrip("/")
+    for protocol, suffix in _PROTOCOL_SUFFIXES.items():
+        if path.endswith(suffix):
+            return protocol
+    return "openai_chat"
+
+
+def _endpoint_url(settings) -> str:
+    base = settings.llm_base_url.rstrip("/")
+    path = (settings.llm_api_path or "").strip()
+    base_path = urlsplit(base).path.rstrip("/")
+    for suffix in _PROTOCOL_SUFFIXES.values():
+        if base_path.endswith(suffix):
+            return base
+    if path in {"", "/"}:
+        protocol = (
+            settings.llm_protocol
+            if settings.llm_protocol in _PROTOCOL_SUFFIXES
+            else "openai_chat"
+        )
+        return base + _PROTOCOL_SUFFIXES[protocol]
+    return base + "/" + path.lstrip("/")
+
+
+def _max_tokens(settings, protocol: str) -> int:
+    configured = int(getattr(settings, "llm_max_tokens", 0) or 0)
+    if configured > 0:
+        return configured
+    # Anthropic rejects requests without max_tokens, so its "provider default"
+    # is the documented ceiling rather than an omitted field.
+    return 4096 if protocol == "anthropic_messages" else 0
 
 
 class LLMClient:
@@ -36,7 +86,7 @@ class LLMClient:
 
     async def list_models(self) -> list[str]:
         settings = get_settings()
-        if settings.llm_provider == "mock" or not settings.llm_api_key or not settings.llm_base_url:
+        if settings.llm_provider == "mock" or not settings.llm_base_url:
             return []
         async with httpx.AsyncClient(timeout=5, transport=self._async_transport) as client:
             response = await client.get(settings.llm_base_url.rstrip("/") + "/models", headers=_auth_headers())
@@ -53,7 +103,7 @@ class LLMClient:
         raise_on_error: bool = False,
     ) -> T:
         settings = get_settings()
-        if settings.llm_provider == "mock" or not settings.llm_api_key or not settings.llm_base_url:
+        if settings.llm_provider == "mock" or not settings.llm_base_url:
             return fallback
         if settings.llm_rate_limit_enabled:
             limited = _llm_rate_limited(settings.llm_provider, settings.llm_model)
@@ -63,7 +113,7 @@ class LLMClient:
                 return fallback
         payload = _request_payload(messages)
         headers = _auth_headers()
-        url = settings.llm_base_url.rstrip("/") + "/" + settings.llm_api_path.lstrip("/")
+        url = _endpoint_url(settings)
         last_error: Exception | None = None
         max_attempts = max(1, settings.llm_max_retries + 1)
         for attempt in range(max_attempts):
@@ -74,7 +124,9 @@ class LLMClient:
                 ) as client:
                     response = await client.post(url, headers=headers, json=payload)
                     response.raise_for_status()
-                return _parse_json_response(response.json(), schema)
+                return schema.model_validate(
+                    _parse_json_response(response.json(), _json_content_path())
+                )
             except Exception as exc:
                 last_error = exc
                 _log_llm_failure(schema, attempt, max_attempts, exc)
@@ -107,7 +159,7 @@ class LLMClient:
         raise_on_error: bool = False,
     ) -> tuple[T, bool]:
         settings = get_settings()
-        if settings.llm_provider == "mock" or not settings.llm_api_key or not settings.llm_base_url:
+        if settings.llm_provider == "mock" or not settings.llm_base_url:
             return fallback, True
         if settings.llm_rate_limit_enabled:
             limited = _llm_rate_limited(settings.llm_provider, settings.llm_model)
@@ -117,7 +169,7 @@ class LLMClient:
                 return fallback, True
         payload = _request_payload(messages)
         headers = _auth_headers()
-        url = settings.llm_base_url.rstrip("/") + "/" + settings.llm_api_path.lstrip("/")
+        url = _endpoint_url(settings)
         last_error: Exception | None = None
         max_attempts = max(1, settings.llm_max_retries + 1)
         for attempt in range(max_attempts):
@@ -128,7 +180,9 @@ class LLMClient:
                 ) as client:
                     response = client.post(url, headers=headers, json=payload)
                     response.raise_for_status()
-                return _parse_json_response(response.json(), schema), False
+                return schema.model_validate(
+                    _parse_json_response(response.json(), _json_content_path())
+                ), False
             except Exception as exc:
                 last_error = exc
                 _log_llm_failure(schema, attempt, max_attempts, exc)
@@ -140,7 +194,7 @@ class LLMClient:
 
     async def stream_text(self, messages: list[LLMMessage]) -> AsyncIterator[str]:
         settings = get_settings()
-        if settings.llm_provider == "mock" or not settings.llm_api_key or not settings.llm_base_url:
+        if settings.llm_provider == "mock" or not settings.llm_base_url:
             for piece in _mock_text_chunks():
                 yield piece
             return
@@ -148,10 +202,12 @@ class LLMClient:
             limited = _llm_rate_limited(settings.llm_provider, settings.llm_model)
             if limited:
                 raise RuntimeError(limited)
+        protocol = resolve_protocol(settings)
         payload = _request_payload(messages, stream=True, json_object=False)
         headers = _auth_headers()
-        url = settings.llm_base_url.rstrip("/") + "/" + settings.llm_api_path.lstrip("/")
+        url = _endpoint_url(settings)
         timeout = httpx.Timeout(max(120.0, float(settings.llm_timeout_seconds)))
+        state = _StreamState(protocol)
         try:
             async with httpx.AsyncClient(
                 timeout=timeout,
@@ -165,11 +221,153 @@ class LLMClient:
                         body = (await response.aread()).decode("utf-8", errors="replace")
                         raise RuntimeError(f"HTTP {response.status_code}: {body[:300]}")
                     async for line in response.aiter_lines():
-                        delta = _parse_stream_line(line)
-                        if delta:
-                            yield delta
+                        for event in _parse_stream_event(protocol, line, state):
+                            if event == _STREAM_DONE:
+                                state.done = True
+                                break
+                            yield event
+                        if state.done:
+                            break
         except httpx.HTTPError as exc:
             raise RuntimeError(_safe_error_message(exc)) from exc
+        state.raise_if_incomplete()
+
+
+@dataclass
+class _StreamState:
+    protocol: str
+    done: bool = False
+    finish_reason: str = ""
+    saw_content: bool = False
+
+    def raise_if_incomplete(self) -> None:
+        reason = self.finish_reason
+        if reason in {"length", "max_tokens"}:
+            raise LLMStreamIncomplete(
+                "输出额度已用完，回答被截断；可在设置中调大输出额度后重试。"
+            )
+        if reason in {"content_filter", "refusal", "safety"}:
+            raise LLMStreamIncomplete("回答被模型安全策略截断。")
+        if self.done:
+            return
+        if self.saw_content:
+            raise LLMStreamIncomplete("模型连接中断，回答不完整，请重试。")
+
+
+@dataclass(frozen=True)
+class _StreamDone:
+    pass
+
+
+_STREAM_DONE = _StreamDone()
+
+
+def _parse_stream_event(protocol: str, line: str, state: _StreamState):
+    """Return text deltas and the end marker for one provider SSE line."""
+    raw = line.strip()
+    if not raw:
+        return []
+    if protocol in {"anthropic_messages", "openai_responses"} and raw.startswith("event:"):
+        return []
+    if raw.startswith("data:"):
+        raw = raw[5:].strip()
+    if not raw:
+        return []
+    if raw == "[DONE]":
+        state.done = True
+        return [_STREAM_DONE]
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    if protocol == "anthropic_messages":
+        return _parse_anthropic_event(payload, state)
+    if protocol == "openai_responses":
+        return _parse_responses_event(payload, state)
+    return _parse_chat_event(payload, state)
+
+
+def _record_finish(state: _StreamState, reason: object) -> None:
+    if isinstance(reason, str) and reason:
+        state.finish_reason = reason
+        if reason in {"stop", "end_turn", "tool_calls", "function_call"}:
+            state.done = True
+
+
+def _text_delta(state: _StreamState, text: object) -> list:
+    if isinstance(text, str) and text:
+        state.saw_content = True
+        return [text]
+    return []
+
+
+def _stream_error(payload: dict) -> list:
+    error = payload.get("error")
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("type") or "unknown"
+    else:
+        message = error
+    if message:
+        raise RuntimeError(f"上游错误：{str(message)[:240]}")
+    return []
+
+
+def _parse_chat_event(payload: dict, state: _StreamState) -> list:
+    if payload.get("error"):
+        return _stream_error(payload)
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return []
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    delta = choice.get("delta")
+    content = delta.get("content") if isinstance(delta, dict) else None
+    _record_finish(state, choice.get("finish_reason"))
+    return _text_delta(state, content)
+
+
+def _parse_anthropic_event(payload: dict, state: _StreamState) -> list:
+    if payload.get("type") == "error":
+        return _stream_error(payload)
+    if payload.get("type") == "content_block_delta":
+        delta = payload.get("delta")
+        text = delta.get("text") if isinstance(delta, dict) else None
+        return _text_delta(state, text)
+    if payload.get("type") == "message_delta":
+        delta = payload.get("delta")
+        stop_reason = delta.get("stop_reason") if isinstance(delta, dict) else None
+        if stop_reason == "max_tokens":
+            state.finish_reason = "max_tokens"
+        elif stop_reason in {"refusal", "content_filter"}:
+            state.finish_reason = "content_filter"
+        elif stop_reason == "end_turn":
+            state.done = True
+        return []
+    if payload.get("type") == "message_stop":
+        state.done = True
+        return [_STREAM_DONE]
+    return []
+
+
+def _parse_responses_event(payload: dict, state: _StreamState) -> list:
+    event_type = payload.get("type")
+    if event_type in {"error", "response.failed"}:
+        return _stream_error(payload)
+    if event_type == "response.output_text.delta":
+        return _text_delta(state, payload.get("delta"))
+    if event_type == "response.completed":
+        response = payload.get("response")
+        status = response.get("status") if isinstance(response, dict) else None
+        if status == "incomplete":
+            state.finish_reason = "length"
+        else:
+            state.done = True
+        return [_STREAM_DONE] if state.done else []
+    if event_type == "response.incomplete":
+        state.finish_reason = "length"
+        return [_STREAM_DONE]
+    return []
 
 
 def get_llm_client() -> LLMClient:
@@ -215,21 +413,124 @@ def _request_payload(
     settings = get_settings()
     if json_object is None:
         json_object = not stream
+    protocol = resolve_protocol(settings)
     payload: dict[str, Any] = {
         "model": _payload_model(messages),
         "messages": [_serialize_message(message) for message in messages],
         "temperature": 0.2,
     }
-    if json_object:
-        payload["response_format"] = {"type": "json_object"}
+    max_tokens = _max_tokens(settings, protocol)
+    if protocol == "openai_chat":
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
+        if json_object:
+            payload["response_format"] = {"type": "json_object"}
+        if settings.llm_extra_body_json:
+            _merge_extra_body(payload, settings.llm_extra_body_json)
+        if stream:
+            payload["stream"] = True
+        return payload
+    if protocol == "openai_responses":
+        payload["input"] = [_responses_input(message) for message in messages]
+        payload.pop("messages")
+        payload.pop("temperature", None)
+        if max_tokens:
+            payload["max_output_tokens"] = max_tokens
+        if json_object:
+            payload["text"] = {"format": {"type": "json_object"}}
+        if settings.llm_extra_body_json:
+            _merge_extra_body(payload, settings.llm_extra_body_json)
+        if stream:
+            payload["stream"] = True
+        return payload
+    system_parts = [
+        message.content for message in messages if message.role == "system" and message.content
+    ]
+    payload.pop("messages")
+    payload.pop("temperature", None)
+    anthropic_messages = [
+        _anthropic_message(message) for message in messages if message.role != "system"
+    ]
+    payload["messages"] = anthropic_messages
+    if system_parts:
+        payload["system"] = "\n\n".join(system_parts)
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
     if settings.llm_extra_body_json:
-        extra_body = json.loads(settings.llm_extra_body_json)
-        if not isinstance(extra_body, dict):
-            raise ValueError("LLM_EXTRA_BODY_JSON must decode to an object")
-        payload.update(extra_body)
+        _merge_extra_body(payload, settings.llm_extra_body_json)
     if stream:
         payload["stream"] = True
     return payload
+
+
+_RESERVED_PAYLOAD_KEYS = {
+    "model",
+    "messages",
+    "input",
+    "system",
+    "stream",
+    "tools",
+    "tool_choice",
+    "response_format",
+    "temperature",
+    "max_tokens",
+    "max_completion_tokens",
+    "max_output_tokens",
+}
+
+
+def _merge_extra_body(payload: dict[str, Any], raw: str) -> None:
+    extra_body = json.loads(raw)
+    if not isinstance(extra_body, dict):
+        raise ValueError("LLM_EXTRA_BODY_JSON must decode to an object")
+    rejected = sorted(set(extra_body) & _RESERVED_PAYLOAD_KEYS)
+    if rejected:
+        raise ValueError(f"LLM_EXTRA_BODY_JSON cannot override: {', '.join(rejected)}")
+    payload.update(extra_body)
+
+
+def _responses_input(message: LLMMessage) -> dict[str, Any]:
+    parts: list[dict[str, Any]] = []
+    if message.content:
+        parts.append({"type": "input_text", "text": message.content})
+    parts.extend({"type": "input_image", "image_url": url} for url in message.images)
+    if not parts:
+        parts.append({"type": "input_text", "text": ""})
+    return {"role": message.role, "content": parts}
+
+
+def _anthropic_message(message: LLMMessage) -> dict[str, Any]:
+    if not message.images:
+        return {"role": message.role, "content": message.content}
+    parts: list[dict[str, Any]] = []
+    if message.content:
+        parts.append({"type": "text", "text": message.content})
+    for url in message.images:
+        header, _, data = url.partition(",")
+        media_type = header[5:].split(";", 1)[0] if header.startswith("data:") else ""
+        if not media_type or not data:
+            raise ValueError("Anthropic 协议只接受 data URL 图片")
+        parts.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": data},
+            }
+        )
+    return {"role": message.role, "content": parts}
+
+
+def _json_content_path() -> str:
+    settings = get_settings()
+    configured = settings.llm_response_content_path
+    default = "choices.0.message.content"
+    if configured != default:
+        return configured
+    protocol = resolve_protocol(settings)
+    if protocol == "openai_responses":
+        return "output.0.content.0.text"
+    if protocol == "anthropic_messages":
+        return "content.0.text"
+    return configured
 
 
 _MOCK_DEMO_REPLY = """## 解题思路
@@ -283,42 +584,30 @@ def _mock_text_chunks() -> list[str]:
     return [text[index : index + 2] for index in range(0, len(text), 2)]
 
 
-def _parse_stream_line(line: str) -> str:
-    raw = line.strip()
-    if raw.startswith("data:"):
-        raw = raw[5:].strip()
-    if not raw or raw == "[DONE]":
-        return ""
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        return ""
-    try:
-        content = payload["choices"][0]["delta"].get("content")
-    except (KeyError, IndexError, TypeError, AttributeError):
-        return ""
-    return content if isinstance(content, str) else ""
-
-
 def _auth_headers() -> dict[str, str]:
     settings = get_settings()
-    auth_value = (
-        f"{settings.llm_auth_scheme} {settings.llm_api_key}"
-        if settings.llm_auth_scheme
-        else settings.llm_api_key
-    )
+    protocol = resolve_protocol(settings)
+    api_key = settings.llm_api_key
+    if not api_key:
+        if protocol == "anthropic_messages":
+            return {"anthropic-version": "2023-06-01"}
+        return {}
+    if protocol == "anthropic_messages" and settings.llm_auth_header in {
+        "api-key",
+        "Authorization",
+    }:
+        return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+    auth_value = f"{settings.llm_auth_scheme} {api_key}" if settings.llm_auth_scheme else api_key
     return {settings.llm_auth_header: auth_value}
 
 
-def _parse_json_response(payload: Any, schema: type[T]) -> T:
-    content = _extract_path(payload, get_settings().llm_response_content_path)
+def _parse_json_response(payload: Any, content_path: str) -> Any:
+    content = _extract_path(payload, content_path)
     if isinstance(content, str):
-        data: Any = _loads_json_content(content)
-    elif isinstance(content, (dict, list)):
-        data = content
-    else:
-        raise ValueError("LLM response content path did not resolve to JSON data")
-    return schema.model_validate(data)
+        return _loads_json_content(content)
+    if isinstance(content, (dict, list)):
+        return content
+    raise ValueError("LLM response content path did not resolve to JSON data")
 
 
 def _loads_json_content(content: str) -> Any:
