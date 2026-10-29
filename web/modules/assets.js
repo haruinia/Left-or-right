@@ -19,6 +19,11 @@ import {
   listRecentNegativeFeedback,
   exportFeedbackAsMarkdown,
 } from "./feedback-store.js";
+import {
+  listExamRecords,
+  deleteExamRecord,
+  exportExamRecordsAsMarkdown,
+} from "./exam-store.js";
 
 function escapeHtml(value) {
   return String(value)
@@ -33,6 +38,7 @@ const panes = {
   records: document.querySelector("#assetRecords"),
   kb: document.querySelector("#assetKB"),
   feedback: document.querySelector("#assetFeedback"),
+  exams: document.querySelector("#assetExams"),
 };
 function showError(target, error) {
   if (!target) return;
@@ -74,6 +80,7 @@ function initAssets() {
   initRecords();
   initKB();
   initFeedback();
+  initExams();
   renderAll();
 }
 
@@ -82,6 +89,7 @@ function renderAll() {
     action(panes.records, renderRecords)(),
     action(panes.kb, renderKB)(),
     action(panes.feedback, renderFeedback)(),
+    action(panes.exams, renderExams)(),
   ]);
 }
 
@@ -294,6 +302,73 @@ async function renderFeedback() {
         ${item.model ? `<footer><span class="asset-tag-small">${escapeHtml(item.model)}</span></footer>` : ""}
       </article>
     `).join("");
+}
+
+// ===== 笔试记录 =====
+const examsList = document.querySelector("#examsList");
+
+function initExams() {
+  document.querySelector("#examsExport")?.addEventListener("click", action(panes.exams, exportExamRecordsAsMarkdown));
+  examsList?.addEventListener("click", action(panes.exams, async (event) => {
+    const deleteId = event.target.closest("[data-delete-exam]")?.dataset.deleteExam;
+    const viewId = event.target.closest("[data-view-exam]")?.dataset.viewExam;
+    if (deleteId && confirm("确定删除这条笔试记录吗？")) {
+      await deleteExamRecord(deleteId);
+      await renderExams();
+    }
+    if (viewId) {
+      const record = (await listExamRecords()).find((r) => r.id === viewId);
+      if (record) renderExamDetail(record);
+    }
+  }));
+}
+
+async function renderExams() {
+  if (!examsList) return;
+  const records = await listExamRecords();
+  if (!records.length) {
+    examsList.innerHTML = '<p class="asset-empty">还没有笔试记录。桌面端每次截图提问都会自动保存题目和回答。</p>';
+    return;
+  }
+  examsList.innerHTML = records.map((record) => {
+    const date = new Date(record.createdAt).toLocaleString("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const preview = record.answer.replace(/[#*`>]/g, "").slice(0, 80) || "（截图题）";
+    return `
+      <article class="asset-item" data-id="${escapeHtml(record.id)}">
+        <header>
+          <time>${escapeHtml(date)}</time>
+          <span class="asset-count">${record.imageCount ? `${record.imageCount} 图` : ""}${record.partial ? " · 中断" : ""}</span>
+        </header>
+        <p class="asset-preview">${escapeHtml(preview)}${preview.length >= 80 ? "…" : ""}</p>
+        <footer>
+          <button type="button" class="secondary" data-view-exam="${escapeHtml(record.id)}">查看</button>
+          <button type="button" class="secondary" data-delete-exam="${escapeHtml(record.id)}">删除</button>
+        </footer>
+      </article>
+    `;
+  }).join("");
+}
+
+function renderExamDetail(record) {
+  examsList.innerHTML = `
+    <article class="asset-detail">
+      <header>
+        <button type="button" class="secondary" id="examsBack">← 返回列表</button>
+        <time>${new Date(record.createdAt).toLocaleString("zh-CN")}</time>
+      </header>
+      ${record.model ? `<p class="asset-note">模型：${escapeHtml(record.model)}${record.partial ? "（回答中断）" : ""}</p>` : ""}
+      ${record.images && record.images.length ? `
+        <div class="asset-gallery">
+          ${record.images.map((img) => `<img src="${escapeHtml(img)}" alt="题图" />`).join("")}
+        </div>
+      ` : ""}
+      <div class="asset-turns">
+        ${record.query ? `<div class="asset-turn is-user"><strong>问</strong><p>${escapeHtml(record.query)}</p></div>` : ""}
+        <div class="asset-turn is-assistant"><strong>答</strong><p>${escapeHtml(record.answer)}</p></div>
+      </div>
+    </article>
+  `;
+  document.querySelector("#examsBack")?.addEventListener("click", action(panes.exams, renderExams));
 }
 
 // Initialize after every DOM reference and state binding is ready (avoid TDZ on import).

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from libs.common.config import get_settings
 
 router = APIRouter(prefix="/api/learning-assets", tags=["learning-assets"])
-AssetKind = Literal["sessions", "knowledge", "feedback"]
+AssetKind = Literal["sessions", "knowledge", "feedback", "exams"]
 
 
 def _database_path() -> Path:

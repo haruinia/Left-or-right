@@ -1,6 +1,7 @@
 import { formatAccelerator, acceleratorFromEvent } from "./shortcuts.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
 import { saveSessionRecord } from "./session-store.js";
+import { saveExamRecord } from "./exam-store.js";
 import { renderAnswer, stepAnswerTab } from "./answer-view.js";
 import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
 import { page, resetReading } from "./reading.js";
@@ -518,6 +519,16 @@ async function runChat() {
       imageCount: unsent.length,
     });
     history.push({ role: "assistant", text: reply });
+    // 每次问答独立存一条笔试记录：题目缩略图 + 发送内容 + 模型回答，
+    // 失败静默（记录属于增值功能，不能影响主流程）。
+    saveExamRecord({
+      images: unsent.slice(0, 3),
+      query: "请讲解这道截图题目",
+      answer: reply,
+      model: currentModel,
+      partial: !complete,
+      startedAt: sessionStartedAt,
+    }).catch(() => {});
   };
   // Coalesce tokens: flush at a sentence boundary at once, otherwise on a 90ms timer.
   const onDelta = (delta) => {
