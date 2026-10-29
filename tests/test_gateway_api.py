@@ -3787,7 +3787,8 @@ def test_gateway_settings_page_hosts_interview_workbench(tmp_path: Path, monkeyp
     assert 'data-hotkey="toggleWindow"' in page.text
     assert 'data-hotkey="clearShots"' in page.text
     assert 'data-hotkey="quitApp"' in page.text
-    assert "大模型接入" in page.text
+    assert "模型接入" in page.text
+    assert "本地预置" in page.text
     assert 'id="jdText"' in page.text
     assert 'id="resumeText"' in page.text
     assert 'id="saveUiSettings"' in page.text

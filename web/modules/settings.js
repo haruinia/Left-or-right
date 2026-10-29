@@ -186,4 +186,52 @@ checkModel?.addEventListener("click", checkLlmConnection);
 checkAsr?.addEventListener("click", checkAsrReadiness);
 
 wireModelConfig();
+wireRail();
 checkRuntime().then(() => Promise.all([loadUiSettings(), loadProfiles()]));
+
+// 分区导航跟随滚动高亮，点击后把目标分区顶到可视区。
+function wireRail() {
+  const rail = document.querySelector(".settings-rail");
+  if (!rail) return;
+  const links = [...rail.querySelectorAll("a[href^='#']")];
+  const sections = links
+    .map((link) => document.querySelector(link.getAttribute("href")))
+    .filter(Boolean);
+  if (!sections.length) return;
+
+  const setActive = (id) => {
+    links.forEach((link) => link.classList.toggle("is-active", link.getAttribute("href") === `#${id}`));
+  };
+
+  // 平滑滚动途中会经过其他分区，这段时间不让观察器改写高亮。
+  let lockUntil = 0;
+
+  rail.addEventListener("click", (event) => {
+    const link = event.target.closest("a[href^='#']");
+    if (!link) return;
+    const target = document.querySelector(link.getAttribute("href"));
+    if (!target) return;
+    event.preventDefault();
+    // 折叠分区被点到时先展开，否则滚动位置会落在收起后的高度上。
+    if (target.tagName === "DETAILS" && !target.open) target.open = true;
+    const id = link.getAttribute("href").slice(1);
+    setActive(id);
+    lockUntil = Date.now() + 900;
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+    history.replaceState(null, "", `#${id}`);
+  });
+
+  if (!("IntersectionObserver" in window)) return;
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (Date.now() < lockUntil) return;
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+      if (visible) setActive(visible.target.id);
+    },
+    { rootMargin: "-15% 0px -70% 0px", threshold: 0 },
+  );
+  sections.forEach((section) => observer.observe(section));
+  setActive(sections[0].id);
+}

@@ -53,7 +53,7 @@ class LlmProfile(BaseModel):
     llm_auth_scheme: str = "Bearer"
     llm_response_content_path: str = "choices.0.message.content"
     llm_extra_body_json: str = ""
-    llm_max_tokens: int = Field(default=16384, ge=0, le=1_000_000)
+    llm_max_tokens: int = Field(default=30000, ge=0, le=1_000_000)
     vision_model: str = ""
     llm_api_key: str = ""
 
@@ -226,54 +226,58 @@ def _new_id(existing: list[LlmProfile], wanted: str) -> str:
 
 def save_profile(payload: ProfileInput) -> dict[str, Any]:
     profiles, active = load_store()
-    current = next((profile for profile in profiles if profile.id == active), None)
-    if current is None:
-        current = _current_profile()
+    editing = next((profile for profile in profiles if profile.id == payload.profile_id), None)
+    # 没带 id 时按"修改当前接入"处理；带了本机不存在的 id 才是新建。
+    base = editing or next((profile for profile in profiles if profile.id == active), None)
+    if base is None:
+        base = _current_profile()
 
     same_connection = (
-        payload.llm_base_url.strip().rstrip("/") == current.llm_base_url.rstrip("/")
-        and payload.llm_protocol == current.llm_protocol
+        payload.llm_base_url.strip().rstrip("/") == base.llm_base_url.rstrip("/")
+        and payload.llm_protocol == base.llm_protocol
     )
     api_key = payload.llm_api_key.strip()
     if payload.clear_api_key:
         api_key = ""
     elif not api_key and same_connection:
-        api_key = current.llm_api_key
+        api_key = base.llm_api_key
 
     profile = LlmProfile(
-        id=payload.profile_id or current.id,
+        id=payload.profile_id or base.id,
         name=payload.name,
         llm_model=payload.llm_model,
         llm_base_url=payload.llm_base_url,
         llm_protocol=payload.llm_protocol,
-        llm_api_path=payload.llm_api_path or current.llm_api_path,
-        llm_auth_header=payload.llm_auth_header or current.llm_auth_header,
+        llm_api_path=payload.llm_api_path or base.llm_api_path,
+        llm_auth_header=payload.llm_auth_header or base.llm_auth_header,
         llm_auth_scheme=(
             payload.llm_auth_scheme
             if payload.llm_auth_scheme
-            else current.llm_auth_scheme
+            else base.llm_auth_scheme
         ),
         llm_response_content_path=(
-            payload.llm_response_content_path or current.llm_response_content_path
+            payload.llm_response_content_path or base.llm_response_content_path
         ),
         llm_extra_body_json=payload.llm_extra_body_json,
         llm_max_tokens=(
             payload.llm_max_tokens
             if payload.llm_max_tokens is not None
-            else current.llm_max_tokens
+            else base.llm_max_tokens
         ),
         vision_model=payload.vision_model,
         llm_api_key=api_key,
     )
     profile = _normalize(profile)
-    if profile.id != active:
-        profile.id = _new_id(profiles, profile.id)
+    if editing is None and not payload.profile_id:
+        profile.id = active
     index = next((i for i, item in enumerate(profiles) if item.id == profile.id), None)
     if index is None:
+        profile.id = _new_id(profiles, profile.id)
         if len(profiles) >= _MAX_PROFILES:
             _fail("配置数量已达上限，请先删除不用的配置")
         profiles.append(profile)
     else:
+        profile.id = profiles[index].id
         profiles[index] = profile
     _write_store(profiles, profile.id)
     apply_profile(profile)
@@ -349,7 +353,7 @@ def _parse_import_item(item: dict[str, Any]) -> LlmProfile:
                 or "choices.0.message.content"
             ),
             llm_extra_body_json=str(_alias(item, "llm_extra_body_json", "extra_body") or ""),
-            llm_max_tokens=int(_alias(item, "llm_max_tokens", "max_tokens") or 16384),
+            llm_max_tokens=int(_alias(item, "llm_max_tokens", "max_tokens") or 30000),
             vision_model=str(_alias(item, "vision_model", "screenshot_model") or ""),
             llm_api_key=str(_alias(item, "llm_api_key", "api_key", "key", "apiKey") or ""),
         )

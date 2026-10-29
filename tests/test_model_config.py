@@ -41,7 +41,7 @@ def test_saved_profile_drives_runtime_settings_and_hides_key(tmp_path) -> None:
     settings = get_settings()
     assert settings.llm_base_url == "https://api.example.test/v1"
     assert settings.llm_protocol == "openai_chat"
-    assert settings.llm_max_tokens == 16384
+    assert settings.llm_max_tokens == 30000
 
     stored = json.loads((tmp_path / "model_profiles.json").read_text(encoding="utf-8"))
     assert stored["profiles"][0]["llm_api_key"] == "secret-key"
@@ -67,6 +67,40 @@ def test_empty_key_on_same_connection_keeps_the_saved_key() -> None:
     active = next(item for item in data["profiles"] if item["id"] == data["active_profile_id"])
     assert active["llm_api_key_configured"] is True
     assert get_settings().llm_api_key == "secret-key"
+
+
+def test_editing_a_saved_profile_updates_it_in_place_and_keeps_its_key() -> None:
+    first = _save()
+    second = _save(
+        name="备用",
+        llm_base_url="https://other.example.test/v1",
+        llm_model="model-b",
+        llm_api_key="other-key",
+        profile_id="backup",
+    )
+    backup = next(item for item in second["profiles"] if item["llm_model"] == "model-b")
+    assert backup["id"] == "backup"
+
+    edited = _save(
+        name="备用改名",
+        llm_base_url="https://other.example.test/v1",
+        llm_model="model-b",
+        llm_api_key="",
+        profile_id="backup",
+    )
+    assert len(edited["profiles"]) == len(first["profiles"]) + 1
+    assert [item["id"] for item in edited["profiles"]].count("backup") == 1
+    saved = next(item for item in edited["profiles"] if item["id"] == "backup")
+    assert saved["name"] == "备用改名"
+    assert saved["llm_api_key_configured"] is True
+
+
+def test_saving_without_an_id_edits_the_active_profile() -> None:
+    first = _save()
+    second = _save(llm_model="model-d", llm_api_key="")
+    assert len(second["profiles"]) == len(first["profiles"])
+    assert second["active_profile_id"] == first["active_profile_id"]
+    assert get_settings().llm_model == "model-d"
 
 
 def test_import_accepts_common_aliases_without_activating(tmp_path) -> None:

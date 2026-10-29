@@ -14,402 +14,421 @@
         <div class="brand">
           <img class="settings-brand-logo" src="modules/pangsi-mark.svg" alt="左右标志：两条相伴的思路线" />
           <div>
-            <span class="step">SETUP</span>
             <h1>设置</h1>
-            <p>在这里设好复习偏好，回到左右专心看题。</p>
+            <p>设好复习偏好和模型接入，回到左右专心看题。</p>
           </div>
         </div>
         <a class="button secondary" href="/">打开左右</a>
       </header>
 
-      <form id="studySettingsForm">
-      <section class="panel settings-card" id="study">
-        <h2>复习预设</h2>
-        <p class="small">每次提问都会带上这些偏好，修改后从下一次发送开始生效。</p>
-        <div class="hotkey-grid">
-          <label>专业 / 方向
-            <input id="studySpecialty" list="studySpecialtyOptions" maxlength="120" placeholder="选择或填写，例如：计算机 / 软件工程、行测" />
-            <datalist id="studySpecialtyOptions">
-              <option value="计算机 / 软件工程"></option>
-              <option value="行测"></option>
-              <option value="申论"></option>
-              <option value="考研"></option>
-              <option value="英语"></option>
-              <option value="金融"></option>
-              <option value="法学"></option>
-              <option value="医学"></option>
-              <option value="会计"></option>
-              <option value="电子信息"></option>
-              <option value="教师资格"></option>
-            </datalist>
-          </label>
-          <label>编程语言
-            <input id="studyLanguage" list="studyLanguageOptions" maxlength="80" placeholder="可留空，按题目指定语言；也可填写其他语言" />
-            <datalist id="studyLanguageOptions">
-              <option value="Python"></option>
-              <option value="Java"></option>
-              <option value="C++"></option>
-              <option value="C"></option>
-              <option value="JavaScript"></option>
-              <option value="TypeScript"></option>
-              <option value="Go"></option>
-              <option value="Rust"></option>
-              <option value="C#"></option>
-              <option value="Kotlin"></option>
-              <option value="Swift"></option>
-              <option value="SQL"></option>
-            </datalist>
-          </label>
-          <label>回答语言
-            <select id="studyAnswerLanguage">
-              <option value="zh-CN">中文</option>
-              <option value="en-US">English</option>
-            </select>
-          </label>
-          <label>我的身份
-            <select id="studyAssistantRole">
-              <option value="candidate">面试者</option>
-              <option value="interviewer">面试官</option>
-            </select>
-          </label>
-        </div>
-        <p class="small" id="studySpecialtyHint" hidden>这个方向按考试题型作答，不会把编程语言发给模型。</p>
-        <label>复习目标
-          <textarea id="studyGoal" rows="2" maxlength="1000" placeholder="例如：看懂报错和当前代码；或行测数量关系与判断推理"></textarea>
-        </label>
-        <label>默认讲解方式
-          <select id="studyAnswerStyle">
-            <option value="hints">先给提示 · 留给自己思考</option>
-            <option value="walkthrough">讲解思路 · 步骤、例子与易错点</option>
-            <option value="solution">完整解答 · 思路和答案</option>
-          </select>
-        </label>
-        <label>补充偏好（选填）
-          <textarea id="studyInstructions" rows="3" maxlength="2000" placeholder="例如：先从暴力解法讲起，再解释怎么优化；用 Java 举例"></textarea>
-        </label>
-      </section>
-
-      <section class="panel settings-card" id="models">
-        <h2>大模型接入</h2>
-        <p class="small">在这里管理接入方式和密钥。保存后立即生效；密钥只保存在本机，页面不会回显。</p>
-        <label>
-          已保存的接入
-          <select id="llmProfileSelect"></select>
-        </label>
-        <div class="settings-actions">
-          <button type="button" class="secondary" id="llmNewProfile">新建接入</button>
-          <button type="button" class="secondary" id="llmDeleteProfile">删除所选接入</button>
-        </div>
-        <div class="hotkey-grid">
-          <label>配置名称
-            <input id="llmProfileName" maxlength="60" placeholder="例如：局域网网关、云端备用" />
-          </label>
-          <label>接入方式
-            <select id="llmProtocol">
-              <option value="auto">自动识别</option>
-              <option value="openai_chat">OpenAI Chat Completions</option>
-              <option value="openai_responses">OpenAI Responses</option>
-              <option value="anthropic_messages">Anthropic Messages</option>
-            </select>
-          </label>
-        </div>
-        <label>接口地址
-          <input id="llmBaseUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1 或完整的 /chat/completions 地址" />
-        </label>
-        <div class="hotkey-grid">
-          <label>模型
-            <input id="llmModel" list="llmModelOptions" maxlength="160" placeholder="例如 deepseek-chat" />
-            <datalist id="llmModelOptions"></datalist>
-          </label>
-          <label>截图模型（选填）
-            <input id="llmVisionModel" list="llmModelOptions" maxlength="160" placeholder="留空则用上面的模型" />
-          </label>
-        </div>
-        <div class="hotkey-grid">
-          <label>单次输出额度（tokens）
-            <input id="llmMaxTokens" type="number" min="0" max="1000000" step="1024" value="16384" />
-          </label>
-          <label>API Key（留空表示不修改）
-            <input id="llmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="未配置" />
-          </label>
-        </div>
-        <label class="consent-row">
-          <input type="checkbox" id="llmClearKey" />
-          <span>清除已保存的密钥<span class="small">切换供应商时不会自动沿用旧密钥。</span></span>
-        </label>
-        <p class="small" id="llmProfileState">正在读取接入配置…</p>
-        <details class="settings-disclosure" id="llmAdvanced">
-          <summary>高级选项 <span>路径、鉴权头和附加请求体</span></summary>
-          <div class="hotkey-grid">
-            <label>接口路径<input id="llmApiPath" maxlength="200" placeholder="/chat/completions" /></label>
-            <label>鉴权头<input id="llmAuthHeader" maxlength="60" placeholder="Authorization" /></label>
-            <label>鉴权前缀<input id="llmAuthScheme" maxlength="60" placeholder="Bearer" /></label>
-            <label>响应内容字段<input id="llmResponsePath" maxlength="200" placeholder="choices.0.message.content" /></label>
-          </div>
-          <label>附加请求体（JSON 对象）
-            <textarea id="llmExtraBody" rows="3" maxlength="20000" placeholder="仅填写服务商要求的其他参数"></textarea>
-          </label>
-        </details>
-        <div class="settings-actions">
-          <button type="button" id="saveLlmProfile" title="保存并启用这套接入">保存并启用</button>
-          <button class="secondary" type="button" id="saveLlmApiOnly">只保存密钥</button>
-          <button class="secondary" type="button" id="checkModel" title="用已保存的配置调用一次真实模型">检查连接</button>
-          <span class="status-pill" id="modelStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>模型检查中</span></span>
-        </div>
-        <p class="small" id="connectedModel">等待读取模型配置</p>
-        <details class="settings-disclosure" id="llmImport">
-          <summary>导入配置 <span>粘贴或选择 JSON</span></summary>
-          <p class="small">支持单条或数组，字段可为 llm_base_url / llm_model / llm_api_key，也支持 base_url、model、api_key、max_tokens 等常见写法。导入后需手动保存并启用。</p>
-          <label>配置 JSON
-            <textarea id="llmImportText" rows="5" maxlength="60000" placeholder='{"base_url":"https://api.example.com/v1","model":"model-name","api_key":"..."}'></textarea>
-          </label>
-          <label>或选择文件
-            <input type="file" id="llmImportFile" accept="application/json,.json" />
-          </label>
-          <div class="settings-actions">
-            <button type="button" class="secondary" id="importLlmProfile">解析并导入</button>
-          </div>
-          <p class="small" id="llmImportState" role="status"></p>
-        </details>
-        <div class="settings-actions">
-          <button class="secondary" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
-          <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
-          <a class="button secondary" href="/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
-        </div>
-      </section>
-
-      <details class="settings-disclosure" id="shortcuts" open>
-        <summary>桌面快捷键 <span>截图、发送与窗口操作</span></summary>
-        <section class="settings-card">
-        <p class="small">点击一个快捷键，再按下新的组合键。Esc 取消，Tab 切换。保存后约 4 秒同步到桌面，无需重启。</p>
-        <p class="small" id="hotkeyFeedback" role="status">原有功能全部保留。快捷键需包含 ⌘ / Ctrl / Alt 等修饰键。</p>
-        <div class="hotkey-grid">
-          <label>
-            隐藏 / 显示
-            <input id="hotkeyToggleWindow" data-hotkey="toggleWindow" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="toggleWindow"></span>
-          </label>
-          <label>
-            退出
-            <input id="hotkeyQuitApp" data-hotkey="quitApp" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="quitApp"></span>
-          </label>
-          <label>
-            按住操作面板
-            <input id="hotkeyToggleVisible" data-hotkey="toggleVisible" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="toggleVisible"></span>
-          </label>
-          <label>
-            紧凑 / 展开
-            <input id="hotkeyToggleCompact" data-hotkey="toggleCompact" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="toggleCompact"></span>
-          </label>
-          <label>
-            截图
-            <input id="hotkeyCaptureRegion" data-hotkey="captureRegion" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="captureRegion"></span>
-          </label>
-          <label>
-            全屏截图
-            <input id="hotkeyCaptureScreen" data-hotkey="captureScreen" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="captureScreen"></span>
-          </label>
-          <label>
-            窗口上移
-            <input data-hotkey="moveUp" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="moveUp"></span>
-          </label>
-          <label>
-            窗口下移
-            <input data-hotkey="moveDown" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="moveDown"></span>
-          </label>
-          <label>
-            窗口左移
-            <input data-hotkey="moveLeft" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="moveLeft"></span>
-          </label>
-          <label>
-            窗口右移
-            <input data-hotkey="moveRight" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="moveRight"></span>
-          </label>
-          <label>
-            新对话
-            <input id="hotkeyNewQuestion" data-hotkey="newQuestion" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="newQuestion"></span>
-          </label>
-          <label>重置视图<input data-hotkey="resetView" spellcheck="false" /><span class="small hotkey-preview" data-preview="resetView"></span></label>
-          <label>
-            清空截图
-            <input id="hotkeyClearShots" data-hotkey="clearShots" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="clearShots"></span>
-          </label>
-          <label>
-            删除最后一张截图
-            <input id="hotkeyDeleteLastShot" data-hotkey="deleteLastShot" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="deleteLastShot"></span>
-          </label>
-          <label>
-            处理截图
-            <input id="hotkeySendChat" data-hotkey="sendChat" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="sendChat"></span>
-          </label>
-          <label>
-            回答上一页
-            <input id="hotkeyReadPrev" data-hotkey="readPrev" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="readPrev"></span>
-          </label>
-          <label>
-            回答下一页
-            <input id="hotkeyReadNext" data-hotkey="readNext" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="readNext"></span>
-          </label>
-          <label>
-            回答内容上滚
-            <input id="hotkeyScrollUp" data-hotkey="scrollUp" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="scrollUp"></span>
-          </label>
-          <label>
-            回答内容下滚
-            <input data-hotkey="scrollDown" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="scrollDown"></span>
-          </label>
-          <label>
-            降低不透明度
-            <input data-hotkey="opacityDown" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="opacityDown"></span>
-          </label>
-          <label>
-            提高不透明度
-            <input data-hotkey="opacityUp" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="opacityUp"></span>
-          </label>
-          <label>
-            缩小字号
-            <input data-hotkey="zoomOut" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="zoomOut"></span>
-          </label>
-          <label>
-            还原字号
-            <input data-hotkey="zoomReset" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="zoomReset"></span>
-          </label>
-          <label>
-            放大字号
-            <input data-hotkey="zoomIn" spellcheck="false" />
-            <span class="small hotkey-preview" data-preview="zoomIn"></span>
-          </label>
-        </div>
-        <button type="button" class="secondary" id="resetHotkeys">恢复默认快捷键</button>
-      </section>
-
-      </details>
-
-      <details class="settings-disclosure" id="legacySettings">
-        <summary>其他功能与旧版工作台 <span>岗位、简历、语音与评估</span></summary>
-      <section class="settings-card">
-        <span class="step">JOB</span>
-        <h2>岗位信息</h2>
-        <p class="small">给下面的面试工作台用。首页截图对话不会读这段 JD。</p>
-        <label>
-          岗位 JD
-          <textarea id="jdText" rows="8" placeholder="粘贴岗位职责、能力要求和业务背景"></textarea>
-        </label>
-        <label>
-          上传 JD 文档
-          <input
-            type="file"
-            id="jdFile"
-            aria-describedby="jdFileStatus"
-            accept=".txt,.md,.markdown,.json,.csv,.log,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/*"
-          />
-          <span class="small upload-status" id="jdFileStatus" role="status" aria-live="polite">支持 PDF、Word、图片和文本文件。</span>
-        </label>
-      </section>
-
-      <section class="settings-card">
-        <span class="step">RESUME</span>
-        <h2>简历信息</h2>
-        <p class="small">保存后作为候选人资料进入实时面试。</p>
-        <label>
-          简历摘要
-          <textarea id="resumeText" rows="8" placeholder="粘贴候选人经历、项目和职责"></textarea>
-        </label>
-        <label>
-          上传简历文档
-          <input
-            type="file"
-            id="resumeFile"
-            aria-describedby="resumeFileStatus"
-            accept=".txt,.md,.markdown,.json,.csv,.log,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/*"
-          />
-          <span class="small upload-status" id="resumeFileStatus" role="status" aria-live="polite">支持 PDF、Word、图片和文本文件。</span>
-        </label>
-        <label class="consent-row" for="longTermMemoryConsent">
-          <input type="checkbox" id="longTermMemoryConsent" name="long_term_memory_consent" />
-          <span>
-            记录跨面试长期记忆
-            <span class="small">勾选表示已获得候选人同意。未勾选时本次面试不会留下任何跨面试记忆。</span>
-          </span>
-        </label>
-      </section>
-
-      <section class="settings-card" id="interview">
-        <h2>面试工作台</h2>
-        <p class="small">原来的实时面试、语音转写、追问和评分仍可单独使用。</p>
-        <div class="settings-actions">
-          <a class="button secondary" href="/cockpit" target="_blank" rel="noopener">打开旧版工作台</a>
-          <button class="secondary" type="button" id="checkAsr">检查语音服务</button>
-          <span class="status-pill" id="asrStatus" role="status"><span class="status-dot"></span><span>待检查</span></span>
-          <button class="secondary" type="button" id="loadSampleSettings">填入岗位与简历样例</button>
-        </div>
-      </section>
-      </details>
-
-      <div class="settings-footer">
-        <span class="small" id="settingsSaveState" role="status">正在读取设置…</span>
-        <button type="submit" id="saveUiSettings" disabled>保存设置</button>
-      </div>
-      </form>
-
-      <!-- 学习资产：会话记录 / 知识库 / 回答反馈（数据来自桌面端 localStorage） -->
-      <section class="settings-card" id="assets">
-        <h2>学习资产</h2>
-        <p class="small">桌面端每次「新对话」自动保存会话，可在这里回看、导入知识库、导出分享。</p>
-        <nav class="asset-tabs" id="assetTabs">
-          <button type="button" class="asset-tab is-active" data-asset-tab="records">会话记录</button>
-          <button type="button" class="asset-tab" data-asset-tab="kb">知识库</button>
-          <button type="button" class="asset-tab" data-asset-tab="feedback">回答反馈</button>
+      <div class="settings-body">
+        <nav class="settings-rail" aria-label="设置分区">
+          <a href="#study">复习预设</a>
+          <a href="#models">模型接入</a>
+          <a href="#shortcuts">快捷键</a>
+          <a href="#legacySettings">岗位与简历</a>
+          <a href="#assets">学习资产</a>
         </nav>
 
-        <section class="asset-pane" id="assetRecords">
-          <div class="asset-toolbar">
-            <button type="button" class="secondary" id="recordsExport">导出 Markdown</button>
-          </div>
-          <div class="asset-list" id="recordsList"></div>
-        </section>
+        <div class="settings-main">
+          <form id="studySettingsForm">
+            <section class="settings-section" id="study">
+              <div class="settings-section-head">
+                <div>
+                  <h2>复习预设</h2>
+                  <p class="small">每次提问都会带上这些偏好，改完保存，从下一次发送开始生效。</p>
+                </div>
+              </div>
 
-        <section class="asset-pane" id="assetKB" hidden>
-          <div class="asset-toolbar">
-            <button type="button" class="secondary" id="kbImport">从会话导入</button>
-            <button type="button" class="secondary" id="kbExport">导出 Markdown</button>
-            <input type="search" id="kbSearch" placeholder="搜索问题、答案或标签…" />
-          </div>
-          <div class="asset-kb-stats" id="kbStats"></div>
-          <div class="asset-kb-tags" id="kbTags"></div>
-          <div class="asset-list" id="kbList"></div>
-        </section>
+              <div class="settings-field-grid">
+                <label>专业 / 方向
+                  <input id="studySpecialty" list="studySpecialtyOptions" maxlength="120" placeholder="选择或填写，例如：计算机 / 软件工程、行测" />
+                  <datalist id="studySpecialtyOptions">
+                    <option value="计算机 / 软件工程"></option>
+                    <option value="行测"></option>
+                    <option value="申论"></option>
+                    <option value="考研"></option>
+                    <option value="英语"></option>
+                    <option value="金融"></option>
+                    <option value="法学"></option>
+                    <option value="医学"></option>
+                    <option value="会计"></option>
+                    <option value="电子信息"></option>
+                    <option value="教师资格"></option>
+                  </datalist>
+                </label>
+                <label>编程语言
+                  <input id="studyLanguage" list="studyLanguageOptions" maxlength="80" placeholder="可留空，按题目指定语言" />
+                  <datalist id="studyLanguageOptions">
+                    <option value="Python"></option>
+                    <option value="Java"></option>
+                    <option value="C++"></option>
+                    <option value="C"></option>
+                    <option value="JavaScript"></option>
+                    <option value="TypeScript"></option>
+                    <option value="Go"></option>
+                    <option value="Rust"></option>
+                    <option value="C#"></option>
+                    <option value="Kotlin"></option>
+                    <option value="Swift"></option>
+                    <option value="SQL"></option>
+                  </datalist>
+                </label>
+                <label>回答语言
+                  <select id="studyAnswerLanguage">
+                    <option value="zh-CN">中文</option>
+                    <option value="en-US">English</option>
+                  </select>
+                </label>
+                <label>我的身份
+                  <select id="studyAssistantRole">
+                    <option value="candidate">面试者</option>
+                    <option value="interviewer">面试官</option>
+                  </select>
+                </label>
+                <label>默认讲解方式
+                  <select id="studyAnswerStyle">
+                    <option value="hints">先给提示，留给自己思考</option>
+                    <option value="walkthrough">讲解思路，步骤、例子与易错点</option>
+                    <option value="solution">完整解答，思路和答案</option>
+                  </select>
+                </label>
+              </div>
 
-        <section class="asset-pane" id="assetFeedback" hidden>
-          <div class="asset-toolbar">
-            <button type="button" class="secondary" id="feedbackExport">导出 Markdown</button>
-          </div>
-          <div class="asset-kb-stats" id="feedbackStats"></div>
-          <div class="asset-list" id="feedbackList"></div>
-        </section>
-      </section>
-      <div class="feed settings-log" id="settingsLog" role="status" aria-live="polite"></div>
+              <p class="small field-hint" id="studySpecialtyHint" hidden>这个方向按考试题型作答，不会把编程语言发给模型。</p>
+
+              <label>复习目标
+                <textarea id="studyGoal" rows="2" maxlength="1000" placeholder="例如：看懂报错和当前代码；或行测数量关系与判断推理"></textarea>
+              </label>
+              <label>补充偏好（选填）
+                <textarea id="studyInstructions" rows="3" maxlength="2000" placeholder="例如：先从暴力解法讲起，再解释怎么优化；用 Java 举例"></textarea>
+              </label>
+            </section>
+
+            <section class="settings-section" id="models">
+              <div class="settings-section-head">
+                <div>
+                  <h2>模型接入</h2>
+                  <p class="small">填接口地址、模型名和 API Key 即可。密钥只保存在本机，页面不会回显。</p>
+                </div>
+                <span class="status-pill" id="modelStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>模型检查中</span></span>
+              </div>
+
+              <div class="model-current-slot" id="llmCurrent"></div>
+
+              <div class="model-block">
+                <div class="model-block-head">
+                  <h3>其他接入</h3>
+                  <button type="button" class="ghost small-button" id="llmNewProfile">新建接入</button>
+                </div>
+                <div class="model-card-grid" id="llmProfileCards"></div>
+              </div>
+
+              <div class="model-block" id="llmPresetBlock">
+                <div class="model-block-head">
+                  <h3>本地预置</h3>
+                  <span class="small">点一下填入表单，不会立刻切换</span>
+                </div>
+                <div class="model-preset-row" id="llmPresetCards"></div>
+              </div>
+
+              <div class="model-form">
+                <div class="model-form-head">
+                  <h3 id="llmFormTitle">新建接入</h3>
+                  <span class="model-edit-tag" id="llmEditTag" hidden></span>
+                  <button type="button" class="ghost small-button" id="llmCancelEdit" hidden>取消编辑</button>
+                </div>
+                <div class="settings-field-grid">
+                  <label>接口地址
+                    <input id="llmBaseUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" />
+                  </label>
+                  <label>模型名
+                    <input id="llmModel" list="llmModelOptions" maxlength="160" placeholder="例如 deepseek-chat" />
+                    <datalist id="llmModelOptions"></datalist>
+                  </label>
+                  <label>名称（选填）
+                    <input id="llmName" maxlength="60" placeholder="例如 局域网、SiliconFlow" />
+                  </label>
+                  <label>单次输出额度（tokens）
+                    <input id="llmMaxTokens" type="number" min="0" max="1000000" step="1024" value="30000" />
+                  </label>
+                  <label class="field-wide">API Key（留空表示不修改）
+                    <input id="llmApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="未配置" />
+                  </label>
+                </div>
+                <div class="settings-actions">
+                  <button type="button" id="saveLlmProfile">保存并启用</button>
+                  <button class="secondary" type="button" id="checkModel" title="用已保存的配置调用一次真实模型">检查连接</button>
+                  <span class="small" id="llmProfileState" role="status">正在读取接入配置…</span>
+                </div>
+              </div>
+
+              <details class="settings-disclosure settings-disclosure-inline" id="llmImport">
+                <summary>导入配置 <span>粘贴或选择 JSON</span></summary>
+                <p class="small">支持 base_url / model / api_key，也支持 llm_base_url、llm_model、llm_api_key、max_tokens 等写法。导入后点卡片编辑并保存启用。</p>
+                <label>配置 JSON
+                  <textarea id="llmImportText" rows="5" maxlength="60000" placeholder='{"base_url":"https://api.example.com/v1","model":"model-name","api_key":"..."}'></textarea>
+                </label>
+                <label>或选择文件
+                  <input type="file" id="llmImportFile" accept="application/json,.json" />
+                </label>
+                <div class="settings-actions">
+                  <button type="button" class="secondary" id="importLlmProfile">解析并导入</button>
+                </div>
+                <p class="small" id="llmImportState" role="status"></p>
+              </details>
+
+              <div class="settings-actions settings-actions-quiet">
+                <button class="ghost small-button" type="button" id="refreshStatus" title="刷新本地服务、模型和 ASR 配置状态">刷新状态</button>
+                <span class="status-pill" id="runtimeStatus" role="status" aria-live="polite"><span class="status-dot"></span><span>检查中</span></span>
+                <a class="button ghost small-button" href="/docs" target="_blank" title="打开本地 API 文档">API 文档</a>
+              </div>
+            </section>
+
+            <details class="settings-disclosure settings-section" id="shortcuts" open>
+              <summary>桌面快捷键 <span>截图、发送与窗口操作</span></summary>
+              <section class="settings-card">
+                <p class="small">点击一个快捷键，再按下新的组合键。Esc 取消，Tab 切换。保存后约 4 秒同步到桌面，无需重启。</p>
+                <p class="small" id="hotkeyFeedback" role="status">原有功能全部保留。快捷键需包含 ⌘ / Ctrl / Alt 等修饰键。</p>
+                <div class="hotkey-grid">
+                  <label>
+                    隐藏 / 显示
+                    <input id="hotkeyToggleWindow" data-hotkey="toggleWindow" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="toggleWindow"></span>
+                  </label>
+                  <label>
+                    退出
+                    <input id="hotkeyQuitApp" data-hotkey="quitApp" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="quitApp"></span>
+                  </label>
+                  <label>
+                    按住操作面板
+                    <input id="hotkeyToggleVisible" data-hotkey="toggleVisible" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="toggleVisible"></span>
+                  </label>
+                  <label>
+                    紧凑 / 展开
+                    <input id="hotkeyToggleCompact" data-hotkey="toggleCompact" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="toggleCompact"></span>
+                  </label>
+                  <label>
+                    截图
+                    <input id="hotkeyCaptureRegion" data-hotkey="captureRegion" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="captureRegion"></span>
+                  </label>
+                  <label>
+                    全屏截图
+                    <input id="hotkeyCaptureScreen" data-hotkey="captureScreen" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="captureScreen"></span>
+                  </label>
+                  <label>
+                    窗口上移
+                    <input data-hotkey="moveUp" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="moveUp"></span>
+                  </label>
+                  <label>
+                    窗口下移
+                    <input data-hotkey="moveDown" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="moveDown"></span>
+                  </label>
+                  <label>
+                    窗口左移
+                    <input data-hotkey="moveLeft" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="moveLeft"></span>
+                  </label>
+                  <label>
+                    窗口右移
+                    <input data-hotkey="moveRight" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="moveRight"></span>
+                  </label>
+                  <label>
+                    新对话
+                    <input id="hotkeyNewQuestion" data-hotkey="newQuestion" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="newQuestion"></span>
+                  </label>
+                  <label>重置视图<input data-hotkey="resetView" spellcheck="false" /><span class="small hotkey-preview" data-preview="resetView"></span></label>
+                  <label>
+                    清空截图
+                    <input id="hotkeyClearShots" data-hotkey="clearShots" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="clearShots"></span>
+                  </label>
+                  <label>
+                    删除最后一张截图
+                    <input id="hotkeyDeleteLastShot" data-hotkey="deleteLastShot" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="deleteLastShot"></span>
+                  </label>
+                  <label>
+                    处理截图
+                    <input id="hotkeySendChat" data-hotkey="sendChat" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="sendChat"></span>
+                  </label>
+                  <label>
+                    回答上一页
+                    <input id="hotkeyReadPrev" data-hotkey="readPrev" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="readPrev"></span>
+                  </label>
+                  <label>
+                    回答下一页
+                    <input id="hotkeyReadNext" data-hotkey="readNext" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="readNext"></span>
+                  </label>
+                  <label>
+                    回答内容上滚
+                    <input id="hotkeyScrollUp" data-hotkey="scrollUp" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="scrollUp"></span>
+                  </label>
+                  <label>
+                    回答内容下滚
+                    <input data-hotkey="scrollDown" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="scrollDown"></span>
+                  </label>
+                  <label>
+                    降低不透明度
+                    <input data-hotkey="opacityDown" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="opacityDown"></span>
+                  </label>
+                  <label>
+                    提高不透明度
+                    <input data-hotkey="opacityUp" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="opacityUp"></span>
+                  </label>
+                  <label>
+                    缩小字号
+                    <input data-hotkey="zoomOut" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="zoomOut"></span>
+                  </label>
+                  <label>
+                    还原字号
+                    <input data-hotkey="zoomReset" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="zoomReset"></span>
+                  </label>
+                  <label>
+                    放大字号
+                    <input data-hotkey="zoomIn" spellcheck="false" />
+                    <span class="small hotkey-preview" data-preview="zoomIn"></span>
+                  </label>
+                </div>
+                <button type="button" class="secondary" id="resetHotkeys">恢复默认快捷键</button>
+              </section>
+            </details>
+
+            <details class="settings-disclosure settings-section" id="legacySettings">
+              <summary>岗位与简历 <span>面试工作台使用的资料</span></summary>
+              <section class="settings-card">
+                <h2>岗位信息</h2>
+                <p class="small">给面试工作台使用。首页截图对话不会读这段 JD。</p>
+                <label>
+                  岗位 JD
+                  <textarea id="jdText" rows="8" placeholder="粘贴岗位职责、能力要求和业务背景"></textarea>
+                </label>
+                <label>
+                  上传 JD 文档
+                  <input
+                    type="file"
+                    id="jdFile"
+                    aria-describedby="jdFileStatus"
+                    accept=".txt,.md,.markdown,.json,.csv,.log,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/*"
+                  />
+                  <span class="small upload-status" id="jdFileStatus" role="status" aria-live="polite">支持 PDF、Word、图片和文本文件。</span>
+                </label>
+              </section>
+
+              <section class="settings-card">
+                <h2>简历信息</h2>
+                <p class="small">保存后作为候选人资料进入实时面试。</p>
+                <label>
+                  简历摘要
+                  <textarea id="resumeText" rows="8" placeholder="粘贴候选人经历、项目和职责"></textarea>
+                </label>
+                <label>
+                  上传简历文档
+                  <input
+                    type="file"
+                    id="resumeFile"
+                    aria-describedby="resumeFileStatus"
+                    accept=".txt,.md,.markdown,.json,.csv,.log,.pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.heic,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/*"
+                  />
+                  <span class="small upload-status" id="resumeFileStatus" role="status" aria-live="polite">支持 PDF、Word、图片和文本文件。</span>
+                </label>
+                <label class="consent-row" for="longTermMemoryConsent">
+                  <input type="checkbox" id="longTermMemoryConsent" name="long_term_memory_consent" />
+                  <span>
+                    记录跨面试长期记忆
+                    <span class="small">勾选表示已获得候选人同意。未勾选时本次面试不会留下任何跨面试记忆。</span>
+                  </span>
+                </label>
+              </section>
+
+              <section class="settings-card" id="interview">
+                <h2>面试工作台</h2>
+                <p class="small">实时面试、语音转写、追问和评分仍可单独使用。</p>
+                <div class="settings-actions">
+                  <a class="button secondary" href="/cockpit" target="_blank" rel="noopener">打开面试工作台</a>
+                  <button class="secondary" type="button" id="checkAsr">检查语音服务</button>
+                  <span class="status-pill" id="asrStatus" role="status"><span class="status-dot"></span><span>待检查</span></span>
+                  <button class="secondary" type="button" id="loadSampleSettings">填入岗位与简历样例</button>
+                </div>
+              </section>
+            </details>
+
+            <div class="settings-savebar">
+              <span class="small" id="settingsSaveState" role="status">正在读取设置…</span>
+              <button type="submit" id="saveUiSettings" disabled>保存设置</button>
+            </div>
+          </form>
+
+          <section class="settings-section" id="assets">
+            <div class="settings-section-head">
+              <div>
+                <h2>学习资产</h2>
+                <p class="small">桌面端每次新对话和截图提问都会自动留档，可在这里回看、导入知识库、导出。</p>
+              </div>
+            </div>
+            <nav class="asset-tabs" id="assetTabs">
+              <button type="button" class="asset-tab is-active" data-asset-tab="records">会话记录</button>
+              <button type="button" class="asset-tab" data-asset-tab="kb">知识库</button>
+              <button type="button" class="asset-tab" data-asset-tab="feedback">回答反馈</button>
+              <button type="button" class="asset-tab" data-asset-tab="exams">笔试记录</button>
+            </nav>
+
+            <section class="asset-pane" id="assetRecords">
+              <div class="asset-toolbar">
+                <button type="button" class="secondary" id="recordsExport">导出 Markdown</button>
+              </div>
+              <div class="asset-list" id="recordsList"></div>
+            </section>
+
+            <section class="asset-pane" id="assetKB" hidden>
+              <div class="asset-toolbar">
+                <button type="button" class="secondary" id="kbImport">从会话导入</button>
+                <button type="button" class="secondary" id="kbExport">导出 Markdown</button>
+                <input type="search" id="kbSearch" placeholder="搜索问题、答案或标签…" />
+              </div>
+              <div class="asset-kb-stats" id="kbStats"></div>
+              <div class="asset-kb-tags" id="kbTags"></div>
+              <div class="asset-list" id="kbList"></div>
+            </section>
+
+            <section class="asset-pane" id="assetFeedback" hidden>
+              <div class="asset-toolbar">
+                <button type="button" class="secondary" id="feedbackExport">导出 Markdown</button>
+              </div>
+              <div class="asset-kb-stats" id="feedbackStats"></div>
+              <div class="asset-list" id="feedbackList"></div>
+            </section>
+
+            <section class="asset-pane" id="assetExams" hidden>
+              <div class="asset-toolbar">
+                <button type="button" class="secondary" id="examsExport">导出 Markdown</button>
+              </div>
+              <p class="small">每次截图提问的题目、模型回答和题图都会自动留在这里。</p>
+              <div class="asset-list" id="examsList"></div>
+            </section>
+          </section>
+
+          <div class="feed settings-log" id="settingsLog" role="status" aria-live="polite"></div>
+        </div>
+      </div>
     </main>
     <script type="module" src="modules/settings.js"></script>
   </body>

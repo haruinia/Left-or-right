@@ -29,7 +29,7 @@ def test_settings_rejects_out_of_range_runtime_thresholds() -> None:
 
 
 def test_settings_validates_llm_output_budget_and_protocol() -> None:
-    assert Settings().llm_max_tokens == 16384
+    assert Settings().llm_max_tokens == 30000
     assert Settings(llm_max_tokens=0).llm_max_tokens == 0
     with pytest.raises(ValidationError):
         Settings(llm_max_tokens=-1)

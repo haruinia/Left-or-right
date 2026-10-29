@@ -22,7 +22,7 @@ class Settings(BaseSettings):
         "auto", "openai_chat", "openai_responses", "anthropic_messages"
     ] = "auto"
     # 0 means "do not send an output budget"; providers then apply their own default.
-    llm_max_tokens: int = Field(default=16384, ge=0, le=1_000_000)
+    llm_max_tokens: int = Field(default=30000, ge=0, le=1_000_000)
     llm_api_key: str = ""
     llm_auth_header: str = "api-key"
     llm_auth_scheme: str = ""
