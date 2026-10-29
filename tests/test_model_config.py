@@ -80,6 +80,7 @@ def test_editing_a_saved_profile_updates_it_in_place_and_keeps_its_key() -> None
     )
     backup = next(item for item in second["profiles"] if item["llm_model"] == "model-b")
     assert backup["id"] == "backup"
+    model_config.activate_profile(first["active_profile_id"])
 
     edited = _save(
         name="备用改名",
@@ -135,6 +136,18 @@ def test_invalid_extra_body_and_protocol_are_rejected() -> None:
         _save(llm_extra_body_json="{bad")
     with pytest.raises(ValueError):
         _save(llm_protocol="grpc")
+
+
+def test_presets_are_local_only_and_never_return_credentials(tmp_path) -> None:
+    assert model_config.list_response()["presets"] == []
+    (tmp_path / "model_presets.json").write_text(json.dumps([
+        {"id": "local", "base_url": "https://preset.test/v1", "model": "test-model", "api_key": "private-fixture", "models": ["test-model"]},
+    ]), encoding="utf-8")
+    response = model_config.list_response()
+    assert response["presets"][0]["id"] == "local"
+    assert response["presets"][0]["llm_model"] == "test-model"
+    assert "private-fixture" not in json.dumps(response)
+    assert "llm_api_key" not in response["presets"][0]
 
 
 def test_delete_keeps_at_least_one_profile() -> None:

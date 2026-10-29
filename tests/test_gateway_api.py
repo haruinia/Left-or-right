@@ -1007,7 +1007,7 @@ def test_gateway_llm_check_reports_mock_mode(tmp_path: Path, monkeypatch) -> Non
 def test_gateway_llm_check_calls_configured_model(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("LLM_MODEL", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test")
     monkeypatch.setenv("LLM_API_KEY", "secret-key")
     get_settings.cache_clear()
@@ -1042,14 +1042,14 @@ def test_gateway_llm_check_calls_configured_model(tmp_path: Path, monkeypatch) -
     assert response.json() == {
         "ok": True,
         "mode": "live",
-        "message": "真实模型连接正常：openai_compatible / mimo-v2.5-pro",
+        "message": "真实模型连接正常：openai_compatible / test-model",
     }
 
 
 def test_gateway_llm_check_sanitizes_upstream_error(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("LLM_MODEL", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test")
     monkeypatch.setenv("LLM_API_KEY", "secret-key")
     get_settings.cache_clear()
@@ -3660,7 +3660,7 @@ def test_cockpit_assets_are_served_with_web_media_types(tmp_path: Path, monkeypa
     assert 'src="modules/home.js"' in home.text
 
     settings = client.get("/settings")
-    assert 'href="styles.css"' in settings.text
+    assert 'href="modules/settings.css"' in settings.text
     assert 'src="modules/settings.js"' in settings.text
 
     cockpit = client.get("/cockpit")
@@ -3776,32 +3776,59 @@ def test_gateway_root_is_liuwa_home(tmp_path: Path, monkeypatch) -> None:
     assert "/api/chat/stream" in client.get("/modules/home.js").text
 
 
-def test_gateway_settings_page_hosts_interview_workbench(tmp_path: Path, monkeypatch) -> None:
+def test_gateway_settings_page_keeps_only_current_features(tmp_path: Path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     page = client.get("/settings")
     assert page.status_code == 200
-    assert "岗位信息" in page.text
-    assert "简历信息" in page.text
-    assert "快捷键" in page.text
-    assert "隐藏 / 显示" in page.text
-    assert 'data-hotkey="toggleWindow"' in page.text
-    assert 'data-hotkey="clearShots"' in page.text
-    assert 'data-hotkey="quitApp"' in page.text
-    assert "模型接入" in page.text
-    assert "本地预置" in page.text
-    assert 'id="jdText"' in page.text
-    assert 'id="resumeText"' in page.text
-    assert 'id="saveUiSettings"' in page.text
+    for label in ("模型接入", "答题偏好", "面试资料", "快捷键", "学习记录", "岗位信息", "简历信息"):
+        assert label in page.text
+    for element in ("jdText", "resumeText", "saveUiSettings", "studySpecialty", "studySpecialtyOptions", "studyAnswerStyle", "llmToggleKey"):
+        assert f'id="{element}"' in page.text
     assert 'src="modules/settings.js"' in page.text
-    assert 'href="/cockpit"' in page.text
+    assert 'href="modules/settings.css"' in page.text
+    assert 'href="styles.css"' not in page.text
+    assert 'href="/cockpit"' not in page.text
     assert "<iframe" not in page.text
-    assert 'id="studySpecialty"' in page.text
-    assert 'id="studySpecialtyOptions"' in page.text
+    assert "检查语音服务" not in page.text
+    assert 'id="llmName"' not in page.text
     assert 'value="行测"' in page.text
     assert 'value="申论"' in page.text
-    assert 'id="studyAnswerStyle"' in page.text
-    assert "面试工作台" in page.text
-    assert "/api/ui/settings" in client.get("/modules/settings.js").text
+    script = client.get("/modules/settings.js").text
+    assert "/api/ui/settings" in script
+    for action in ("toggleWindow", "clearShots", "quitApp"):
+        assert action in script
+    css = client.get("/modules/settings.css")
+    assert css.status_code == 200
+    assert css.headers["content-type"].startswith("text/css")
+
+
+def test_model_key_reveal_is_explicit_local_authenticated_and_not_cached(tmp_path: Path, monkeypatch) -> None:
+    from services.gateway import model_config
+
+    _client(tmp_path, monkeypatch, gateway_api_key="local-access")
+    monkeypatch.setenv("LLM_PROFILES_PATH", str(tmp_path / "profiles.json"))
+    model_config.save_profile(model_config.ProfileInput(
+        llm_model="test-model", llm_base_url="https://model.test/v1", llm_api_key="private-test-key",
+    ))
+    client = TestClient(app, base_url="http://127.0.0.1:9958", client=("127.0.0.1", 50000))
+    headers = {"x-api-key": "local-access", "origin": "http://127.0.0.1:9958"}
+    public = client.get("/api/config/llm/profiles", headers=headers)
+    assert "private-test-key" not in public.text
+    profile_id = public.json()["active_profile_id"]
+    path = f"/api/config/llm/profiles/{profile_id}/key"
+    assert client.post(path).status_code == 401
+    result = client.post(path, headers=headers)
+    assert result.status_code == 200
+    assert result.json() == {"llm_api_key": "private-test-key"}
+    assert result.headers["cache-control"] == "no-store"
+    assert client.post(path, headers={**headers, "origin": "http://evil.test"}).status_code == 403
+    assert client.post(path, headers={**headers, "origin": "null"}).status_code == 403
+    assert client.post(path, headers={**headers, "sec-fetch-site": "cross-site"}).status_code == 403
+    assert client.post("/api/config/llm/profiles/missing/key", headers=headers).status_code == 404
+    remote = TestClient(app, base_url="http://127.0.0.1:9958", client=("192.168.1.20", 50000))
+    assert remote.post(path, headers=headers).status_code == 403
+    rebound = TestClient(app, base_url="http://evil.test", client=("127.0.0.1", 50000))
+    assert rebound.post(path, headers={"x-api-key": "local-access"}).status_code == 403
 
 
 def test_ui_settings_roundtrip_persists_briefing_and_hotkeys(

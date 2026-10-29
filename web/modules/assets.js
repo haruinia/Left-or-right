@@ -1,4 +1,4 @@
-// 学习资产管理：会话记录 / 知识库 / 回答反馈的查看、导入、导出。
+// 学习记录与知识库的查看、导入、导出。
 // 通过共享本地服务读取，桌面端与设置中心使用同一份持久化数据。
 import {
   listSessionRecords,
@@ -14,11 +14,6 @@ import {
   exportKnowledgeBaseAsMarkdown,
   getKBStats,
 } from "./knowledge-base.js";
-import {
-  getFeedbackStats,
-  listRecentNegativeFeedback,
-  exportFeedbackAsMarkdown,
-} from "./feedback-store.js";
 import {
   listExamRecords,
   deleteExamRecord,
@@ -37,7 +32,6 @@ const tabs = document.querySelector("#assetTabs");
 const panes = {
   records: document.querySelector("#assetRecords"),
   kb: document.querySelector("#assetKB"),
-  feedback: document.querySelector("#assetFeedback"),
   exams: document.querySelector("#assetExams"),
 };
 function showError(target, error) {
@@ -72,14 +66,16 @@ function initAssets() {
   tabs.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-asset-tab]");
     if (!tab) return;
-    tabs.querySelectorAll(".asset-tab").forEach((t) => t.classList.toggle("is-active", t === tab));
+    tabs.querySelectorAll(".asset-tab").forEach((t) => {
+      t.classList.toggle("is-active", t === tab);
+      t.setAttribute("aria-pressed", String(t === tab));
+    });
     Object.entries(panes).forEach(([key, pane]) => { pane.hidden = key !== tab.dataset.assetTab; });
     renderAll();
   });
 
   initRecords();
   initKB();
-  initFeedback();
   initExams();
   renderAll();
 }
@@ -88,7 +84,6 @@ function renderAll() {
   return Promise.all([
     action(panes.records, renderRecords)(),
     action(panes.kb, renderKB)(),
-    action(panes.feedback, renderFeedback)(),
     action(panes.exams, renderExams)(),
   ]);
 }
@@ -259,49 +254,6 @@ async function renderKBList() {
       </footer>
     </article>
   `).join("");
-}
-
-// ===== 回答反馈 =====
-const feedbackStats = document.querySelector("#feedbackStats");
-const feedbackList = document.querySelector("#feedbackList");
-
-function initFeedback() {
-  document.querySelector("#feedbackExport")?.addEventListener("click", action(panes.feedback, exportFeedbackAsMarkdown));
-}
-
-async function renderFeedback() {
-  if (!feedbackStats || !feedbackList) return;
-  const stats = await getFeedbackStats();
-  feedbackStats.innerHTML = `
-    <span>共 ${stats.total} 条反馈</span>
-    <span>👍 ${stats.up}</span>
-    <span>👎 ${stats.down}</span>
-    <span>好评率 ${stats.upRate}%</span>
-  `;
-  if (!stats.total) {
-    feedbackList.innerHTML = '<p class="asset-empty">还没有反馈记录。这里保留并汇总已有的回答反馈。</p>';
-    return;
-  }
-  // 简化展示：只显示负面反馈（用于改进），正面反馈体现在统计里
-  const negatives = await listRecentNegativeFeedback(50);
-    if (!negatives.length) {
-      feedbackList.innerHTML = '<p class="asset-empty">没有负面反馈，回答质量良好。</p>';
-      return;
-    }
-    feedbackList.innerHTML = negatives.map((item) => `
-      <article class="asset-item">
-        <header>
-          <span class="asset-tag-small">👎 无用</span>
-          <time>${new Date(item.timestamp).toLocaleString("zh-CN")}</time>
-        </header>
-        ${item.questionText ? `<p class="asset-question">${escapeHtml(item.questionText.slice(0, 120))}</p>` : ""}
-        <details class="asset-answer">
-          <summary>查看回答</summary>
-          <p>${escapeHtml(item.answerText.slice(0, 500))}${item.answerText.length > 500 ? "…" : ""}</p>
-        </details>
-        ${item.model ? `<footer><span class="asset-tag-small">${escapeHtml(item.model)}</span></footer>` : ""}
-      </article>
-    `).join("");
 }
 
 // ===== 笔试记录 =====

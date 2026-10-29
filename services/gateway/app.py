@@ -512,6 +512,29 @@ def llm_profiles():
     return model_config.list_response()
 
 
+@app.post("/api/config/llm/profiles/{profile_id}/key")
+def reveal_llm_key(profile_id: str, request: Request):
+    from ipaddress import ip_address
+
+    try:
+        local_client = request.client is not None and ip_address(request.client.host).is_loopback
+    except ValueError:
+        local_client = False
+    origin = request.headers.get("origin")
+    if (
+        not local_client
+        or request.url.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or request.headers.get("sec-fetch-site") == "cross-site"
+        or (origin and origin.rstrip("/") != str(request.base_url).rstrip("/"))
+    ):
+        raise HTTPException(status_code=403, detail="密钥只能在本机设置页面查看")
+    try:
+        key = model_config.profile_api_key(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JSONResponse({"llm_api_key": key}, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+
 @app.post("/api/config/llm", response_model=RuntimeStatus)
 def update_llm_config(payload: model_config.ProfileInput) -> RuntimeStatus:
     """保存并启用一套模型接入配置；密钥只写在本机私有存储。"""

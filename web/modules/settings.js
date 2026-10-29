@@ -1,237 +1,163 @@
 import { DEFAULT_HOTKEYS, formatAccelerator, acceleratorFromEvent, shortcutConflict } from "./shortcuts.js";
 import { isExamSpecialty } from "./study-presets.js";
 import { parseDocumentFile } from "./documents.js";
-import { checkAsr, checkModel, jdText, longTermMemoryConsent, refreshStatus, resumeText } from "./dom.js";
-import { fetchGatewayJson, postJson, saveGatewayConnection } from "./gateway.js";
-import { checkAsrReadiness, checkLlmConnection, checkRuntime } from "./runtime.js";
+import { fetchGatewayJson, postJson } from "./gateway.js";
 import { state } from "./state.js";
-import { appendEvent, escapeHtml } from "./ui.js";
-import "./assets.js"; // 学习资产板块（会话记录/知识库/反馈）
 import { loadProfiles, wireModelConfig } from "./model-config.js";
+import "./assets.js";
 
+const $ = (selector) => document.querySelector(selector);
+document.addEventListener("pointerdown", () => { document.documentElement.dataset.keyboardFocus = "false"; });
+document.addEventListener("keydown", (event) => { if (event.key === "Tab") document.documentElement.dataset.keyboardFocus = "true"; });
 const studyFields = {
-  study_specialty: document.querySelector("#studySpecialty"),
-  study_language: document.querySelector("#studyLanguage"),
-  study_goal: document.querySelector("#studyGoal"),
-  study_answer_style: document.querySelector("#studyAnswerStyle"),
-  study_instructions: document.querySelector("#studyInstructions"),
-  answer_language: document.querySelector("#studyAnswerLanguage"),
-  assistant_role: document.querySelector("#studyAssistantRole"),
+  study_specialty: $("#studySpecialty"),
+  study_language: $("#studyLanguage"),
+  study_goal: $("#studyGoal"),
+  study_answer_style: $("#studyAnswerStyle"),
+  study_instructions: $("#studyInstructions"),
+  answer_language: $("#studyAnswerLanguage"),
+  assistant_role: $("#studyAssistantRole"),
 };
-const saveState = document.querySelector("#settingsSaveState");
-let settingsLoaded = false;
-let savedUiSettings = {};
-
-const HOTKEY_ACTIONS = Object.keys(DEFAULT_HOTKEYS);
+const shortcutGroups = [
+  ["截图与对话", { captureRegion: "截图", captureScreen: "全屏截图", sendChat: "处理截图", newQuestion: "新对话", resetView: "重置视图", deleteLastShot: "删除最后一张截图", clearShots: "清空截图" }],
+  ["阅读", { readPrev: "回答上一页", readNext: "回答下一页", scrollUp: "回答内容上滚", scrollDown: "回答内容下滚" }],
+  ["窗口", { toggleWindow: "隐藏 / 显示", toggleVisible: "按住操作面板", toggleCompact: "紧凑 / 展开", moveUp: "窗口上移", moveDown: "窗口下移", moveLeft: "窗口左移", moveRight: "窗口右移", opacityDown: "降低不透明度", opacityUp: "提高不透明度", zoomOut: "缩小字号", zoomReset: "还原字号", zoomIn: "放大字号", quitApp: "退出应用" }],
+];
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-const hotkeyFeedback = document.querySelector("#hotkeyFeedback");
+const saveState = $("#settingsSaveState");
+let savedSettings = null;
+let saving = false;
 
-function hotkeyInputs() {
-  return HOTKEY_ACTIONS.map((action) => document.querySelector(`[data-hotkey="${action}"]`)).filter(Boolean);
-}
+$("#hotkeyList").innerHTML = shortcutGroups.map(([group, actions]) => `<div class="shortcut-group"><h3>${group}</h3>${Object.entries(actions).map(([action, label]) => `<label class="shortcut-row"><span>${label}</span><input data-hotkey="${action}" aria-describedby="hotkeyFeedback" readonly disabled /></label>`).join("")}</div>`).join("");
 
-function readHotkeysFromForm() {
-  const hotkeys = {};
+function hotkeyInputs() { return [...document.querySelectorAll("[data-hotkey]")]; }
+function readHotkeys() { return Object.fromEntries(hotkeyInputs().map((input) => [input.dataset.hotkey, input.dataset.accelerator])); }
+function fillHotkeys(hotkeys) {
   for (const input of hotkeyInputs()) {
-    hotkeys[input.dataset.hotkey] = input.dataset.accelerator;
-  }
-  return hotkeys;
-}
-
-function applyHotkeysToForm(hotkeys) {
-  for (const input of hotkeyInputs()) {
-    const value = hotkeys[input.dataset.hotkey];
+    const value = hotkeys[input.dataset.hotkey] || DEFAULT_HOTKEYS[input.dataset.hotkey];
+    input.dataset.accelerator = value;
+    input.value = formatAccelerator(value, mac);
     input.disabled = false;
-    if (value) input.dataset.accelerator = value;
-    input.value = formatAccelerator(input.dataset.accelerator || "", mac);
-    const preview = document.querySelector(`[data-preview="${input.dataset.hotkey}"]`);
-    if (preview) preview.textContent = "点击录入组合键";
   }
 }
-
-function hydrateForm(saved) {
-  savedUiSettings = saved;
-  for (const [key, input] of Object.entries(studyFields)) input.value = saved[key] ?? "";
-  if (jdText) jdText.value = saved.jd_text || "";
-  if (resumeText) resumeText.value = saved.resume_text || "";
-  if (longTermMemoryConsent && typeof saved.long_term_memory_consent === "boolean") {
-    longTermMemoryConsent.checked = saved.long_term_memory_consent;
-  }
-  applyHotkeysToForm(saved.hotkeys || DEFAULT_HOTKEYS);
-  validateHotkeys();
-  syncStudyHint();
+function readSettings() {
+  return {
+    ...Object.fromEntries(Object.entries(studyFields).map(([key, input]) => [key, input.value.trim()])),
+    jd_text: $("#jdText").value,
+    resume_text: $("#resumeText").value,
+    long_term_memory_consent: $("#longTermMemoryConsent").checked,
+    hotkeys: readHotkeys(),
+  };
 }
-
-function syncStudyHint() {
-  const hint = document.querySelector("#studySpecialtyHint");
-  if (!hint || !studyFields.study_specialty) return;
-  hint.hidden = !isExamSpecialty(studyFields.study_specialty.value);
+function changedSettings() {
+  return Object.fromEntries(Object.entries(readSettings()).filter(([key, value]) => (
+    key === "hotkeys"
+      ? Object.entries(value).some(([action, binding]) => binding !== savedSettings?.hotkeys?.[action])
+      : value !== savedSettings?.[key]
+  )));
 }
-
-async function loadUiSettings() {
-  try {
-    const saved = await fetchGatewayJson("/api/ui/settings");
-    hydrateForm(saved);
-    settingsLoaded = true;
-    document.querySelector("#resetHotkeys").disabled = false;
-    document.querySelector("#saveUiSettings").disabled = false;
-    saveState.textContent = "修改后点击保存，同步到桌面应用。";
-  } catch (error) {
-    saveState.textContent = "读取失败，请检查服务连接后刷新页面。";
-    appendEvent("设置", `读取失败：${escapeHtml(error.message || error)}`, "red");
-  }
-}
-
-async function saveUiSettings(event) {
-  event.preventDefault();
-  if (!settingsLoaded || !validateHotkeys()) return;
-  const button = document.querySelector("#saveUiSettings");
-  if (button) button.disabled = true;
-  try {
-    const saved = await postJson("/api/ui/settings", {
-      // 只提交本页编辑的字段，避免覆盖快捷设置刚改的语言和身份。
-      ...Object.fromEntries(Object.entries(studyFields).map(([key, input]) => [key, input.value.trim()])),
-      jd_text: jdText ? jdText.value : "",
-      resume_text: resumeText ? resumeText.value : "",
-      long_term_memory_consent: Boolean(longTermMemoryConsent && longTermMemoryConsent.checked),
-      hotkeys: readHotkeysFromForm(),
-    }, { method: "PATCH" });
-    hydrateForm(saved);
-    saveState.textContent = "已保存，下次提问会使用新的复习预设。";
-    appendEvent("设置", "复习预设与快捷键已保存。", "green");
-  } catch (error) {
-    saveState.textContent = "保存失败，修改仍保留在页面中。";
-    appendEvent("设置", `保存失败：${escapeHtml(error.message || error)}`, "red");
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
-function loadSampleSettings() {
-  if (jdText) {
-    jdText.value =
-      "负责 LLM 应用平台、FastAPI 微服务、模型调用编排、可靠性治理、评估报告与线上故障排查。要求能独立做技术方案、指标设计、降级策略和跨团队协作。";
-  }
-  if (resumeText) {
-    resumeText.value =
-      "候选人自述 5 年 Python 后端经验，最近负责 AI 面试评估系统，涉及 FastAPI 网关、LLM JSON 解析、重试降级、报告生成和可观测性指标。";
-  }
-  appendEvent("样例资料", "已填入一组 JD 和简历，点击保存设置后生效。");
-}
-
-if (!state.gatewayApiKey && typeof window.__GATEWAY_KEY__ === "string") {
-  state.gatewayApiKey = window.__GATEWAY_KEY__.trim();
-}
-
-document.querySelector("#jdFile")?.addEventListener("change", (event) => {
-  parseDocumentFile(event.target.files[0], event.target, jdText, "JD", "jd");
-});
-document.querySelector("#resumeFile")?.addEventListener("change", (event) => {
-  parseDocumentFile(event.target.files[0], event.target, resumeText, "简历", "resume");
-});
 function validateHotkeys() {
-  const conflict = shortcutConflict(readHotkeysFromForm(), mac);
-  hotkeyFeedback.classList.toggle("is-error", Boolean(conflict));
-  if (conflict) {
-    const labels = conflict.map((action) => document.querySelector(`[data-hotkey="${action}"]`).closest("label").firstChild.textContent.trim());
-    hotkeyFeedback.textContent = `「${labels[0]}」与「${labels[1]}」使用了相同按键，请修改后保存。`;
-    saveState.textContent = "快捷键冲突，尚未保存。";
-    return false;
+  const conflict = shortcutConflict(readHotkeys());
+  const node = $("#hotkeyFeedback");
+  node.classList.toggle("is-error", Boolean(conflict));
+  node.textContent = conflict
+    ? `「${document.querySelector(`[data-hotkey="${conflict[0]}"]`).closest("label").querySelector("span").textContent}」与「${document.querySelector(`[data-hotkey="${conflict[1]}"]`).closest("label").querySelector("span").textContent}」按键冲突。`
+    : "组合键需包含 ⌘、Ctrl 或 Alt。";
+  return !conflict;
+}
+function syncDirty() {
+  $("#studySpecialtyHint").hidden = !isExamSpecialty(studyFields.study_specialty.value);
+  if (!savedSettings || saving) return;
+  const valid = validateHotkeys();
+  const dirty = Object.keys(changedSettings()).length > 0;
+  $("#saveUiSettings").disabled = !valid || !dirty;
+  saveState.textContent = !valid ? "快捷键冲突，尚未保存。" : dirty ? "有未保存的修改" : "已与应用同步";
+}
+function fillSettings(saved) {
+  savedSettings = saved;
+  for (const [key, input] of Object.entries(studyFields)) input.value = saved[key] ?? "";
+  $("#jdText").value = saved.jd_text || "";
+  $("#resumeText").value = saved.resume_text || "";
+  $("#longTermMemoryConsent").checked = Boolean(saved.long_term_memory_consent);
+  fillHotkeys(saved.hotkeys || DEFAULT_HOTKEYS);
+  $("#resetHotkeys").disabled = false;
+}
+async function loadSettings() {
+  try { fillSettings(await fetchGatewayJson("/api/ui/settings")); syncDirty(); }
+  catch { saveState.textContent = "读取设置失败，请重新打开此页。"; }
+}
+async function saveSettings(event) {
+  event.preventDefault();
+  if (!savedSettings || saving || !validateHotkeys()) return;
+  const changes = changedSettings();
+  if (!Object.keys(changes).length) return;
+  saving = true;
+  $("#saveUiSettings").disabled = true;
+  saveState.textContent = "正在保存…";
+  try {
+    const saved = await postJson("/api/ui/settings", changes, { method: "PATCH" });
+    // 请求期间的新输入仍留在表单里，只更新保存基线。
+    savedSettings = saved;
+    saveState.textContent = "已保存并同步到应用";
+  } catch { saveState.textContent = "保存失败，修改仍保留在页面中。"; }
+  finally {
+    saving = false;
+    $("#saveUiSettings").disabled = !validateHotkeys() || !Object.keys(changedSettings()).length;
   }
-  hotkeyFeedback.textContent = "原有功能全部保留。保存后自动同步；系统占用的组合键会在桌面提示。";
-  return true;
 }
 
-document.querySelector("#resetHotkeys").disabled = true;
 hotkeyInputs().forEach((input) => {
-  input.disabled = true;
-  input.readOnly = true;
-  input.setAttribute("aria-describedby", "hotkeyFeedback");
-  input.addEventListener("focus", () => {
-    input.value = "";
-    input.placeholder = "按下新的组合键…";
-  });
-  input.addEventListener("blur", () => {
-    input.value = formatAccelerator(input.dataset.accelerator || "", mac);
-  });
+  input.addEventListener("focus", () => { input.value = ""; input.placeholder = "按下新的组合键"; });
+  input.addEventListener("blur", () => { input.value = formatAccelerator(input.dataset.accelerator || "", mac); });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) return;
     event.preventDefault();
-    if (event.key === "Escape" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-      input.blur();
-      return;
-    }
+    if (event.key === "Escape") { input.blur(); return; }
     const accelerator = acceleratorFromEvent(event, mac);
     if (!accelerator) return;
     input.dataset.accelerator = accelerator;
-    input.value = formatAccelerator(accelerator, mac);
-    saveState.textContent = "有未保存的修改";
-    validateHotkeys();
     input.blur();
+    syncDirty();
   });
 });
-document.querySelector("#resetHotkeys").addEventListener("click", () => {
-  applyHotkeysToForm(DEFAULT_HOTKEYS);
-  validateHotkeys();
-  saveState.textContent = "已恢复默认快捷键，点击保存后生效。";
-});
-document.querySelector("#studySettingsForm")?.addEventListener("submit", saveUiSettings);
-document.querySelector("#studySettingsForm")?.addEventListener("input", () => {
-  syncStudyHint();
-  if (settingsLoaded) saveState.textContent = "有未保存的修改";
-});
-document.querySelector("#loadSampleSettings")?.addEventListener("click", loadSampleSettings);
-refreshStatus?.addEventListener("click", checkRuntime);
-checkModel?.addEventListener("click", checkLlmConnection);
-checkAsr?.addEventListener("click", checkAsrReadiness);
-
-wireModelConfig();
-wireRail();
-checkRuntime().then(() => Promise.all([loadUiSettings(), loadProfiles()]));
-
-// 分区导航跟随滚动高亮，点击后把目标分区顶到可视区。
-function wireRail() {
-  const rail = document.querySelector(".settings-rail");
-  if (!rail) return;
-  const links = [...rail.querySelectorAll("a[href^='#']")];
-  const sections = links
-    .map((link) => document.querySelector(link.getAttribute("href")))
-    .filter(Boolean);
-  if (!sections.length) return;
-
-  const setActive = (id) => {
-    links.forEach((link) => link.classList.toggle("is-active", link.getAttribute("href") === `#${id}`));
-  };
-
-  // 平滑滚动途中会经过其他分区，这段时间不让观察器改写高亮。
-  let lockUntil = 0;
-
-  rail.addEventListener("click", (event) => {
-    const link = event.target.closest("a[href^='#']");
-    if (!link) return;
-    const target = document.querySelector(link.getAttribute("href"));
-    if (!target) return;
-    event.preventDefault();
-    // 折叠分区被点到时先展开，否则滚动位置会落在收起后的高度上。
-    if (target.tagName === "DETAILS" && !target.open) target.open = true;
-    const id = link.getAttribute("href").slice(1);
-    setActive(id);
-    lockUntil = Date.now() + 900;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-    history.replaceState(null, "", `#${id}`);
+$("#resetHotkeys").addEventListener("click", () => { fillHotkeys(DEFAULT_HOTKEYS); syncDirty(); });
+$("#studySettingsForm").addEventListener("submit", saveSettings);
+$("#studySettingsForm").addEventListener("input", syncDirty);
+for (const kind of ["jd", "resume"]) {
+  $(`#${kind}File`).addEventListener("change", async (event) => {
+    await parseDocumentFile(event.target.files[0], event.target, $(`#${kind}Text`), kind === "jd" ? "JD" : "简历", kind);
+    syncDirty();
   });
-
-  if (!("IntersectionObserver" in window)) return;
-  const observer = new IntersectionObserver(
-    (entries) => {
-      if (Date.now() < lockUntil) return;
-      const visible = entries
-        .filter((entry) => entry.isIntersecting)
-        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-      if (visible) setActive(visible.target.id);
-    },
-    { rootMargin: "-15% 0px -70% 0px", threshold: 0 },
-  );
-  sections.forEach((section) => observer.observe(section));
-  setActive(sections[0].id);
 }
+
+const views = [...document.querySelectorAll(".settings-view")];
+const links = [...document.querySelectorAll(".settings-nav a")];
+function showView() {
+  let id = location.hash.slice(1) || "models";
+  if (id === "legacySettings") id = "briefing";
+  if (!views.some((view) => view.id === id)) id = "models";
+  views.forEach((view) => { view.hidden = view.id !== id; });
+  links.forEach((link) => {
+    if (link.hash === `#${id}`) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  });
+  $("#settingsSavebar").hidden = !["study", "briefing", "shortcuts"].includes(id);
+  document.title = `${links.find((link) => link.hash === `#${id}`).textContent} · 左右`;
+}
+window.addEventListener("hashchange", showView);
+links.forEach((link) => link.addEventListener("click", (event) => {
+  event.preventDefault();
+  history.pushState(null, "", link.hash);
+  showView();
+  window.scrollTo({ top: 0, behavior: "instant" });
+}));
+window.addEventListener("popstate", showView);
+
+if (!state.gatewayApiKey && typeof window.__GATEWAY_KEY__ === "string") state.gatewayApiKey = window.__GATEWAY_KEY__.trim();
+showView();
+wireModelConfig();
+Promise.all([loadSettings(), loadProfiles()]);
+fetchGatewayJson("/health").then(() => { $("#serviceStatus").textContent = "本机已连接"; }).catch(() => {
+  $("#serviceStatus").textContent = "本机服务未连接";
+  $("#serviceStatus").dataset.kind = "error";
+});

@@ -2,156 +2,175 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { webcrypto } from 'node:crypto';
 
 const source = fs.readFileSync(new URL('../web/modules/model-config.js', import.meta.url), 'utf8');
-
-function element(id) {
-  return {
-    id, value: '', checked: false, placeholder: '', textContent: '', disabled: false, hidden: false,
-    dataset: {}, children: [],
-    listeners: {},
-    addEventListener(type, fn) { this.listeners[type] = fn; },
-    replaceChildren(...children) { this.children = children; },
-    closest(selector) { return selector === '#llmPresetBlock' ? elements.get('#llmPresetBlock') : null; },
-    focus() {},
-    scrollIntoView() {},
-  };
-}
-
-const elements = new Map();
-
 function moduleUnderTest() {
-  elements.clear();
-  for (const id of [
-    '#llmCurrent', '#llmName', '#llmBaseUrl', '#llmModel', '#llmMaxTokens', '#llmApiKey',
-    '#llmProfileState', '#llmFormTitle', '#llmEditTag', '#llmCancelEdit', '#llmModelOptions',
-    '#llmProfileCards', '#llmPresetCards', '#llmPresetBlock', '#llmImportText', '#llmImportState',
-    '#llmNewProfile', '#saveLlmProfile', '#importLlmProfile', '#llmImportFile', '#models',
-  ]) elements.set(id, element(id));
-  const posts = [];
-  const profile = (overrides = {}) => ({
-    id: 'lan', name: '局域网', llm_model: 'model-a', llm_base_url: 'http://10.0.0.2:9555/v1',
-    llm_protocol: 'auto', llm_api_path: '/chat/completions', llm_auth_header: 'Authorization',
-    llm_auth_scheme: 'Bearer', llm_response_content_path: 'choices.0.message.content',
-    llm_extra_body_json: '', llm_max_tokens: 30000, vision_model: '', llm_api_key_configured: true,
-    ...overrides,
-  });
-  const profiles = {
-    profiles: [profile()],
+  const elements = new Map();
+  for (const id of ['llmBaseUrl', 'llmModel', 'llmMaxTokens', 'llmApiKey', 'llmToggleKey', 'llmProfileState', 'llmFormTitle', 'llmModelOptions', 'llmProfileCards', 'llmPresetCards', 'llmPresetBlock', 'llmImportText', 'llmImportState', 'llmNewProfile', 'saveLlmProfile', 'importLlmProfile', 'llmImportFile', 'llmCancelEdit', 'llmForm', 'checkModel']) {
+    elements.set(`#${id}`, {
+      value: '', type: 'password', textContent: '', dataset: {}, disabled: false, hidden: false, listeners: {}, attributes: {},
+      addEventListener(type, fn) { this.listeners[type] = fn; },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      replaceChildren() {}, focus() {}, select() {},
+    });
+  }
+  const store = {
     active_profile_id: 'lan',
-    presets: [{ id: 'silicon', name: 'SiliconFlow', llm_base_url: 'https://api.siliconflow.cn/v1', llm_model: 'deepseek-ai/DeepSeek-V4.1-Flash', models: ['deepseek-ai/DeepSeek-V4.1-Flash'] }],
+    profiles: [{ id: 'lan', llm_model: 'model-a', llm_base_url: 'http://10.0.0.2:9555/v1', llm_protocol: 'auto', llm_api_path: '/chat/completions', llm_auth_header: 'Authorization', llm_auth_scheme: 'Bearer', llm_response_content_path: 'choices.0.message.content', llm_extra_body_json: '', llm_max_tokens: 30000, vision_model: '', llm_api_key_configured: true }],
+    presets: [{ id: 'cloud', name: '云端备用', llm_base_url: 'https://api.example.test/v1', llm_model: 'model-b', models: ['model-b'] }],
   };
-  const response = { json: async () => profiles };
-  const gateway = {
-    fetchGatewayJson: async () => profiles,
-    postJson: async (path, body) => { posts.push({ path, body }); return { imported: 1, ...profiles }; },
-    fetchGateway: async () => response,
-  };
-  const code = source
-    .replace(/import .*?from "\.\/gateway\.js";/, '')
-    .replace(/import .*?from "\.\/ui\.js";/, '')
-    .replaceAll('export async function', 'async function')
-    .replaceAll('export function', 'function');
+  const posts = [];
   const sandbox = {
-    document: {
-      querySelector: (selector) => elements.get(selector) || null,
-      querySelectorAll: () => [],
+    document: { querySelector: (s) => elements.get(s) || null },
+    crypto: webcrypto,
+    Option: class {},
+    confirm: () => true,
+    escapeHtml: (s) => String(s),
+    fetchGatewayJson: async () => store,
+    fetchGateway: async () => ({ json: async () => store }),
+    postJson: async (path, body) => {
+      posts.push({ path, body });
+      if (path.endsWith('/key')) return { llm_api_key: 'saved-test-secret' };
+      if (path.endsWith('/activate')) store.active_profile_id = body.profile_id;
+      return { ...store, imported: 1 };
     },
-    location: { hash: '' },
-    FileReader: class {},
-    Option: class { constructor(text, value) { this.text = text; this.value = value; } },
-    appendEvent() {},
-    escapeHtml: (value) => String(value),
-    console,
-    ...gateway,
   };
-  vm.runInNewContext(code, sandbox);
-  return { sandbox, posts, vm };
+  const code = source.replace(/^import .*;$/gm, '').replaceAll('export async function', 'async function').replaceAll('export function', 'function');
+  const context = vm.createContext(sandbox);
+  vm.runInContext(code, context);
+  const run = (code) => vm.runInContext(code, context);
+  run('wireModelConfig()');
+  return { elements, store, posts, sandbox, run };
 }
 
-test('profile list fills the active connection and never puts a key in the page', async () => {
-  const { sandbox, vm: runner } = moduleUnderTest();
-  await runner.runInNewContext('loadProfiles()', sandbox);
-  assert.equal(elements.get('#llmBaseUrl').value, 'http://10.0.0.2:9555/v1');
-  assert.equal(elements.get('#llmModel').value, 'model-a');
-  assert.equal(elements.get('#llmName').value, '局域网');
-  assert.equal(elements.get('#llmMaxTokens').value, '30000');
-  assert.equal(elements.get('#llmApiKey').value, '');
-  assert.match(elements.get('#llmApiKey').placeholder, /已配置/);
-  assert.match(elements.get('#llmCurrent').innerHTML, /当前使用/);
-  assert.match(elements.get('#llmCurrent').innerHTML, /局域网/);
-  assert.ok(!elements.get('#llmCurrent').innerHTML.includes('secret'));
-  assert.ok(!JSON.stringify([...elements].map(([, value]) => value)).includes('secret'));
-});
-
-test('saving sends only form fields and asked-for key actions', async () => {
-  const { sandbox, posts, vm: runner } = moduleUnderTest();
-  await runner.runInNewContext('loadProfiles()', sandbox);
-  elements.get('#llmMaxTokens').value = '32768';
-  elements.get('#llmApiKey').value = 'new-key';
-  const result = await runner.runInNewContext('saveProfile()', sandbox);
-  assert.equal(result, true);
-  assert.equal(posts[0].path, '/api/config/llm');
-  assert.equal(posts[0].body.llm_max_tokens, 32768);
-  assert.equal(posts[0].body.llm_api_key, 'new-key');
-  assert.equal(posts[0].body.llm_base_url, 'http://10.0.0.2:9555/v1');
-  assert.equal(posts[0].body.profile_id, 'lan');
-  assert.equal(elements.get('#llmApiKey').value, '');
-});
-
-test('saving the same address and model updates that profile instead of duplicating it', async () => {
-  const { sandbox, posts, vm: runner } = moduleUnderTest();
-  await runner.runInNewContext('loadProfiles()', sandbox);
-  sandbox.__profiles = {
-    profiles: [
-      { id: 'lan', name: '局域网', llm_model: 'model-a', llm_base_url: 'http://10.0.0.2:9555/v1', llm_max_tokens: 30000, llm_api_key_configured: true },
-      { id: 'other', name: '备用', llm_model: 'model-b', llm_base_url: 'https://other.test/v1', llm_max_tokens: 30000, llm_api_key_configured: true },
-    ],
-    active_profile_id: 'lan',
-    presets: [],
-  };
-  runner.runInNewContext('applyProfiles(__profiles)', sandbox);
-  runner.runInNewContext('fillForm(null)', sandbox);
-  elements.get('#llmBaseUrl').value = 'https://other.test/v1';
-  elements.get('#llmModel').value = 'model-b';
-  await runner.runInNewContext('saveProfile()', sandbox);
-  assert.equal(posts[0].body.profile_id, 'other');
-});
-
-test('activating a saved profile posts its id and keeps the form in sync', async () => {
-  const { sandbox, posts, vm: runner } = moduleUnderTest();
-  await runner.runInNewContext('loadProfiles()', sandbox);
-  await runner.runInNewContext('activateProfile("lan")', sandbox);
-  assert.equal(posts[0].path, '/api/config/llm/activate');
-  assert.equal(posts[0].body.profile_id, 'lan');
-  assert.match(elements.get('#llmProfileState').textContent, /已启用/);
-});
-
-test('a preset only fills the form and does not call the gateway', async () => {
-  const { sandbox, posts, vm: runner } = moduleUnderTest();
-  await runner.runInNewContext('loadProfiles()', sandbox);
-  runner.runInNewContext('handlePresetClick({ target: { closest: () => ({ dataset: { preset: "silicon" } }) } })', sandbox);
+test('saved key displays a mask and remains private until explicitly revealed', async () => {
+  const { run, elements, posts } = moduleUnderTest();
+  await run('loadProfiles()');
+  assert.equal(elements.get('#llmApiKey').value, '************');
+  assert.equal(elements.get('#llmApiKey').type, 'password');
   assert.equal(posts.length, 0);
-  assert.equal(elements.get('#llmBaseUrl').value, 'https://api.siliconflow.cn/v1');
-  assert.equal(elements.get('#llmModel').value, 'deepseek-ai/DeepSeek-V4.1-Flash');
-  assert.equal(elements.get('#llmName').value, 'SiliconFlow');
-  assert.match(elements.get('#llmProfileState').textContent, /保存并启用/);
+  assert.ok(!elements.get('#llmProfileCards').innerHTML.includes('saved-test-secret'));
+  await run('toggleKey()');
+  assert.equal(posts[0].path, '/api/config/llm/profiles/lan/key');
+  assert.equal(elements.get('#llmApiKey').value, 'saved-test-secret');
+  assert.equal(elements.get('#llmApiKey').type, 'text');
+  assert.equal(elements.get('#llmToggleKey').attributes['aria-pressed'], 'true');
+  await run('toggleKey()');
+  assert.equal(elements.get('#llmApiKey').type, 'password');
+  assert.equal(posts.length, 1);
 });
 
-test('imported JSON is parsed in the page and imported without enabling it', async () => {
-  const { sandbox, posts, vm: runner } = moduleUnderTest();
-  elements.get('#llmImportText').value = JSON.stringify({ base_url: 'https://x.test/v1', model: 'm' });
-  await runner.runInNewContext('importConfig()', sandbox);
+test('saving an untouched masked key never sends the mask as a credential', async () => {
+  const { run, posts } = moduleUnderTest();
+  await run('loadProfiles()');
+  assert.equal(await run('saveProfile()'), true);
+  assert.equal(posts[0].body.profile_id, 'lan');
+  assert.equal(posts[0].body.llm_api_key, '');
+  assert.equal(posts[0].body.clear_api_key, false);
+  assert.equal(posts[0].body.llm_max_tokens, 30000);
+});
+
+test('editing and clearing a key send the requested credential change', async () => {
+  const { run, elements, posts } = moduleUnderTest();
+  await run('loadProfiles()');
+  const input = elements.get('#llmApiKey');
+  input.value = 'new-test-key';
+  input.listeners.input();
+  await run('saveProfile()');
+  assert.equal(posts[0].body.llm_api_key, 'new-test-key');
+  input.value = '';
+  input.listeners.input();
+  await run('saveProfile()');
+  assert.equal(posts[1].body.clear_api_key, true);
+});
+
+test('new profile uses a distinct id and a 30000 token default', async () => {
+  const { run, elements, posts } = moduleUnderTest();
+  await run('loadProfiles()');
+  elements.get('#llmNewProfile').listeners.click();
+  assert.equal(elements.get('#llmApiKey').value, '');
+  elements.get('#llmBaseUrl').value = 'https://other.test/v1';
+  elements.get('#llmModel').value = 'other';
+  await run('saveProfile()');
+  assert.notEqual(posts[0].body.profile_id, 'lan');
+  assert.equal(posts[0].body.llm_max_tokens, 30000);
+});
+
+test('new duplicate connection reuses the saved profile id', async () => {
+  const { run, elements, posts } = moduleUnderTest();
+  await run('loadProfiles()');
+  elements.get('#llmNewProfile').listeners.click();
+  elements.get('#llmBaseUrl').value = 'http://10.0.0.2:9555/v1/';
+  elements.get('#llmModel').value = 'model-a';
+  await run('saveProfile()');
+  assert.equal(posts[0].body.profile_id, 'lan');
+});
+
+test('changing provider resets protocol metadata and does not send the revealed old key', async () => {
+  const { run, elements, posts, store } = moduleUnderTest();
+  store.profiles[0].llm_protocol = 'anthropic_messages';
+  await run('loadProfiles()');
+  await run('toggleKey()');
+  elements.get('#llmBaseUrl').value = 'https://other.test/v1';
+  await run('saveProfile()');
+  assert.equal(posts[1].body.llm_api_key, '');
+  assert.equal(posts[1].body.llm_protocol, 'auto');
+});
+
+test('preset fills the three fields without saving or activating', async () => {
+  const { run, elements, posts, store } = moduleUnderTest();
+  store.presets[0].llm_api_key_configured = true;
+  await run('loadProfiles()');
+  elements.get('#llmPresetCards').listeners.click({ target: { closest: () => ({ dataset: { preset: 'cloud' } }) } });
+  assert.equal(posts.length, 0);
+  assert.equal(elements.get('#llmBaseUrl').value, 'https://api.example.test/v1');
+  assert.equal(elements.get('#llmModel').value, 'model-b');
+  assert.equal(elements.get('#llmApiKey').value, '');
+});
+
+test('import does not change the active profile or overwrite unsaved form input', async () => {
+  const { run, elements, posts } = moduleUnderTest();
+  await run('loadProfiles()');
+  elements.get('#llmModel').value = 'unsaved-draft';
+  elements.get('#llmImportText').value = '{"base_url":"https://x.test/v1","model":"imported"}';
+  await run('importConfig()');
+  assert.equal(posts.length, 1);
   assert.equal(posts[0].path, '/api/config/llm/import');
-  assert.equal(posts[0].body.config.model, 'm');
-  assert.match(elements.get('#llmImportState').textContent, /保存启用/);
-  assert.equal(posts.length, 1, 'import must not also activate a profile');
+  assert.equal(elements.get('#llmModel').value, 'unsaved-draft');
+  assert.equal(elements.get('#llmImportText').value, '');
 });
 
-test('invalid JSON reports an error and posts nothing', async () => {
-  const { sandbox, posts, vm: runner } = moduleUnderTest();
-  elements.get('#llmImportText').value = '{not json';
-  await runner.runInNewContext('importConfig()', sandbox);
+test('invalid JSON is reported without sending a request', async () => {
+  const { run, elements, posts } = moduleUnderTest();
+  elements.get('#llmImportText').value = '{bad';
+  await run('importConfig()');
   assert.equal(posts.length, 0);
   assert.match(elements.get('#llmImportState').textContent, /JSON/);
+});
+
+test('late reveal response cannot overwrite a newly selected profile', async () => {
+  const { run, elements, sandbox } = moduleUnderTest();
+  await run('loadProfiles()');
+  let resolve;
+  sandbox.postJson = () => new Promise((r) => { resolve = r; });
+  const request = run('toggleKey()');
+  run('fillForm(null)');
+  resolve({ llm_api_key: 'previous-secret' });
+  await request;
+  assert.equal(elements.get('#llmApiKey').value, '');
+  assert.equal(elements.get('#llmApiKey').type, 'password');
+});
+
+test('late reveal response cannot overwrite a key typed while fetching', async () => {
+  const { run, elements, sandbox } = moduleUnderTest();
+  await run('loadProfiles()');
+  let resolve;
+  sandbox.postJson = () => new Promise((r) => { resolve = r; });
+  const request = run('toggleKey()');
+  elements.get('#llmApiKey').value = 'new-key';
+  elements.get('#llmApiKey').listeners.input();
+  resolve({ llm_api_key: 'previous-secret' });
+  await request;
+  assert.equal(elements.get('#llmApiKey').value, 'new-key');
 });

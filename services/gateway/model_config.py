@@ -18,29 +18,6 @@ _MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+\-]{0,159}")
 _MAX_PROFILES = 50
 _MAX_BODY_CHARS = 20_000
 
-# 只保存接入方式，不保存密钥：密钥从现有运行配置或用户本次输入继承。
-PRESET_CATALOG = [
-    {
-        "id": "lan-gateway",
-        "name": "局域网网关",
-        "llm_base_url": "http://192.168.2.251:9555/v1",
-        "llm_model": "antigravity/claude-opus-4-6-thinking",
-        "models": [
-            "antigravity/claude-opus-4-6-thinking",
-            "antigravity/gemini-3.8-flash-high",
-            "workbuddy/deepseek-v4.1-flash",
-            "qoder/dfmodel",
-        ],
-    },
-    {
-        "id": "siliconflow",
-        "name": "云端备用",
-        "llm_base_url": "https://api.siliconflow.cn/v1",
-        "llm_model": "deepseek-ai/DeepSeek-V4.1-Flash",
-        "models": ["deepseek-ai/DeepSeek-V4.1-Flash"],
-    },
-]
-
 
 class LlmProfile(BaseModel):
     id: str
@@ -152,12 +129,34 @@ def _write_store(profiles: list[LlmProfile], active: str) -> None:
         raise
 
 
+def profile_api_key(profile_id: str) -> str:
+    profiles, _ = load_store()
+    profile = next((item for item in profiles if item.id == profile_id), None)
+    if profile is None:
+        raise ValueError("配置不存在")
+    return profile.llm_api_key
+
+
+def _preset_catalog() -> list[dict[str, Any]]:
+    path = profiles_path().with_name("model_presets.json")
+    if not path.is_file():
+        return []
+    try:
+        items = _import_items(json.loads(path.read_text(encoding="utf-8")))
+        return [
+            {**_public(_parse_import_item(item)), "models": [str(model) for model in item.get("models", [])]}
+            for item in items
+        ]
+    except (ValueError, TypeError):
+        return []
+
+
 def list_response() -> dict[str, Any]:
     profiles, active = load_store()
     return {
         "profiles": [_public(profile) for profile in profiles],
         "active_profile_id": active,
-        "presets": PRESET_CATALOG,
+        "presets": _preset_catalog(),
     }
 
 

@@ -50,8 +50,8 @@ test('per-record writes and deletes do not send stale collection snapshots', asy
 
 test('an assets module import with live settings elements completes without TDZ startup errors', async () => {
   const elements = new Map();
-  for (const id of ['#assetTabs', '#assetRecords', '#assetKB', '#assetFeedback', '#recordsList',
-    '#kbList', '#kbTags', '#kbStats', '#kbSearch', '#feedbackStats', '#feedbackList']) {
+  for (const id of ['#assetTabs', '#assetRecords', '#assetKB', '#assetExams', '#recordsList',
+    '#kbList', '#kbTags', '#kbStats', '#kbSearch', '#examsList']) {
     elements.set(id, {
       innerHTML: '', value: '', addEventListener() {}, querySelector() { return null; },
     });
@@ -63,5 +63,5 @@ test('an assets module import with live settings elements completes without TDZ 
   await new Promise(resolve => setImmediate(resolve));
   assert.match(elements.get('#recordsList').innerHTML, /还没有保存的会话记录/);
   assert.match(elements.get('#kbStats').innerHTML, /共 0 条/);
-  assert.match(elements.get('#feedbackList').innerHTML, /还没有反馈记录/);
+  assert.match(elements.get('#examsList').innerHTML, /还没有笔试记录/);
 });
