@@ -27,6 +27,9 @@ module.exports = async function buildBackend(context = {}) {
   if (!['darwin', 'win32'].includes(platform) || platform !== process.platform || targetArch !== process.arch) {
     throw new Error('Build the desktop app on its target operating system and architecture; the bundled service cannot be cross-compiled.');
   }
+  if (platform === 'win32') {
+    require('./taskbar-runtime').assertTaskbarDistribution(context.packager?.config?.electronDist);
+  }
   const root = path.resolve(__dirname, '..', '..');
   const venv = platform === 'win32'
     ? path.join(root, '.venv', 'Scripts', 'python.exe')

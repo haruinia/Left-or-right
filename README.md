@@ -110,6 +110,8 @@ python scripts/run_gateway.py
 
 在目标操作系统上准备 Node.js、npm 与已激活的 Python 环境；macOS 使用 `.venv/bin/python`，Windows 使用 `.venv\Scripts\python.exe`。Windows 默认构建 x64 安装包，macOS 构建当前机器架构：
 
+Windows 的任务栏隐藏策略需要[定制 Electron 运行时](desktop/electron/README.md)。先按该文档构建并设置 `ZUOYOU_ELECTRON_DIST`，再执行 `dist:win`；Windows 开发使用 `start:win`。普通 Electron 会被能力检查拒绝，避免打包出 Ctrl 操作时重新出现任务栏按钮的版本。
+
 ```bash
 pip install -e ".[desktop]"
 ```

@@ -2,12 +2,44 @@ name: Native desktop builds
 
 on:
   workflow_dispatch:
+    inputs:
+      windows_runtime_url:
+        description: 'HTTPS ZIP of the custom taskbar-protected Windows Electron runtime'
+        required: true
+        type: string
+      windows_runtime_sha256:
+        description: 'SHA-256 of the custom runtime ZIP'
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  taskbar-regression:
+    name: Native taskbar policy regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify and apply the pinned native patch
+        run: python scripts/prepare_electron_taskbar.py --source output/electron-source/electron --download
+      - name: Compile and exercise the actual patched native methods
+        run: python tests/test_electron_taskbar_native.py --cxx g++ -v
+      - name: Check build environment isolation
+        run: python tests/test_electron_build_tools.py -v
+      - name: Check application window and packaging contracts
+        run: node --test tests/test_taskbar_runtime.mjs tests/test_error_window.mjs tests/test_settings_window.mjs tests/test_capture_displays.mjs tests/test_window_visibility.mjs tests/test_desktop_packaging.mjs tests/test_desktop_backend.mjs
   package:
+    needs: taskbar-regression
     name: ${{ matrix.os }} native package
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -39,6 +71,37 @@ jobs:
         run: python -m pip install -e ".[desktop,dev]"
       - name: Install Electron build dependencies
         run: npm --prefix desktop ci
+      - name: Prepare the custom Windows Electron runtime
+        if: runner.os == 'Windows'
+        shell: python
+        env:
+          RUNTIME_URL: ${{ inputs.windows_runtime_url }}
+          RUNTIME_SHA256: ${{ inputs.windows_runtime_sha256 }}
+        run: |
+          import hashlib, os, pathlib, re, urllib.parse, urllib.request, zipfile
+          url = os.environ['RUNTIME_URL']
+          expected = os.environ['RUNTIME_SHA256'].lower()
+          if urllib.parse.urlparse(url).scheme != 'https' or not re.fullmatch(r'[0-9a-f]{64}', expected):
+              raise RuntimeError('A custom Electron HTTPS ZIP and its SHA-256 are required')
+          root = pathlib.Path('output/ci-electron-runtime').resolve()
+          root.mkdir(parents=True, exist_ok=True)
+          archive = root / 'runtime.zip'
+          urllib.request.urlretrieve(url, archive)
+          with archive.open('rb') as stream:
+              actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+          if actual != expected:
+              raise RuntimeError('Custom runtime ZIP checksum mismatch')
+          destination = root / 'runtime'
+          with zipfile.ZipFile(archive) as bundle:
+              for member in bundle.infolist():
+                  target = (destination / member.filename).resolve()
+                  if not target.is_relative_to(destination):
+                      raise RuntimeError('Unsafe path in custom runtime archive')
+              bundle.extractall(destination)
+          if not (destination / 'electron.exe').is_file():
+              raise RuntimeError('The custom runtime ZIP must contain electron.exe at its root')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f'ZUOYOU_ELECTRON_DIST={destination}\n')
       - name: Test packaging and local-service startup contracts
         run: node --test tests/test_desktop_backend.mjs tests/test_desktop_packaging.mjs
       - name: Test Python entry points

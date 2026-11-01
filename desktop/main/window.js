@@ -57,6 +57,7 @@ function createWindow(config, { onMove, onDisplay } = {}) {
     show: false,
     resizable: true,
     skipTaskbar: true,
+    neverShowInTaskbar: true,
     alwaysOnTop: true,
     acceptFirstMouse: true,
     // Vibrancy paints a material over the whole window, so the meeting behind

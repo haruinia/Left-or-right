@@ -18,6 +18,8 @@ test('area selection uses selected display bounds and local Retina crop coordina
   const target={id:2,bounds:{x:-1920,y:0,width:1920,height:1080},scaleFactor:2};
   const result=sandbox.module.exports.selectRegion(target);
   assert.equal(options.x,-1920);assert.equal(options.width,1920);
+  assert.equal(options.show,false);
+  assert.equal(options.neverShowInTaskbar,true);
   handlers.get('selector:commit')({}, {left:10,top:20,width:100,height:80});
   const rect=await result;
   assert.deepEqual([rect.x,rect.y,rect.width,rect.height],[20,40,200,160]);

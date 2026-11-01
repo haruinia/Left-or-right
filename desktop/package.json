@@ -1,15 +1,16 @@
 {
   "author": "haruinia",
   "name": "shuihuo-killer-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "左右：在题目旁边，找到另一种思路。半透明截图学习助手。",
   "main": "main/index.js",
   "scripts": {
     "start": "electron .",
+    "start:win": "node main/windows-runtime.js start",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
-    "dist:win": "electron-builder --win --x64"
+    "dist:win": "node main/windows-runtime.js"
   },
   "devDependencies": {
     "electron": "^33.0.0",

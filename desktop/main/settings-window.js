@@ -35,6 +35,7 @@ async function openSettingsWindow(config, section, mainWindow, canShow = () => t
     minHeight: Math.min(420, area.height),
     show: false,
     skipTaskbar: true,
+    neverShowInTaskbar: true,
     backgroundColor: '#fcfcfd',
     autoHideMenuBar: true,
     webPreferences: {

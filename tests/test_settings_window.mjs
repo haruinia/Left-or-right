@@ -38,6 +38,7 @@ test('settings open inside a sandboxed, capture-protected app window before load
   assert.equal(await api.openSettingsWindow(config,'study',main),true);
   const w=windows[0];
   assert.equal(w.options.skipTaskbar,true);
+  assert.equal(w.options.neverShowInTaskbar,true);
   assert.equal(w.options.webPreferences.contextIsolation,true);
   assert.equal(w.options.webPreferences.nodeIntegration,false);
   assert.equal(w.options.webPreferences.sandbox,true);

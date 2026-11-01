@@ -87,6 +87,7 @@ function selectRegion(display = screen.getPrimaryDisplay()) {
     selectedDisplay = display;
     const bounds = display.bounds;
     const win = new BrowserWindow({
+      show: false,
       x: bounds.x,
       y: bounds.y,
       width: bounds.width,
@@ -101,6 +102,7 @@ function selectRegion(display = screen.getPrimaryDisplay()) {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
+      neverShowInTaskbar: true,
       alwaysOnTop: true,
       // 第一下点击直接透到页面里，不用先点一下"激活"再点第二下。
       acceptFirstMouse: true,

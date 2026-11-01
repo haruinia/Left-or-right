@@ -8,28 +8,36 @@ const source = fs.readFileSync(new URL('../desktop/main/build-backend.js', impor
 function hook(platform = 'darwin', arch = 'arm64', options = {}) {
   const paths = platform === 'win32' ? path.win32 : path.posix;
   const calls = [];
+  const runtimeChecks = [];
+  let backendBuilt = Boolean(options.cachedBackend);
   const sandbox = {
     module: { exports: {} },
     __dirname: platform === 'win32' ? 'C:\\project\\desktop\\main' : '/project/desktop/main',
     process: { platform, arch, env: { ...(platform === 'win32' ? { SystemRoot: 'C:\\Windows' } : {}), ...options.env } },
     require(name) {
       if (name === 'node:path') return paths;
+      if (name === './taskbar-runtime') return {assertTaskbarDistribution: directory => {
+        runtimeChecks.push(directory);
+        if (options.invalidRuntime) throw Error('custom Electron runtime required');
+      }};
       if (name === 'node:fs') return { existsSync: name => {
         if (options.missingCompiler && name.endsWith('csc.exe')) return false;
         if (options.framework32Only && name.includes('Framework64')) return false;
         if (options.missingHelperSource && name.endsWith('windows-interaction.cs')) return false;
         if (options.missingHelperBinary && name.endsWith('windows-interaction.exe')) return false;
-        return options.missingBinary ? !name.includes(`${paths.sep}backend${paths.sep}`) : options.noVenv ? !name.includes('.venv') : true;
+        if (name.includes(`${paths.sep}backend${paths.sep}`)) return !options.missingBinary && backendBuilt;
+        return options.noVenv ? !name.includes('.venv') : true;
       } };
       if (name === 'node:child_process') return { spawnSync: (...args) => {
         calls.push(args);
+        if (!args[0].endsWith('csc.exe')) backendBuilt = true;
         return { status: args[0].endsWith('csc.exe') ? options.compilerStatus ?? 0 : options.status ?? 0 };
       } };
       throw Error(name);
     },
   };
   vm.runInNewContext(source, sandbox);
-  return { run: sandbox.module.exports, calls };
+  return { run: sandbox.module.exports, calls, runtimeChecks };
 }
 
 test('build hooks select a native interpreter and explicitly forward the target platform and arch', async () => {
@@ -49,6 +57,17 @@ test('cross-platform, cross-architecture, and unsupported host builds fail befor
   await assert.rejects(run({ electronPlatformName: 'darwin', arch: 1 }), /cannot be cross-compiled/);
   await assert.rejects(hook('linux', 'x64').run(), /cannot be cross-compiled/);
   assert.equal(calls.length, 0);
+});
+
+test('Windows packaging checks the selected runtime before building and supports an existing backend', async () => {
+  const rejected=hook('win32','x64',{invalidRuntime:true});
+  await assert.rejects(rejected.run(),/custom Electron/);
+  assert.equal(rejected.calls.length,0);
+  const cached=hook('win32','x64',{cachedBackend:true});
+  await cached.run({packager:{config:{electronDist:'C:\\runtime'}}});
+  assert.deepEqual(cached.runtimeChecks,['C:\\runtime']);
+  assert.equal(cached.calls.length,1);
+  assert.ok(cached.calls[0][0].endsWith('csc.exe'));
 });
 
 test('explicit interpreters are used and missing native service output fails the build', async () => {
@@ -87,7 +106,8 @@ test('Windows compilation falls back to the installed Framework compiler and fai
 test('Windows installer is native x64, non-elevated and preserves user data on uninstall', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../desktop/package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.scripts.dist, 'electron-builder');
-  assert.equal(pkg.scripts['dist:win'], 'electron-builder --win --x64');
+  assert.equal(pkg.scripts['dist:win'], 'node main/windows-runtime.js');
+  assert.equal(pkg.scripts['start:win'], 'node main/windows-runtime.js start');
   assert.equal(pkg.scripts['dist:mac'], 'electron-builder --mac');
   assert.deepEqual(pkg.build.win.target, [{ target: 'nsis', arch: ['x64'] }]);
   assert.equal(pkg.build.win.requestedExecutionLevel, 'asInvoker');

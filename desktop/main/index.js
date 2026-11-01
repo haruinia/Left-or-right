@@ -2,7 +2,7 @@
 
 const { pathToFileURL } = require('node:url');
 const path = require('node:path');
-const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences, screen, dialog, BrowserWindow } = require('electron');
+const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences, screen, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('./config');
 const {
   createWindow,
@@ -29,6 +29,7 @@ const { ensureBackend, stopBackend } = require('./backend');
 const { startCommandKeyMonitor } = require('./command-key');
 const { openSettingsWindow } = require('./settings-window');
 const { createWindowVisibility } = require('./window-visibility');
+const { showAppError: displayAppError } = require('./error-window');
 
 app.setName('左右');
 const config = loadConfig();
@@ -43,6 +44,11 @@ const visibility = createWindowVisibility({
   getWindows: () => BrowserWindow.getAllWindows(),
   setInteractive: held => setInteractive(win, held, {restore: !held}),
 });
+
+function showAppError(title, content) {
+  const version = visibility.version();
+  void displayAppError(title, content, () => visibility.canShow(version));
+}
 // 一次截图流程（框选 → 抓 → 恢复窗口）进行中时，再按截图键直接忽略。
 // 之前第二次 ⌘⇧U 会先取消旧框选再立刻开新的，而旧流程的收尾
 // 会把主面板重新 show 到新覆盖层上面，下一次点击就被面板吃掉了。
@@ -280,11 +286,11 @@ function registerIpc() {
   ipcMain.handle('cockpit:openSettings', async (_event, section) => {
     const version = visibility.version();
     if (!await ensureBackend(config)) {
-      dialog.showErrorBox('设置服务未能启动', '请重启应用后重试。服务日志位于应用的 gateway.log 日志文件中。');
+      showAppError('设置服务未能启动', '请重启应用后重试。服务日志位于应用的 gateway.log 日志文件中。');
       return false;
     }
     const opened = await openSettingsWindow(config, section, win, () => visibility.canShow(version));
-    if (!opened) dialog.showErrorBox('设置页未能打开', '本地服务未能加载设置页面，请重试。');
+    if (!opened) showAppError('设置页未能打开', '本地服务未能加载设置页面，请重试。');
     return opened;
   });
   ipcMain.handle('liuwa:reset-view', () => { if(win && !win.isDestroyed()) win.webContents.send('liuwa:reset-view'); });
@@ -311,6 +317,14 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function boot() {
+  // Validate the native policy before creating any window or starting services.
+  try {
+    require('./taskbar-runtime').assertTaskbarRuntime();
+  } catch (error) {
+    console.error(error.message);
+    app.quit();
+    return;
+  }
   // Gank 式纯快捷键驱动：无条件隐藏 Dock 图标，不创建菜单栏托盘。
   // accessory 策略让应用不出现在 Dock、Cmd+Tab 和应用菜单中。
   if (process.platform === 'darwin') {
@@ -319,7 +333,7 @@ async function boot() {
   }
   nativeTheme.themeSource = 'light';
   if (!await ensureBackend(config)) {
-    dialog.showErrorBox('本地服务未能启动', '请重新打开应用。如果问题持续，请检查应用日志目录中的 gateway.log。');
+    showAppError('本地服务未能启动', '请重新打开应用。如果问题持续，请检查应用日志目录中的 gateway.log。');
   }
   registerIpc();
   failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
