@@ -92,6 +92,8 @@ class FakeAliyunWS:
                 return
             await self._events.put(json.dumps({"header": {"event": "task-started"}}))
         elif action == "finish-task":
+            assert data["header"]["streaming"] == "duplex"
+            assert data["payload"] == {"input": {}}
             await self._events.put(json.dumps({"header": {"event": "task-finished"}}))
 
     async def recv(self) -> str:

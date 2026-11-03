@@ -48,20 +48,34 @@ test('per-record writes and deletes do not send stale collection snapshots', asy
   assert.deepEqual(JSON.parse(calls[1].options.body), { id: 'old' });
 });
 
+test('interview session updates keep the stable id and full answer text', async () => {
+  const {saveSessionRecord}=await import('../web/modules/session-store.js');
+  const answer='完整回答。'.repeat(5000);
+  globalThis.fetch=async(_url,options)=>({ok:true,json:async()=>({item:JSON.parse(options.body).item})});
+  const saved=await saveSessionRecord({id:'interview-stable',turns:[{role:'assistant',text:answer,partial:true}],note:'面试问答'});
+  assert.equal(saved.id,'interview-stable');
+  assert.equal(saved.turns[0].text,answer);
+  assert.equal(saved.turns[0].partial,true);
+});
+
 test('an assets module import with live settings elements completes without TDZ startup errors', async () => {
   const elements = new Map();
-  for (const id of ['#assetTabs', '#assetRecords', '#assetKB', '#assetExams', '#recordsList',
+  for (const id of ['#assets', '#assetTabs', '#assetRecords', '#assetKB', '#assetExams', '#recordsList',
     '#kbList', '#kbTags', '#kbStats', '#kbSearch', '#examsList']) {
     elements.set(id, {
-      innerHTML: '', value: '', addEventListener() {}, querySelector() { return null; },
+      innerHTML: '', value: '', addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; },
     });
   }
-  globalThis.document = { querySelector: selector => elements.get(selector) ?? null };
+  globalThis.document = { querySelector: selector => elements.get(selector) ?? null, addEventListener() {} };
+  globalThis.location = { hash: '#assets' };
+  globalThis.history = { state: null };
+  window.addEventListener = () => {};
+  window.scrollTo = () => {};
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ items: [] }) });
   await import('../web/modules/assets.js');
   // Network completions render on subsequent microtasks.
   await new Promise(resolve => setImmediate(resolve));
-  assert.match(elements.get('#recordsList').innerHTML, /还没有保存的会话记录/);
-  assert.match(elements.get('#kbStats').innerHTML, /共 0 条/);
+  assert.equal(elements.get('#recordsList').innerHTML, '');
+  assert.equal(elements.get('#kbStats').innerHTML, '');
   assert.match(elements.get('#examsList').innerHTML, /还没有笔试记录/);
 });

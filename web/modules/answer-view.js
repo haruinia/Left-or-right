@@ -119,6 +119,37 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
   return {...model, selected:reader.selected};
 }
 
+export function exportAnswerReadingState(root) {
+  const reader = readers.get(root);
+  if (!reader) return null;
+  const positions = new Map(reader.positions);
+  if (reader.selected) positions.set(reader.selected, root.scrollTop || 0);
+  return { selected: reader.selected, manual: reader.manual, positions: Object.fromEntries(positions) };
+}
+
+export function restoreAnswerReadingState(root, state) {
+  const reader = readers.get(root);
+  if (!reader || !state || typeof state !== 'object') return false;
+  const selected = reader.model.panels.some(panel => panel.key === state.selected) ? state.selected : reader.selected;
+  reader.positions = new Map(Object.entries(state.positions || {}).filter(([key, value]) => reader.model.panels.some(panel => panel.key === key) && Number.isFinite(value) && value >= 0));
+  reader.selected = selected;
+  reader.manual = Boolean(state.manual);
+  root.scrollTop = reader.positions.get(selected) || 0;
+  const panel = reader.model.panels.find(item => item.key === selected);
+  root.innerHTML = panel?.hasContent ? renderMarkdown(panel.markdown) : '';
+  root.dataset.answerPanel = selected;
+  root.dataset.hasAnswer = String(Boolean(panel?.hasContent));
+  root.dataset.waiting = `正在生成${panel?.label || '回答'}…`;
+  const tabs = root.closest?.('.liuwa-reader')?.querySelector('#liuwaAnswerTabs');
+  tabs?.querySelectorAll('button').forEach(button => {
+    const active = button.dataset.panel === selected;
+    button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+  });
+  root.setAttribute('aria-labelledby', `answer-tab-${selected}`);
+  root.scrollTop = reader.positions.get(selected) || 0;
+  return true;
+}
+
 export function stepAnswerTab(direction, root) {
   const doc = (root && root.ownerDocument) ? root.ownerDocument : (typeof document !== 'undefined' ? document : null);
   if (!doc) return false;

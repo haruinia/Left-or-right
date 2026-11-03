@@ -11,17 +11,20 @@ const { globalShortcut } = require('electron');
 // 既和系统/浏览器冲突，也不符合用户从 Gank 带过来的手感。
 const BINDINGS = [
   { accelerator: 'CommandOrControl+H', action: 'captureRegion', label: '截图' },
-  { accelerator: 'CommandOrControl+Enter', action: 'sendChat', label: '处理截图' },
+  { accelerator: 'CommandOrControl+Enter', action: 'sendChat', label: '回答/解题' },
   { accelerator: 'CommandOrControl+B', action: 'toggleWindow', label: '显示/隐藏' },
   { accelerator: 'CommandOrControl+Q', action: 'quitApp', label: '退出' },
   { accelerator: 'CommandOrControl+N', action: 'newQuestion', label: '新对话' },
-  { accelerator: 'CommandOrControl+R', action: 'resetView', label: '重置视图' },
+  { accelerator: 'CommandOrControl+R', action: 'resetView', label: '重置对话' },
   { accelerator: 'CommandOrControl+L', action: 'deleteLastShot', label: '删除最后一张截图' },
   { accelerator: 'CommandOrControl+Shift+Backspace', action: 'clearShots', label: '清空截图' },
 
   { accelerator: 'CommandOrControl+Shift+Space', action: 'toggleVisible', label: '按住操作面板' },
   { accelerator: 'CommandOrControl+Shift+Y', action: 'captureScreen', label: '全屏截图' },
   { accelerator: 'CommandOrControl+Shift+J', action: 'toggleCompact', label: '紧凑/展开' },
+  { accelerator: 'CommandOrControl+Alt+I', action: 'toggleInterview', label: '开始/停止面试' },
+  { accelerator: 'CommandOrControl+Alt+M', action: 'muteInterviewMic', label: '麦克风静音' },
+  { accelerator: 'CommandOrControl+Alt+U', action: 'muteInterviewSystem', label: '系统声音静音' },
 
   // 翻页/滚动沿用 Gank 的标点键：逗号句号翻页，分号引号滚动。
   { accelerator: 'CommandOrControl+,', action: 'readPrev', label: '上一页' },

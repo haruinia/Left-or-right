@@ -4,56 +4,88 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
-    <title>模型接入 · 左右</title>
+    <title>接入设置 · 左右</title>
     <link rel="icon" href="modules/pangsi-mark.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="modules/settings.css" />
+    <link rel="stylesheet" href="modules/protected-controls.css" />
   </head>
   <body>
     <header class="site-header">
-      <a class="wordmark" href="/" aria-label="左右首页"><img src="modules/pangsi-mark.svg" alt="" width="28" height="28" /><span>左右</span></a>
+      <div class="settings-brand"><button type="button" class="text-button settings-back" id="settingsBack" aria-label="返回应用">← 返回</button><a class="wordmark" href="/" aria-label="左右首页"><img src="modules/pangsi-mark.svg" alt="" width="28" height="28" /><span>左右</span></a></div>
       <nav class="settings-nav" aria-label="设置分区">
-        <a href="#models" aria-current="page">模型接入</a>
+        <a href="#models" aria-current="page">接入设置</a>
         <a href="#study">答题偏好</a>
         <a href="#briefing">面试资料</a>
         <a href="#shortcuts">快捷键</a>
         <a href="#assets">学习记录</a>
       </nav>
-      <span class="service-status" id="serviceStatus" role="status">连接应用中</span>
+      <div class="header-status"><a href="#interview" id="interviewRecordingBadge" hidden>转写中</a><span class="service-status" id="serviceStatus" role="status">连接应用中</span></div>
     </header>
 
     <main class="settings-content">
       <section id="models" class="settings-view" aria-labelledby="modelsTitle">
-        <header class="page-heading"><p class="page-context">左右设置</p><h1 id="modelsTitle">接好模型，<br />开始你的下一题。</h1><p>你的接口，你的模型。配置只保存在这台电脑上。</p></header>
-        <div class="section-heading"><h2>我的模型</h2><button type="button" class="secondary" id="llmNewProfile">添加模型 <span aria-hidden="true">＋</span></button></div>
-        <div class="model-grid" id="llmProfileCards" aria-label="已保存的模型"><p class="empty-state">正在读取模型…</p></div>
-        <details class="presets-disclosure" id="llmPresetBlock">
-          <summary>从预置添加 <span>局域网与云端接口</span></summary>
-          <div class="preset-grid" id="llmPresetCards"></div>
-        </details>
-        <form id="llmForm" class="connection-editor">
-          <div class="section-heading"><h2 id="llmFormTitle">编辑模型</h2><button type="button" class="text-button" id="llmCancelEdit">还原修改</button></div>
+        <header class="page-heading" id="connectionsHeading"><h1 id="modelsTitle">接入设置</h1></header>
+        <nav class="connection-tabs" id="connectionTabs" aria-label="接入类型"><a href="#models" aria-current="page">回答模型</a><a href="#models/asr">语音识别</a></nav>
+        <div id="llmPane" class="connection-pane">
+        <div id="llmList"><div class="section-heading"><h2>回答模型</h2><div class="inline-actions"><button type="button" class="secondary" id="llmOpenImport">导入</button><button type="button" id="llmNewProfile">添加模型</button></div></div>
+        <div class="model-grid" id="llmProfileCards" aria-label="已保存的模型"><p class="empty-state">正在读取模型…</p></div></div>
+        <form id="llmForm" class="connection-editor" hidden>
+          <div class="section-heading"><h2 id="llmFormTitle">编辑模型</h2><button type="button" class="text-button" id="llmCancelEdit">取消</button></div>
           <div class="connection-fields">
+            <label for="llmName">名称</label>
+            <div><input id="llmName" required maxlength="60" autocomplete="off" placeholder="例如：个人接口、公司网关" /></div>
             <label for="llmBaseUrl">接口 URL</label>
-            <div><input id="llmBaseUrl" type="url" required autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" /><p class="field-hint">支持基础地址或完整接口路径，自动识别协议。</p></div>
+            <div><input id="llmBaseUrl" type="url" required autocomplete="off" spellcheck="false" placeholder="https://api.example.com/v1" /></div>
             <label for="llmApiKey">API Key</label>
             <div class="key-field"><input id="llmApiKey" type="password" autocomplete="off" spellcheck="false" aria-label="API Key" placeholder="输入 API Key" /><button type="button" id="llmToggleKey" class="text-button" aria-controls="llmApiKey" aria-pressed="false" aria-label="显示 API Key" title="显示 API Key"><img class="eye-open" src="modules/icons/eye.svg" alt="" /><img class="eye-closed" src="modules/icons/eye-off.svg" alt="" /></button></div>
             <label for="llmModel">模型名称</label>
             <div><input id="llmModel" list="llmModelOptions" required maxlength="160" autocomplete="off" spellcheck="false" placeholder="输入接口提供的模型名称" /><datalist id="llmModelOptions"></datalist></div>
           </div>
           <details class="output-options"><summary>输出额度 <span>默认 30,000 tokens</span></summary><label for="llmMaxTokens">单次最多输出 tokens</label><input id="llmMaxTokens" type="number" min="1" max="1000000" step="1" value="30000" /></details>
-          <div class="form-actions"><button type="submit" id="saveLlmProfile">保存并使用 <span aria-hidden="true">↗</span></button><button type="button" class="secondary" id="checkModel">测试当前模型</button><p id="llmProfileState" role="status" aria-live="polite"></p></div>
+          <details class="presets-disclosure" id="llmPresetBlock" hidden><summary>使用预置</summary><div class="preset-grid" id="llmPresetCards"></div></details>
+          <div class="form-actions"><button type="submit" id="saveLlmProfile">保存并使用</button><button type="button" class="secondary" id="checkModel">测试当前模型</button></div>
         </form>
-        <details class="import-disclosure" id="llmImport"><summary>导入模型配置</summary><p class="field-hint">粘贴 JSON，或选择配置文件。导入不会切换当前模型。</p><label for="llmImportText">配置 JSON</label><textarea id="llmImportText" rows="4" maxlength="60000" spellcheck="false" placeholder='{"base_url":"https://api.example.com/v1","model":"model-name","api_key":"..."}'></textarea><div class="form-actions"><button type="button" class="secondary" id="importLlmProfile">导入配置</button><label class="file-button" for="llmImportFile">选择 JSON 文件</label><input id="llmImportFile" type="file" accept=".json,application/json" class="file-input" /></div><p id="llmImportState" role="status"></p></details>
+        <section class="connection-import" id="llmImport" aria-labelledby="llmImportTitle" hidden><div class="section-heading"><h2 id="llmImportTitle">导入模型</h2><button type="button" class="text-button" id="llmCancelImport">取消</button></div><p class="field-hint">导入不会切换当前模型。</p><label for="llmImportText">配置 JSON</label><textarea id="llmImportText" rows="8" maxlength="60000" spellcheck="false" placeholder='{"base_url":"https://api.example.com/v1","model":"model-name","api_key":"..."}'></textarea><div class="form-actions"><button type="button" id="importLlmProfile">导入配置</button><label class="file-button" for="llmImportFile">选择 JSON 文件</label><input id="llmImportFile" type="file" accept=".json,application/json" class="file-input" /></div><p id="llmImportState" role="status"></p></section>
+        <p id="llmProfileState" class="connection-status" role="status" aria-live="polite"></p>
+        </div>
+        <div id="asr" class="connection-pane" hidden>
+        <div id="asrList"><div class="section-heading"><h2 id="asrTitle">语音识别</h2><div class="inline-actions"><button type="button" class="secondary" id="asrRefresh">刷新</button><button type="button" id="asrNew">添加接入</button></div></div>
+        <div class="model-grid" id="asrProfileCards" aria-label="已保存的语音接入"></div></div>
+        <form id="asrForm" class="connection-editor" hidden>
+          <div class="section-heading"><h2 id="asrFormTitle">添加语音接入</h2><button type="button" class="text-button" id="asrCancel">取消</button></div>
+          <div class="connection-fields">
+            <label for="asrName">名称</label><input id="asrName" required maxlength="60" autocomplete="off" placeholder="例如：个人语音服务" />
+            <label for="asrProvider">语音服务</label><select id="asrProvider"><option value="aliyun_nls_ws">阿里云 NLS</option><option value="aliyun_ws">阿里云百炼</option></select>
+            <label for="asrApiKey" id="asrApiKeyLabel" hidden>API Key</label><div class="key-field" id="asrApiKeyField" hidden><input id="asrApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="输入语音服务 API Key" /><button type="button" id="asrToggleKey" class="text-button" aria-controls="asrApiKey" aria-pressed="false" aria-label="显示 API Key"><img class="eye-open" src="modules/icons/eye.svg" alt="" /><img class="eye-closed" src="modules/icons/eye-off.svg" alt="" /></button></div>
+            <label for="asrAppKey" id="asrAppKeyLabel">AppKey</label><div class="key-field" id="asrAppKeyField"><input id="asrAppKey" type="password" autocomplete="off" spellcheck="false" placeholder="输入 NLS 项目的 AppKey" /><button type="button" id="asrToggleAppKey" class="text-button" aria-controls="asrAppKey" aria-pressed="false" aria-label="显示 AppKey"><img class="eye-open" src="modules/icons/eye.svg" alt="" /><img class="eye-closed" src="modules/icons/eye-off.svg" alt="" /></button></div>
+            <label for="asrAuthMode" id="asrAuthModeLabel">鉴权方式</label><select id="asrAuthMode"><option value="token">临时 Token</option><option value="access_key">自动更新 Token</option></select>
+            <label for="asrNlsToken" id="asrNlsTokenLabel">AccessToken</label><div id="asrNlsTokenField"><div class="key-field"><input id="asrNlsToken" type="password" autocomplete="off" spellcheck="false" placeholder="输入 NLS AccessToken" /><button type="button" id="asrToggleNlsToken" class="text-button" aria-controls="asrNlsToken" aria-pressed="false" aria-label="显示 AccessToken"><img class="eye-open" src="modules/icons/eye.svg" alt="" /><img class="eye-closed" src="modules/icons/eye-off.svg" alt="" /></button></div><p class="field-hint">测试 Token 会过期。</p></div>
+            <label for="asrAccessKeyId" id="asrAccessKeyIdLabel" hidden>AccessKey ID</label><div class="key-field" id="asrAccessKeyIdField" hidden><input id="asrAccessKeyId" type="password" autocomplete="off" spellcheck="false" placeholder="输入 RAM 用户的 AccessKey ID" /><button type="button" id="asrToggleAccessKeyId" class="text-button" aria-controls="asrAccessKeyId" aria-pressed="false" aria-label="显示 AccessKey ID"><img class="eye-open" src="modules/icons/eye.svg" alt="" /><img class="eye-closed" src="modules/icons/eye-off.svg" alt="" /></button></div>
+            <label for="asrAccessKeySecret" id="asrAccessKeySecretLabel" hidden>AccessKey Secret</label><div id="asrAccessKeySecretField" hidden><div class="key-field"><input id="asrAccessKeySecret" type="password" autocomplete="off" spellcheck="false" placeholder="输入 AccessKey Secret" /><button type="button" id="asrToggleAccessKeySecret" class="text-button" aria-controls="asrAccessKeySecret" aria-pressed="false" aria-label="显示 AccessKey Secret"><img class="eye-open" src="modules/icons/eye.svg" alt="" /><img class="eye-closed" src="modules/icons/eye-off.svg" alt="" /></button></div><p class="field-hint">AccessKey 仅保存在本机后端，用于自动获取 Token。</p></div>
+          </div>
+          <details class="asr-advanced"><summary>接口与识别参数</summary><div class="field-grid"><label>WebSocket 地址<input id="asrEndpoint" required value="wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1" spellcheck="false" /></label><label id="asrModelLabel" hidden>模型名称<input id="asrModel" value="paraformer-realtime-v2" maxlength="160" spellcheck="false" disabled /></label><label id="asrLanguageHintsLabel" hidden>语言提示<input id="asrLanguageHints" value="zh,en" maxlength="120" disabled /></label><label>热词表 ID<input id="asrVocabulary" maxlength="200" placeholder="可选" /></label></div></details>
+          <div class="form-actions"><button type="submit" id="asrSave">保存并使用</button><button type="button" class="secondary" id="asrCheck" disabled>测试接入</button></div>
+        </form>
+        <p id="asrProfileState" class="connection-status" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <section id="interview" class="settings-view" aria-labelledby="interviewTitle" hidden>
+        <header class="page-heading"><h1 id="interviewTitle">开始面试</h1></header>
+        <p id="interviewIdentity" class="audio-identity"></p>
+        <div class="form-actions transcription-actions"><button type="button" id="interviewStart" disabled>开始</button><button type="button" class="secondary" id="interviewStop" hidden disabled>停止</button><a id="interviewConnectionLink" href="#models/asr" hidden>设置语音接入</a><button type="button" class="text-button" id="interviewPermissions" hidden>检查录音权限</button></div>
+        <p id="interviewStatus" role="status" aria-live="polite"></p>
+        <div id="interviewRecovery" hidden><div class="form-actions"><button type="button" class="secondary" id="interviewRetrySave" hidden>重试保存</button><button type="button" class="secondary" id="interviewExport" disabled>导出文字</button></div><p class="transcription-partial" id="interviewMicPartial" hidden></p><p class="transcription-partial" id="interviewSystemPartial" hidden></p><p class="empty-state" id="interviewEmpty">尚无转写内容。</p><div id="interviewTranscript" class="transcription-feed" role="log" aria-label="面试转写内容" aria-live="polite"></div></div>
       </section>
 
       <form id="studySettingsForm">
         <section id="study" class="settings-view" aria-labelledby="studyTitle" hidden>
-          <header class="page-heading"><p class="page-context">答题偏好</p><h1 id="studyTitle">让解答，<br />按你的习惯来。</h1><p>保存后，从下一次提问开始生效。</p></header>
+          <header class="page-heading"><h1 id="studyTitle">答题偏好</h1></header>
           <div class="field-grid">
-            <label>专业 / 方向<input id="studySpecialty" list="studySpecialtyOptions" maxlength="120" placeholder="选择或填写你的方向" /><datalist id="studySpecialtyOptions"><option value="计算机 / 软件工程"></option><option value="行测"></option><option value="申论"></option><option value="考研"></option><option value="英语"></option><option value="金融"></option><option value="法学"></option><option value="医学"></option><option value="会计"></option><option value="电子信息"></option><option value="教师资格"></option></datalist></label>
-            <label>编程语言<input id="studyLanguage" list="studyLanguageOptions" maxlength="80" placeholder="不指定，按题目要求" /><datalist id="studyLanguageOptions"><option value="Python"></option><option value="Java"></option><option value="C++"></option><option value="C"></option><option value="JavaScript"></option><option value="TypeScript"></option><option value="Go"></option><option value="Rust"></option><option value="C#"></option><option value="Kotlin"></option><option value="Swift"></option><option value="SQL"></option></datalist></label>
+            <label>专业 / 方向<select id="studySpecialty" disabled><option value="">正在读取…</option></select><input id="studySpecialtyCustom" aria-label="自定义专业方向" maxlength="120" placeholder="输入专业或考试方向" required hidden disabled /></label>
+            <label>编程语言<select id="studyLanguage" disabled><option value="">正在读取…</option></select><input id="studyLanguageCustom" aria-label="自定义编程语言" maxlength="80" placeholder="输入编程语言" required hidden disabled /></label>
             <label>回答语言<select id="studyAnswerLanguage"><option value="zh-CN">中文</option><option value="en-US">English</option></select></label>
-            <label>讲解方式<select id="studyAnswerStyle"><option value="hints">先给提示</option><option value="walkthrough">分步讲解</option><option value="solution">完整解答</option></select></label>
+            <label>讲解方式<select id="studyAnswerStyle"><option value="hints">先给提示</option><option value="walkthrough">分步讲解</option><option value="solution" selected>完整解答</option></select></label>
             <label class="field-wide">复习目标<textarea id="studyGoal" rows="2" maxlength="1000" placeholder="你希望重点练习什么？"></textarea></label>
           </div>
           <p id="studySpecialtyHint" class="field-hint" hidden>考试类方向不会附带编程语言。</p>
@@ -61,17 +93,17 @@
         </section>
 
         <section id="briefing" class="settings-view" aria-labelledby="briefingTitle" hidden>
-          <header class="page-heading"><p class="page-context">面试资料</p><h1 id="briefingTitle">把经历与岗位，<br />放在一起准备。</h1><p>这些资料用于面试，不会附加到截图笔试的提问里。</p></header>
+          <header class="page-heading"><h1 id="briefingTitle">面试资料</h1></header>
           <div class="field-grid">
             <label>我的身份<select id="studyAssistantRole"><option value="candidate">面试者</option><option value="interviewer">面试官</option></select></label>
           </div>
           <div class="briefing-block"><div class="section-heading"><h2>岗位信息</h2><label class="file-button" for="jdFile">上传文档 <span aria-hidden="true">↗</span></label><input type="file" id="jdFile" class="file-input" accept=".txt,.md,.json,.pdf,.doc,.docx,image/*" /></div><label class="sr-only" for="jdText">岗位 JD</label><textarea id="jdText" rows="7" placeholder="粘贴岗位职责、能力要求和业务背景"></textarea><p id="jdFileStatus" class="field-hint" role="status">支持 PDF、Word、图片和文本。</p></div>
           <div class="briefing-block"><div class="section-heading"><h2>简历信息</h2><label class="file-button" for="resumeFile">上传文档 <span aria-hidden="true">↗</span></label><input type="file" id="resumeFile" class="file-input" accept=".txt,.md,.json,.pdf,.doc,.docx,image/*" /></div><label class="sr-only" for="resumeText">简历摘要</label><textarea id="resumeText" rows="7" placeholder="粘贴经历、项目和职责"></textarea><p id="resumeFileStatus" class="field-hint" role="status">支持 PDF、Word、图片和文本。</p></div>
-          <label class="consent-row"><input type="checkbox" id="longTermMemoryConsent" /><span>记录跨面试长期记忆<small>勾选表示已获得候选人同意。未勾选时本次面试不会留下任何跨面试记忆。</small></span></label>
+          <label class="consent-row"><input type="checkbox" id="interviewUseKnowledge" disabled aria-describedby="interviewKnowledgeHint" /><span>面试回答参考知识库<small id="interviewKnowledgeHint">仅将相关片段随问题发送给当前大模型；历史 AI 回答不作为个人经历。<a href="#assets/kb">管理知识库</a></small></span></label>
         </section>
 
         <section id="shortcuts" class="settings-view" aria-labelledby="shortcutsTitle" hidden>
-          <header class="page-heading"><p class="page-context">桌面快捷键</p><h1 id="shortcutsTitle">手不用离开键盘。</h1><p>点击组合键后重新按键。Esc 取消，保存后自动同步到应用。</p></header>
+          <header class="page-heading"><h1 id="shortcutsTitle">快捷键</h1></header>
           <div class="section-heading"><h2>按键设置</h2><button type="button" class="secondary" id="resetHotkeys" disabled>恢复默认</button></div>
           <p id="hotkeyFeedback" class="field-hint" role="status"></p>
           <div class="shortcut-list" id="hotkeyList"></div>
@@ -80,7 +112,7 @@
       </form>
 
       <section id="assets" class="settings-view" aria-labelledby="assetsTitle" hidden>
-        <header class="page-heading"><p class="page-context">学习记录</p><h1 id="assetsTitle">每一题，<br />都值得再看一遍。</h1><p>回看截图与解答，把有用的内容留进知识库。</p></header>
+        <header class="page-heading"><h1 id="assetsTitle">学习记录</h1></header>
         <nav class="asset-tabs" id="assetTabs" aria-label="记录类型"><button type="button" class="asset-tab is-active" data-asset-tab="exams" aria-pressed="true">笔试记录</button><button type="button" class="asset-tab" data-asset-tab="records" aria-pressed="false">会话记录</button><button type="button" class="asset-tab" data-asset-tab="kb" aria-pressed="false">知识库</button></nav>
         <section id="assetExams" class="asset-pane"><div class="asset-toolbar"><button type="button" class="secondary" id="examsExport">导出 Markdown <span aria-hidden="true">↗</span></button></div><div class="asset-list" id="examsList"></div></section>
         <section id="assetRecords" class="asset-pane" hidden><div class="asset-toolbar"><button type="button" class="secondary" id="recordsExport">导出 Markdown <span aria-hidden="true">↗</span></button></div><div class="asset-list" id="recordsList"></div></section>

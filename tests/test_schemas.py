@@ -10,6 +10,7 @@ from libs.schemas import (
     AIGCResult,
     BehaviorSignal,
     CandidateCreate,
+    ChatStreamRequest,
     ConsentCreate,
     ConsentRecord,
     ConsistencyFlag,
@@ -37,7 +38,49 @@ from libs.schemas import (
     ReportBuildRequest,
     ScoringRequest,
     TranscriptSegment,
+    UiSettings,
 )
+
+
+def test_chat_context_defaults_to_study_and_interview_role_is_optional() -> None:
+    request = ChatStreamRequest(text="问题")
+    assert request.context == "study"
+    assert request.interview_role is None
+    assert ChatStreamRequest(context="interview", images=["image"]).interview_role is None
+
+
+@pytest.mark.parametrize("role", ["candidate", "interviewer"])
+def test_chat_interview_accepts_an_explicit_role_snapshot(role) -> None:
+    request = ChatStreamRequest(context="interview", interview_role=role, text="问题")
+    assert request.interview_role == role
+
+
+@pytest.mark.parametrize("context", ["voice", "scoring", "", None, 42])
+def test_chat_rejects_unknown_context(context) -> None:
+    with pytest.raises(ValidationError):
+        ChatStreamRequest(context=context, text="问题")
+
+
+@pytest.mark.parametrize("role", ["unknown", "system", "", 1])
+def test_chat_rejects_invalid_interview_role(role) -> None:
+    with pytest.raises(ValidationError):
+        ChatStreamRequest(context="interview", interview_role=role, text="问题")
+
+
+@pytest.mark.parametrize("context", ["study", "interview"])
+def test_chat_context_still_requires_a_question_or_image(context) -> None:
+    with pytest.raises(ValidationError):
+        ChatStreamRequest(context=context, text=" ")
+
+
+def test_new_study_settings_default_to_complete_solution() -> None:
+    assert UiSettings().study_answer_style == "solution"
+
+
+def test_saved_study_style_and_language_are_not_replaced_by_new_defaults() -> None:
+    settings = UiSettings(study_answer_style="hints", study_language="Rust")
+    assert settings.study_answer_style == "hints"
+    assert settings.study_language == "Rust"
 
 
 def test_behavior_signal_forbids_compliance_sensitive_extra_fields() -> None:

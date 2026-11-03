@@ -96,6 +96,21 @@ def test_editing_a_saved_profile_updates_it_in_place_and_keeps_its_key() -> None
     assert saved["llm_api_key_configured"] is True
 
 
+def test_same_model_from_two_named_sources_keeps_independent_connections() -> None:
+    first = _save(name="个人接口", profile_id="personal")
+    second = _save(name="公司网关", profile_id="company", llm_base_url="https://company.example.test/v1", llm_api_key="company-test-key")
+    matching = [p for p in second["profiles"] if p["llm_model"] == "model-a" and p["id"] in {"personal", "company"}]
+    assert len(matching) == 2
+    assert {p["name"] for p in matching} == {"个人接口", "公司网关"}
+    model_config.activate_profile("personal")
+    assert get_settings().llm_base_url == "https://api.example.test/v1"
+    assert get_settings().llm_api_key == "secret-key"
+    model_config.activate_profile("company")
+    assert get_settings().llm_base_url == "https://company.example.test/v1"
+    assert get_settings().llm_api_key == "company-test-key"
+    assert first["active_profile_id"] == "personal"
+
+
 def test_saving_without_an_id_edits_the_active_profile() -> None:
     first = _save()
     second = _save(llm_model="model-d", llm_api_key="")

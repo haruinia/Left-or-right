@@ -43,6 +43,8 @@ def test_load_liuwa_chat_prompt_reads_prompt_file() -> None:
     assert "{answer_language}" in prompt
     assert "liuwa:type=choice" in prompt
     assert "## 代码" in prompt
+    programming = next(line for line in prompt.splitlines() if line.startswith("2. 编程题："))
+    assert programming.index("## 答案") < programming.index("## 代码")
     assert prompt == prompt.strip()
 
 

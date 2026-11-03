@@ -1,13 +1,20 @@
 import {state} from './state.js';
 import {applyDisplay} from './display.js';
+import {SPECIALTY_GROUPS, LANGUAGE_GROUPS, CUSTOM_STUDY_VALUE, isExamSpecialty, fillStudyChoice, syncStudyCustom, readStudyChoice} from './study-presets.js';
 
 const byId = id => document.getElementById(id);
 const menu = byId('liuwaDisplay');
 const reader = document.querySelector('.liuwa-reader');
 const status = byId('quickSettingsStatus');
 const notice = text => { if(status) status.textContent = text; };
-const fields = {study_language:'quickProgrammingLanguage',answer_language:'quickAnswerLanguage',assistant_role:'quickIdentity'};
+const fields = {study_specialty:'quickSpecialty',study_language:'quickProgrammingLanguage',answer_language:'quickAnswerLanguage',assistant_role:'quickIdentity'};
+const studyChoices = {
+  study_specialty: {input:'quickSpecialtyCustom',groups:SPECIALTY_GROUPS},
+  study_language: {input:'quickProgrammingLanguageCustom',groups:LANGUAGE_GROUPS},
+};
 let modelsLoading = false;
+let modelProfiles = [];
+let activeProfileId = '';
 let ui = null;
 let origin = '';
 
@@ -31,34 +38,79 @@ function hydrateUi(data) {
   ui=data;
   for(const [key,id] of Object.entries(fields)) {
     const input=byId(id), value=data[key] || '';
-    // Preserve languages configured in advanced settings, even outside the common list.
-    if(key==='study_language' && value && ![...input.options].some(option=>option.value===value)) input.add(new Option(value,value));
-    input.value=value;
-    if(key==='study_language' && value==='') input.selectedIndex=-1;
     input.disabled=false;
+    const choice=studyChoices[key];
+    if(choice)fillStudyChoice(input,byId(choice.input),choice.groups,value);
+    else input.value=value;
   }
+  syncStudyAvailability();
+}
+function syncStudyAvailability() {
+  byId('quickProgrammingLanguage').disabled=isExamSpecialty(readStudyChoice(byId('quickSpecialty'),byId('quickSpecialtyCustom')));
+  for(const [key,choice] of Object.entries(studyChoices))syncStudyCustom(byId(fields[key]),byId(choice.input));
 }
 function hydrateCapture(config) {
   const options=config.captureOptions;
+  const select=byId('quickDisplay');
   if(!options) {
-    byId('quickCaptureMode').disabled=true;byId('quickDisplay').replaceChildren(new Option('桌面版可选择显示器',''));
+    byId('quickCaptureMode').disabled=true;select.disabled=true;
+    select.replaceChildren(new Option('桌面版可选择显示器',''));
     return;
   }
   byId('quickCaptureMode').value=options.mode;byId('quickCaptureMode').disabled=false;
-  byId('quickDisplay').replaceChildren(...options.displays.map(d=>new Option(`${d.label} · ${d.width}×${d.height}`,d.id)));
-  byId('quickDisplay').value=options.displayId;byId('quickDisplay').disabled=false;
+  select.replaceChildren(...options.displays.map(display=>new Option(`${display.label} · ${display.width}×${display.height}`,String(display.id))));
+  select.value=String(options.displayId);
+  select.disabled=false;
+}
+function hydrateModels(data) {
+  modelProfiles=data.profiles || [];
+  activeProfileId=data.active_profile_id || '';
+  const select=byId('quickModel');
+  const names=new Map();
+  for(const profile of modelProfiles) {
+    const name=profile.name || profile.llm_model;
+    names.set(name,(names.get(name) || 0)+1);
+  }
+  select.replaceChildren(...modelProfiles.map(profile=>{
+    const name=profile.name || profile.llm_model;
+    let label=name===profile.llm_model ? name : `${name} · ${profile.llm_model}`;
+    if(names.get(name)>1) {
+      let host=profile.llm_base_url || '';
+      try {host=new URL(host).host;} catch {}
+      label+=` · ${host}`;
+    }
+    return new Option(label,profile.id);
+  }));
+  if(!modelProfiles.length)select.replaceChildren(new Option('暂无已保存模型',''));
+  select.value=activeProfileId;
+  select.disabled=modelsLoading || !modelProfiles.length;
+}
+function setModelBusy(busy) {
+  modelsLoading=busy;
+  byId('quickRefreshModels').disabled=busy;
+  byId('quickModel').disabled=busy || !modelProfiles.length;
 }
 async function loadModels() {
-  if(modelsLoading)return;modelsLoading=true;byId('quickRefreshModels').disabled=true;
+  if(modelsLoading)return;
+  setModelBusy(true);
+  try {hydrateModels(await request('/api/config/llm/profiles'));}
+  catch(error) {notice(`模型列表读取失败：${error.message}`);}
+  finally {setModelBusy(false);}
+}
+async function activateModel() {
+  const select=byId('quickModel');
+  const profileId=select.value;
+  if(modelsLoading || !modelProfiles.some(profile=>profile.id===profileId))return;
+  const previous=activeProfileId;
+  setModelBusy(true);
   try {
-    const data=await request('/api/config/models');
-    const summary=byId('quickModelSummary');
-    if(summary) summary.textContent = data.interview_model
-      ? `${data.interview_model}${data.screenshot_model && data.screenshot_model !== data.interview_model ? ` · 截图 ${data.screenshot_model}` : ''}`
-      : '尚未配置模型';
-    if(data.warning)notice(data.warning);
-  } catch(error) {notice(`模型状态读取失败：${error.message}`);}
-  finally {modelsLoading=false;byId('quickRefreshModels').disabled=false;}
+    hydrateModels(await request('/api/config/llm/activate',{profile_id:profileId}));
+    notice('已保存。');
+  } catch(error) {
+    try {hydrateModels(await request('/api/config/llm/profiles'));}
+    catch {select.value=previous;}
+    notice(`模型切换失败：${error.message}`);
+  } finally {setModelBusy(false);}
 }
 async function reloadSettings() {
   try {hydrateUi(await request('/api/ui/settings'));notice('修改后自动保存。');}
@@ -73,21 +125,47 @@ export async function loadQuickSettings() {
   // 每次打开都重读：设置页或其他窗口改了语言、模型、显示器后，这里必须跟上。
   await reloadSettings();
 }
-for(const [key,id] of Object.entries(fields))byId(id)?.addEventListener('change',async()=>{
-  const input=byId(id), previous=ui?.[key];input.disabled=true;
-  try {hydrateUi(await request('/api/ui/settings',{[key]:input.value.trim()},'PATCH'));notice('已保存，下次提问生效。');}
-  catch(error){input.value=previous || '';notice(error.message);}
-  finally {input.disabled=false;}
-});
-for(const [id,key] of [['quickCaptureMode','mode'],['quickDisplay','displayId']])byId(id)?.addEventListener('change',async()=>{
-  const input=byId(id);input.disabled=true;
-  try {const data=await window.cockpit.setCaptureOptions({[key]:input.value});hydrateCapture({captureOptions:data});notice(data.saved===false?'本次已应用，偏好保存失败。':'截图设置已保存。');}
+async function saveUiField(key) {
+  const input=byId(fields[key]);
+  const choice=studyChoices[key];
+  const custom=choice && byId(choice.input);
+  const value=choice ? readStudyChoice(input,custom) : input.value.trim();
+  if(custom && input.value===CUSTOM_STUDY_VALUE && !value) {notice('请填写自定义内容。');return;}
+  input.disabled=true;
+  if(custom)custom.disabled=true;
+  try {hydrateUi(await request('/api/ui/settings',{[key]:value},'PATCH'));notice('已保存，下次提问生效。');}
+  catch(error){if(ui)hydrateUi(ui);notice(error.message);}
+  finally {input.disabled=false;syncStudyAvailability();}
+}
+for(const [key,id] of Object.entries(fields)) {
+  byId(id)?.addEventListener('change',()=>{
+    const choice=studyChoices[key];
+    if(choice && byId(id).value===CUSTOM_STUDY_VALUE) {
+      syncStudyAvailability();byId(choice.input).focus();return;
+    }
+    return saveUiField(key);
+  });
+  const choice=studyChoices[key];
+  if(choice)byId(choice.input)?.addEventListener('change',()=>saveUiField(key));
+}
+let captureSaving=false;
+async function saveCaptureOptions(patch) {
+  if(captureSaving)return;
+  captureSaving=true;byId('quickCaptureMode').disabled=true;byId('quickDisplay').disabled=true;
+  try {const data=await window.cockpit.setCaptureOptions(patch);hydrateCapture({captureOptions:data});notice(data.saved===false?'本次已应用，偏好保存失败。':'已保存。');}
   catch(error){notice(error.message);try{hydrateCapture(await window.cockpit.getConfig());}catch{}}
-  finally {input.disabled=false;}
+  finally {captureSaving=false;byId('quickCaptureMode').disabled=false;byId('quickDisplay').disabled=false;}
+}
+byId('quickCaptureMode')?.addEventListener('change',()=>saveCaptureOptions({mode:byId('quickCaptureMode').value}));
+byId('quickDisplay')?.addEventListener('change',()=>{
+  const displayId=byId('quickDisplay').value;
+  if(captureSaving || !displayId)return;
+  return saveCaptureOptions({displayId:String(displayId)});
 });
-byId('quickManageModels')?.addEventListener('click',()=>openSettings('models'));
+byId('quickModel')?.addEventListener('change',activateModel);
 byId('quickRefreshModels')?.addEventListener('click',loadModels);
 function openSettings(section = '') {
+  if (menu) menu.open = false;
   const url = `/settings${section ? `#${section}` : ''}`;
   return window.cockpit?.openSettings ? window.cockpit.openSettings(section) : window.open(url,'_blank','noopener');
 }
@@ -97,15 +175,18 @@ byId('liuwaCloseSettings')?.addEventListener('click',()=>{menu.open=false;});
 function fitPanel() {
   // Exclude the area behind the popover so translucent backgrounds do not stack
   // and answer text cannot bleed through the settings. Closing restores it.
-  if(reader)reader.style.clipPath='';
+  const regions=[reader,byId('liuwaInterview')].filter(Boolean);
+  regions.forEach(region=>{region.style.clipPath='';});
   const panel=menu?.querySelector('.liuwa-display-panel');if(!panel||!menu.open)return;
   panel.style.maxHeight=`${Math.max(150,innerHeight-menu.querySelector('summary').getBoundingClientRect().bottom-18)}px`;
-  if(!reader)return;
-  const r=reader.getBoundingClientRect(), p=panel.getBoundingClientRect();
-  if(!r.width||!r.height)return;
-  const left=Math.max(0,p.left-r.left), top=Math.max(0,p.top-r.top);
-  const right=Math.min(r.width,p.right-r.left), bottom=Math.min(r.height,p.bottom-r.top);
-  if(right>left&&bottom>top)reader.style.clipPath=`polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px, ${left}px ${top}px)`;
+  const p=panel.getBoundingClientRect();
+  for(const region of regions) {
+    const r=region.getBoundingClientRect();
+    if(!r.width||!r.height)continue;
+    const left=Math.max(0,p.left-r.left), top=Math.max(0,p.top-r.top);
+    const right=Math.min(r.width,p.right-r.left), bottom=Math.min(r.height,p.bottom-r.top);
+    if(right>left&&bottom>top)region.style.clipPath=`polygon(evenodd, 0 0, 100% 0, 100% 100%, 0 100%, 0 0, ${left}px ${top}px, ${right}px ${top}px, ${right}px ${bottom}px, ${left}px ${bottom}px, ${left}px ${top}px)`;
+  }
 }
 menu?.addEventListener('toggle',async()=>{
   try {await window.cockpit?.setSurface?.({settingsOpen:menu.open});}catch{notice('窗口尺寸调整失败。');}
@@ -117,6 +198,7 @@ if(menu) {
   const observer=new ResizeObserver(fitPanel);
   observer.observe(menu.querySelector('.liuwa-display-panel'));
   if(reader)observer.observe(reader);
+  if(byId('liuwaInterview'))observer.observe(byId('liuwaInterview'));
 }
 document.addEventListener('pointerdown',event=>{if(menu?.open&&!menu.contains(event.target))menu.open=false;});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&menu?.open){menu.open=false;menu.querySelector('summary').focus();}});

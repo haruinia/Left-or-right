@@ -3,6 +3,7 @@
 const { execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { app, BrowserWindow, shell, screen } = require('electron');
+const { startupDisplay } = require('./capture-options');
 
 const COMPACT = { width: 560, height: 76 };
 // 780 = Gank 解答区的 740px 上限 + 窗口与卡片两层内边距（约 40px）。
@@ -16,7 +17,7 @@ let expandedSize = {...EXPANDED};
 let onDisplayChange = null;
 let displayRevision = 0;
 let theme = 'light';
-let surface = {answer:false, shotCount:0, settingsOpen:false, notice:false};
+let surface = {answer:false, shotCount:0, settingsOpen:false, notice:false, interview:false, transcriptOpen:false};
 
 // The UI ships with the app and loads from disk, so the window still renders when
 // the gateway is down. The gateway URL and key reach the renderer through the
@@ -27,13 +28,13 @@ const RENDERER_INDEX = app.isPackaged
   ? path.join(process.resourcesPath, 'web', 'index.html')
   : path.resolve(__dirname, '..', '..', 'web', 'index.html');
 
-function createWindow(config, { onMove, onDisplay } = {}) {
+function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) {
   const isMac = process.platform === 'darwin';
   // 记住上次的位置：透明无边框窗口没有标题栏可以拖，每次启动都回默认位置
   // 时用户得重新按快捷键挪一遍。
   const saved = config && config.windowBounds;
   compact = true;
-  surface = {answer:false, shotCount:0, settingsOpen:false, notice:false};
+  surface = {answer:false, shotCount:0, settingsOpen:false, notice:false, interview:false, transcriptOpen:false};
   layout = config?.surfaceVersion === 1 && Object.hasOwn(LAYOUTS, config?.windowLayout) ? config.windowLayout : 'narrow';
   theme = ['light','dark','transparent-black','transparent-white'].includes(config?.panelTheme) ? config.panelTheme : 'light';
   opacity = Number.isFinite(config?.panelOpacity) ? config.panelOpacity : .9;
@@ -72,6 +73,8 @@ function createWindow(config, { onMove, onDisplay } = {}) {
       backgroundThrottling: false,
     },
   });
+  const target = startupDisplay(config, screen.getAllDisplays(), screen.getPrimaryDisplay());
+  if (screen.getDisplayMatching(win.getBounds()).id !== target.id) moveToDisplay(win, target);
   fitWindow(win, COMPACT);
   clampToArea(win);
   setOpacity(win, opacity);
@@ -107,8 +110,9 @@ function createWindow(config, { onMove, onDisplay } = {}) {
 
   win.loadFile(RENDERER_INDEX);
   win.once('ready-to-show', () => {
+    if (win.isDestroyed() || !canShow()) return;
     win.setBackgroundColor('#00000000');
-    win.setFocusable(false);
+    setOverlayFocusable(win, false);
     // Gank 式悬浮层：默认让鼠标完全穿过，只有系统级 Command 监听报告
     // Command 按下时才临时接收点击。不能在这里设成可点击，否则面板会
     // 一直挡住下面的题目。
@@ -135,7 +139,8 @@ function createWindow(config, { onMove, onDisplay } = {}) {
   const rememberFrontApp = setInterval(() => {
     if (interact) return;
     const pid = frontmostPid();
-    if (pid && pid !== String(process.pid)) previousPid = pid;
+    const own = process.platform === 'win32' ? nativeWindowId(win) : String(process.pid);
+    if (pid && pid !== own) previousPid = pid;
   }, 1000);
   win.on('closed', () => clearInterval(rememberFrontApp));
 
@@ -148,7 +153,7 @@ function createWindow(config, { onMove, onDisplay } = {}) {
       if (win.isDestroyed()) return;
       const { x, y, width, height } = win.getBounds();
       // 收起尺寸不覆盖阅读尺寸；重启仍恢复最后的阅读窗口。
-      if (!compact && !surface.settingsOpen) expandedSize = {width,height};
+      if (!compact && !surface.settingsOpen && (!surface.interview || surface.answer)) expandedSize = {width,height};
       onMove({ x, y, ...expandedSize });
     }, 400);
   };
@@ -199,7 +204,10 @@ let zoomFactor = 1;
 
 function setZoom(win, value) {
   zoomFactor = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(value * 10) / 10));
-  if (win && !win.isDestroyed()) win.webContents.setZoomFactor(zoomFactor);
+  if (win && !win.isDestroyed()) {
+    win.webContents.setZoomFactor(zoomFactor);
+    if (!compact && surface.interview && !surface.answer) fitSurface(win);
+  }
   return zoomFactor;
 }
 
@@ -220,6 +228,18 @@ function clampToArea(win) {
   if (x !== bounds.x || y !== bounds.y) win.setPosition(x, y, false);
 }
 
+function moveToDisplay(win, display) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const area = display.workArea;
+  const width = Math.min(bounds.width, area.width);
+  const height = Math.min(bounds.height, area.height);
+  const x = Math.round(area.x + (area.width - width) / 2);
+  const y = Math.round(area.y + (area.height - height) / 2);
+  win.setBounds({ x, y, width, height }, false);
+  notifyDisplay(win);
+}
+
 function moveWindow(win, dx, dy) {
   if (!win || win.isDestroyed()) return;
   const bounds = win.getBounds();
@@ -231,7 +251,7 @@ function moveWindow(win, dx, dy) {
 
 function toggleCompact(win) {
   if (!win || win.isDestroyed()) return compact;
-  if (!compact && !surface.settingsOpen) {
+  if (!compact && !surface.settingsOpen && (!surface.interview || surface.answer)) {
     const {width, height} = win.getBounds();
     expandedSize = {width, height};
   }
@@ -252,7 +272,7 @@ function fitWindow(win, size) {
 function setLayout(win, value) {
   if (!win || win.isDestroyed() || !Object.hasOwn(LAYOUTS, value)) return getDisplayState(win);
   layout = value;
-  compact = !surface.answer;
+  compact = !(surface.answer || surface.interview);
   expandedSize = {...LAYOUTS[value]};
   fitSurface(win);
   clampToArea(win);
@@ -261,7 +281,11 @@ function setLayout(win, value) {
 }
 
 function fitSurface(win) {
-  const size = compact ? {...COMPACT, height:COMPACT.height + (surface.shotCount ? 84 : 0) + (surface.notice ? 26 : 0)} : {...expandedSize};
+  const additions = (surface.shotCount ? 84 : 0) + (surface.notice ? 26 : 0);
+  const size = compact ? {...COMPACT, height:COMPACT.height + additions}
+    : surface.interview && !surface.answer ? {...COMPACT, height:COMPACT.height + 74 + (surface.transcriptOpen ? 190 : 0) + additions}
+    : {...expandedSize};
+  if (!compact && surface.interview && !surface.answer) size.height *= zoomFactor;
   if(surface.settingsOpen) size.height = Math.max(size.height, 650);
   fitWindow(win, size);
   clampToArea(win);
@@ -269,9 +293,12 @@ function fitSurface(win) {
 
 function setSurface(win, patch = {}) {
   if(!win || win.isDestroyed()) return getDisplayState(win);
-  if(patch.answer === false) compact = true;
-  else if(patch.answer === true && !surface.answer) compact = false;
+  const interview = typeof patch.interview === 'boolean' ? patch.interview : surface.interview;
+  if(patch.answer === false && !interview) compact = true;
+  else if((patch.answer === true && !surface.answer) || (interview && !surface.interview)) compact = false;
   if(typeof patch.answer === 'boolean') surface.answer = patch.answer;
+  surface.interview = interview;
+  if(typeof patch.transcriptOpen === 'boolean') surface.transcriptOpen = patch.transcriptOpen;
   if(Number.isInteger(patch.shotCount)) surface.shotCount = Math.max(0, Math.min(8, patch.shotCount));
   if(typeof patch.settingsOpen === 'boolean') surface.settingsOpen = patch.settingsOpen;
   if(typeof patch.notice === 'boolean') surface.notice = patch.notice;
@@ -287,7 +314,7 @@ function setTheme(win, value) {
 function showWindow(win) {
   if (!win || win.isDestroyed()) return;
   if (!win.isVisible()) win.showInactive();
-  win.setFocusable(false);
+  setOverlayFocusable(win, false);
   setClickThrough(win, true);
 }
 
@@ -309,10 +336,23 @@ let previousPid = '';
 
 function setClickThrough(win, ignore) {
   if (!win || win.isDestroyed()) return;
-  win.setIgnoreMouseEvents(Boolean(ignore), { forward: true });
+  win.setIgnoreMouseEvents(Boolean(ignore), { forward: false });
+}
+
+function setOverlayFocusable(win, focusable) {
+  win.setFocusable(focusable);
+  // Electron 33 on Windows changes taskbar membership when focusability changes.
+  if (process.platform === 'win32') win.setSkipTaskbar(true);
+}
+
+function nativeWindowId(win) {
+  if (!win || typeof win.getNativeWindowHandle !== 'function') return '';
+  const handle = win.getNativeWindowHandle();
+  return handle.length >= 8 ? handle.readBigUInt64LE().toString() : String(handle.readUInt32LE());
 }
 
 function frontmostPid() {
+  if (process.platform === 'win32') return require('./command-key').getWindowsForegroundWindow();
   if (process.platform !== 'darwin') return '';
   try {
     return execFileSync(
@@ -325,7 +365,11 @@ function frontmostPid() {
   }
 }
 
-function activatePid(pid) {
+function activatePid(pid, win) {
+  if (process.platform === 'win32') {
+    require('./command-key').restoreWindowsForegroundWindow(pid, nativeWindowId(win));
+    return;
+  }
   const n = Number(pid);
   if (!n || process.platform !== 'darwin') return;
   execFile(
@@ -342,24 +386,36 @@ function isInteractive() {
 function setInteractive(win, on, { restore = true } = {}) {
   if (!win || win.isDestroyed()) return interact;
   const next = Boolean(on);
-  if (interact === next) return interact;
+  if (interact === next) {
+    if (!next) {
+      setClickThrough(win, true);
+      setOverlayFocusable(win, false);
+      win.webContents.send('cockpit:armed', false);
+    }
+    return interact;
+  }
   interact = next;
   if (interact) {
+    if (process.platform === 'win32') {
+      const foreground = frontmostPid();
+      if (foreground && foreground !== nativeWindowId(win)) previousPid = foreground;
+    }
     armedAt = Date.now();
     if (!win.isVisible()) win.showInactive();
     // 不主动 focus：按下 Command 只解除鼠标穿透，用户仍可继续在题目
     // 窗口里操作；真正点击悬浮层时才由 macOS 把焦点交给它。
-    win.setFocusable(true);
+    setOverlayFocusable(win, true);
     setClickThrough(win, false);
   } else {
     const hadFocus = typeof win.isFocused === 'function' && win.isFocused();
     setClickThrough(win, true);
-    win.setFocusable(false);
+    setOverlayFocusable(win, false);
     const pid = previousPid;
     previousPid = '';
     // 只有悬浮层真的取得过焦点时才把焦点还给原来的应用。单纯按住
     // Command 不会打断用户正在输入的题目。
-    if (restore && hadFocus && pid && pid !== String(process.pid)) activatePid(pid);
+    const own = process.platform === 'win32' ? nativeWindowId(win) : String(process.pid);
+    if (restore && hadFocus && pid && pid !== own) activatePid(pid, win);
   }
   win.webContents.send('cockpit:armed', interact);
   return interact;
@@ -370,12 +426,14 @@ function beginHoldInteract(win) {
   // 兼容旧的“按住操作面板”全局快捷键：它只负责进入临时交互，
   // 松开 Command 后仍由系统级监听统一恢复穿透。
   const pid = frontmostPid();
-  if (pid && pid !== String(process.pid)) previousPid = pid;
+  const own = process.platform === 'win32' ? nativeWindowId(win) : String(process.pid);
+  if (pid && pid !== own) previousPid = pid;
   setInteractive(win, true);
 }
 
 module.exports = {
   createWindow,
+  moveToDisplay,
   moveWindow,
   setOpacity,
   changeOpacity,

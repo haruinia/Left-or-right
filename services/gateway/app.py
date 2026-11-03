@@ -76,6 +76,7 @@ from services.document_service import parse_document
 from services.chat_service import iter_chat_deltas
 from services.chat_service.service import build_chat_messages
 from services.gateway.learning_assets import router as learning_assets_router
+from services.gateway.transcription import router as transcription_router
 from services.gateway import model_config
 from services.exam_service import solve_exam_screenshot
 from services.memory_service import (
@@ -331,8 +332,9 @@ async def lifespan(fastapi_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Shuihuo Killer", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="左右", version="0.1.0", lifespan=lifespan)
 app.include_router(learning_assets_router)
+app.include_router(transcription_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["null", "file://"],  # Electron loadFile 的本地页面来源
@@ -340,10 +342,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
-WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+WEB_ROOT = Path(os.environ.get("ZUOYOU_WEB_ROOT") or Path(__file__).resolve().parents[2] / "web")
 WEB_INDEX = WEB_ROOT / "index.html"
 WEB_SETTINGS = WEB_ROOT / "settings.html"
-WEB_COCKPIT = WEB_ROOT / "cockpit.html"
 app.mount("/vendor", StaticFiles(directory=WEB_ROOT / "vendor"), name="vendor")
 WEB_ASSET_MEDIA_TYPES = {
     ".css": "text/css; charset=utf-8",
@@ -906,11 +907,6 @@ def settings_page() -> str:
     return WEB_SETTINGS.read_text(encoding="utf-8")
 
 
-@app.get("/cockpit", response_class=HTMLResponse)
-def cockpit() -> str:
-    return WEB_COCKPIT.read_text(encoding="utf-8")
-
-
 def _ui_settings_path() -> Path:
     raw = get_settings().database_url
     if raw.startswith("sqlite:///"):
@@ -1001,16 +997,16 @@ def patch_ui_settings(payload: dict):
 
 
 @app.get("/styles.css")
-@app.get("/modules/{name}")
+@app.get("/modules/{name:path}")
 def web_asset(request: Request, name: str = "") -> Response:
     """Serve the split cockpit assets that index.html references.
 
     The path is resolved under WEB_ROOT and rejected if it escapes, so a crafted
     `name` cannot read files elsewhere on disk.
     """
-    relative = f"modules/{name}" if name else "styles.css"
-    target = (WEB_ROOT / relative).resolve()
-    if not target.is_file() or WEB_ROOT.resolve() not in target.parents:
+    base = (WEB_ROOT / "modules" if name else WEB_ROOT).resolve()
+    target = (base / (name or "styles.css")).resolve()
+    if not target.is_file() or base not in target.parents:
         raise HTTPException(status_code=404, detail="asset not found")
     media_type = WEB_ASSET_MEDIA_TYPES.get(target.suffix)
     if media_type is None:

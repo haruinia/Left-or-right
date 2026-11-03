@@ -6,11 +6,11 @@ import {stepAnswerTab} from '../web/modules/answer-view.js';
 
 for (const [type,content,preferred] of [
   ['choice','## 解题思路\n排除其他选项\n## 答案\nB. TCP\n## 详细解析\n可靠传输。','answer'],
-  ['programming','## 解题思路\n二分\n## 代码\n```python\nprint(42)\n```\n## 复杂度分析\nO(1)','code'],
+  ['programming','## 解题思路\n二分\n## 代码\n```python\nprint(42)\n```\n## 答案\n返回42\n## 复杂度分析\nO(1)','answer'],
   ['reasoning','## 解题思路\n先找不变量\n## 详细解析\n分情况讨论','thought'],
   ['essay','## 写作思路\n围绕材料\n## 参考作答\n推动公共服务向基层延伸。\n## 材料分析\n材料一与材料二','answer'],
   ['calculation','## 答案\n$6$ 米\n## 详细解析\n$2+4=6$','answer'],
-  ['mixed','## 第一题\n### 答案\nB\n## 第二题\n### 代码\n```py\nprint(1)\n```','all'],
+  ['mixed','## 第一题\n### 答案\nB\n## 第二题\n### 代码\n```py\nprint(1)\n```','answer'],
 ]) test(`${type} opens ${preferred} independently of source order`,()=>{
   const model = splitAnswer(`<!-- liuwa:type=${type} -->\n${content}`);
   assert.equal(model.preferred,preferred);
@@ -46,20 +46,48 @@ test('unstructured and misleadingly named answers fall back to the complete text
 });
 
 test('a partially streamed metadata marker is hidden and absent preferred content is not fabricated',()=>{
-  assert.equal(stripAnswerMetadata('<!-- liuwa:type=pro').text,'');
+  for (const prefix of ['<', '<!', '<!-', '<!--', '<!-- li', '<!-- liuwa:type=pro']) assert.equal(stripAnswerMetadata(prefix).text,'');
+  assert.equal(stripAnswerMetadata('<!-- 普通备注 -->\n内容').text,'<!-- 普通备注 -->\n内容');
   const model=splitAnswer('<!-- liuwa:type=programming -->\n## 解题思路\n先排序');
-  assert.equal(model.preferred,'code');
-  assert.equal(model.panels.find(p=>p.key==='code').hasContent,false);
+  assert.equal(model.preferred,'thought');
+  assert.equal(model.panels.some(p=>p.key==='answer'),false);
+  assert.equal(model.panels.some(p=>p.key==='code'),false);
   assert.equal(model.panels.find(p=>p.key==='thought').hasContent,true);
 });
 
-test('general answers with a code section infer programming and open code first',()=>{
+test('general answers with code still show their explicit answer first',()=>{
   const source='<!-- liuwa:type=general -->\n## 答案\n查询活跃用户。\n## 代码\n```sql\nSELECT * FROM users WHERE active = 1;\n```';
   const model=splitAnswer(source);
   assert.equal(model.type,'programming');
-  assert.equal(model.preferred,'code');
-  assert.equal(model.panels[0].key,'code');
+  assert.equal(model.preferred,'answer');
+  assert.equal(model.panels[0].key,'answer');
   assert.match(model.panels.find(p=>p.key==='code').markdown,/```sql/);
+});
+
+test('reasoning responses with an explicit answer also show the answer first',()=>{
+  const model=splitAnswer('<!-- liuwa:type=reasoning -->\n## 解题思路\n先分析条件。\n## 答案\n命题成立。');
+  assert.equal(model.preferred,'answer');
+  assert.equal(model.panels[0].key,'answer');
+});
+
+test('old programming answers with only code remain readable without an empty answer tab',()=>{
+  const model=splitAnswer('<!-- liuwa:type=programming -->\n## 代码\n```java\nreturn 42;\n```');
+  assert.equal(model.preferred,'code');
+  assert.equal(model.panels.some(p=>p.key==='answer'),false);
+  assert.match(model.panels.find(p=>p.key==='code').markdown,/return 42/);
+});
+
+test('mixed answers without an explicit answer retain the whole question context',()=>{
+  const model=splitAnswer('<!-- liuwa:type=mixed -->\n## 第一题\n解释一个概念。\n## 第二题\n### 代码\n```py\nprint(42)\n```');
+  assert.equal(model.preferred,'all');
+  assert.equal(model.panels.some(p=>p.key==='answer'),false);
+});
+
+test('metadata and an answer heading alone do not count as answer content',()=>{
+  for (const source of ['<!--', '<!-- li', '<!-- liuwa:type=programming -->', '<!-- liuwa:type=programming -->\n## 答案']) {
+    const model=splitAnswer(source);
+    assert.equal(model.panels.some(p=>p.hasContent),false,source);
+  }
 });
 
 test('stepAnswerTab switches between tabs in left and right direction', () => {

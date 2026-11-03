@@ -34,7 +34,7 @@ async def _call_with_transport(transport: httpx.MockTransport) -> ProbeResponse:
 
 def test_llm_client_uses_configurable_protocol(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("LLM_MODEL", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_MODEL", "example-model")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/api")
     monkeypatch.setenv("LLM_API_PATH", "/v2/chat")
     monkeypatch.setenv("LLM_API_KEY", "secret")
@@ -48,7 +48,7 @@ def test_llm_client_uses_configurable_protocol(monkeypatch) -> None:
         assert str(request.url) == "https://llm.example.test/api/v2/chat"
         assert request.headers["X-API-Key"] == "secret"
         body = json.loads(request.content)
-        assert body["model"] == "mimo-v2.5-pro"
+        assert body["model"] == "example-model"
         assert body["custom"]["enabled"] is True
         return httpx.Response(
             200,
@@ -585,7 +585,7 @@ def test_image_message_without_text_omits_the_text_part(monkeypatch) -> None:
 
 def test_stream_text_parses_openai_sse_deltas(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("LLM_MODEL", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_MODEL", "example-model")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test/api")
     monkeypatch.setenv("LLM_API_PATH", "/v1/chat/completions")
     monkeypatch.setenv("LLM_API_KEY", "secret")
@@ -620,7 +620,7 @@ def test_stream_text_parses_openai_sse_deltas(monkeypatch) -> None:
 
 def test_stream_text_surfaces_provider_error_body(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "openai_compatible")
-    monkeypatch.setenv("LLM_MODEL", "mimo-v2.5-pro")
+    monkeypatch.setenv("LLM_MODEL", "example-model")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test")
     monkeypatch.setenv("LLM_API_KEY", "secret")
     monkeypatch.setenv("LLM_AUTH_HEADER", "Authorization")

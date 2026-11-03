@@ -76,7 +76,7 @@ def test_gateway_script_runtime_summary_marks_mock_modes() -> None:
     run_gateway = _load_run_gateway()
     status = SimpleNamespace(
         llm_provider="mock",
-        llm_model="mimo-v2.5-pro",
+        llm_model="example-model",
         llm_base_url_configured=True,
         llm_api_key_configured=False,
         asr_provider="stub",
@@ -93,9 +93,9 @@ def test_gateway_script_runtime_summary_marks_mock_modes() -> None:
     lines = run_gateway.runtime_summary_lines(status)
     summary = "\n".join(lines)
 
-    assert "Model: mock / mimo-v2.5-pro (mock)" in summary
+    assert "Model: mock / example-model (mock)" in summary
     assert "ASR: stub (mock)" in summary
-    assert "Model: mock / mimo-v2.5-pro (configured)" not in summary
+    assert "Model: mock / example-model (configured)" not in summary
     assert "ASR: stub (configured)" not in summary
 
 
@@ -103,7 +103,7 @@ def test_gateway_script_runtime_summary_accepts_nls_auto_token() -> None:
     run_gateway = _load_run_gateway()
     status = SimpleNamespace(
         llm_provider="mock",
-        llm_model="mimo-v2.5-pro",
+        llm_model="example-model",
         llm_base_url_configured=True,
         llm_api_key_configured=False,
         asr_provider="aliyun_nls_ws",

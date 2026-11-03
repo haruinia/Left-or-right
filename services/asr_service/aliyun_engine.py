@@ -189,8 +189,9 @@ class AliyunASRSession:
             "header": {
                 "action": "finish-task",
                 "task_id": self.task_id,
+                "streaming": "duplex",
             },
-            "payload": {},
+            "payload": {"input": {}},
         }
 
     async def _close_websocket(self) -> None:

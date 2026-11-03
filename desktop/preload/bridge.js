@@ -12,9 +12,14 @@ const api = {
   setSurface: (patch) => ipcRenderer.invoke('cockpit:setSurface', patch),
   setCaptureOptions: (patch) => ipcRenderer.invoke('cockpit:setCaptureOptions', patch),
   openSettings: (section) => ipcRenderer.invoke('cockpit:openSettings', section),
+  getInterviewState: () => ipcRenderer.invoke('interview:getState'),
+  interviewCommand: command => ipcRenderer.invoke('interview:command', command),
+  onInterviewState: callback => ipcRenderer.on('interview:state', (_event, value) => callback(value)),
+  onInterviewControl: callback => ipcRenderer.on('liuwa:interview-control', (_event, action) => callback(action)),
   resetView: () => ipcRenderer.invoke('liuwa:reset-view'),
   onReset: (callback) => ipcRenderer.on('liuwa:reset-view', () => callback()),
   onDisplay: (callback) => ipcRenderer.on('cockpit:display', (_event, value) => callback(value)),
+  onCaptureStart: callback => ipcRenderer.on('liuwa:capture-start', (_event, payload) => callback(payload)),
   onCapture: (callback) => ipcRenderer.on('liuwa:capture', (_event, payload) => callback(payload)),
   onCaptureError: (callback) =>
     ipcRenderer.on('liuwa:capture-error', (_event, payload) => callback(payload)),
@@ -30,6 +35,7 @@ const api = {
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);
+ipcRenderer.on('app:privacy-hidden', () => window.dispatchEvent(new Event('app:privacy-hidden')));
 
 const bootConfig = ipcRenderer.sendSync('cockpit:getConfigSync');
 contextBridge.exposeInMainWorld('__GATEWAY_URL__', bootConfig.gatewayUrl || '');

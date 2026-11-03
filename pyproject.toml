@@ -1,7 +1,7 @@
 [project]
 name = "shuihuo-killer"
 version = "0.1.0"
-description = "AI interview probe and anti-padding evaluation system"
+description = "Local-first desktop screenshot study assistant"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",
@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "ruff>=0.6.0"]
+desktop = ["pyinstaller>=6.16,<7"]
 postgres = ["psycopg[binary]>=3.2.0"]
 redis = ["redis>=5.0.0"]
 celery = ["celery[redis]>=5.3.0"]

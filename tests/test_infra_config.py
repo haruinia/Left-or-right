@@ -95,20 +95,22 @@ def test_pyproject_declares_optional_worker_dependencies() -> None:
     assert "opentelemetry-instrumentation-fastapi>=0.47b0" in pyproject
 
 
-def test_readme_documents_current_default_llm_model() -> None:
+def test_readme_documents_generic_model_settings_without_legacy_product_copy() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "mimo-v2.5-pro" in readme
-    assert "mimo2.5pro" not in readme
+    for text in ("截图学习助手", "接口 URL", "API Key", "模型名称", "30,000 tokens", "https://api.example.com/v1"):
+        assert text in readme
+    for text in ("水货杀手", "反注水", "反作弊", "/cockpit"):
+        assert text not in readme
 
 
-def test_readme_documents_local_ocr_and_nls_asr_setup() -> None:
+def test_readme_explains_installed_service_and_desktop_build() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    # 精简版 README 以 provider 表的形式覆盖 ASR；OCR 在文档解析说明里提及。
-    assert "OCR" in readme
-    assert "ASR_PROVIDER=aliyun_nls_ws" in readme
-    assert "NLS" in readme
+    for text in ("安装版自带本地服务", "9958", 'pip install -e ".[desktop]"', "npm --prefix desktop ci", "npm --prefix desktop run dist"):
+        assert text in readme
+    for text in ("运行显示器", "下拉框", "应用会移动过去", "截图跟随应用所在屏幕", "两个显示器不能同时选中", "未按住时没有悬停反馈"):
+        assert text in readme
 
 
 def test_readme_distinguishes_real_llm_smoke_from_mock_mode() -> None:
@@ -140,25 +142,11 @@ def test_readme_explains_document_upload_formats() -> None:
     assert "25MB" in readme
 
 
-def test_readme_explains_asr_smoke_scripts() -> None:
+def test_readme_identifies_asr_as_optional_components() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    # 精简版 README 列出 ASR provider 与对应冒烟脚本。
-    assert "ASR_PROVIDER=sherpa_onnx" in readme
-    assert "ASR_PROVIDER=aliyun_ws" in readme
-    assert "download_sherpa_asr_model.py" in readme
-    assert "check_aliyun_asr.py" in readme
-    assert "check_aliyun_nls_asr.py" in readme
-    assert "BlackHole" in readme
-
-
-def test_readme_explains_aliyun_nls_auto_token_mode() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    # NLS 既支持 AppKey + Token，也支持 AccessKey 自动签发 Token。
-    assert "aliyun_nls_ws" in readme
-    assert "Token" in readme
-    assert "AccessKey" in readme
+    for text in ("可选 ASR 底层组件", "不属于当前截图学习的必需依赖", "ASR_PROVIDER=sherpa_onnx", "ASR_PROVIDER=aliyun_ws", "ASR_PROVIDER=aliyun_nls_ws", "download_sherpa_asr_model.py", "check_aliyun_asr.py", "check_aliyun_nls_asr.py", "Token", "AccessKey"):
+        assert text in readme
 
 
 def test_env_example_lists_runtime_integration_knobs() -> None:
@@ -210,20 +198,21 @@ def test_env_example_lists_runtime_integration_knobs() -> None:
         assert key in env_example
 
 
-def test_env_example_includes_complete_deepseek_configuration_block() -> None:
+def test_env_example_uses_mock_with_generic_model_and_empty_credentials() -> None:
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
-
-    for line in [
-        "# LLM_PROVIDER=openai_compatible",
-        "# LLM_MODEL=deepseek-v4-pro",
-        "# LLM_BASE_URL=https://api.deepseek.com",
-        "# LLM_API_PATH=/chat/completions",
-        "# LLM_API_KEY=your-deepseek-key",
-        "# LLM_AUTH_HEADER=Authorization",
-        "# LLM_AUTH_SCHEME=Bearer",
-        "# LLM_RESPONSE_CONTENT_PATH=choices.0.message.content",
-    ]:
-        assert line in env_example
+    values = dict(
+        line.split("=", 1)
+        for line in env_example.splitlines()
+        if line and not line.startswith("#") and "=" in line
+    )
+    assert values["LLM_PROVIDER"] == "mock"
+    assert values["LLM_MODEL"] == "example-model"
+    assert values["LLM_BASE_URL"] == ""
+    assert values["LLM_API_KEY"] == ""
+    assert values["LLM_API_PATH"] == "/chat/completions"
+    assert values["LLM_AUTH_HEADER"] == "Authorization"
+    assert values["LLM_AUTH_SCHEME"] == "Bearer"
+    assert values["LLM_RESPONSE_CONTENT_PATH"] == "choices.0.message.content"
 
 
 def test_postgres_schema_matches_core_spec_tables() -> None:

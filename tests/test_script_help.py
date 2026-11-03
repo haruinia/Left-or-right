@@ -13,10 +13,11 @@ def test_all_utility_scripts_support_help_without_running() -> None:
     assert scripts
     for script in scripts:
         result = subprocess.run(
-            [sys.executable, str(script), "--help"],
+            [sys.executable, "-X", "utf8", str(script), "--help"],
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
 
         assert "usage:" in result.stdout

@@ -14,6 +14,8 @@ function setup() {
   const sandbox = {
     savedSettings: saved,
     saving: false,
+    window: {dispatchEvent() {}},
+    Event: class {},
     saveState: { textContent: '' },
     readSettings: () => current,
     validateHotkeys: () => true,

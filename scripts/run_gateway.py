@@ -39,7 +39,7 @@ def port_is_available(host: str, port: int) -> bool:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the local Shuihuo Killer gateway.")
+    parser = argparse.ArgumentParser(description="Run the local Left-or-right service.")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-reload", action="store_true", help="Disable uvicorn auto-reload.")
@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Runtime configuration error: {exc}", file=sys.stderr)
         return 3
 
-    print(f"Starting Shuihuo Killer gateway at {url}")
+    print(f"Starting Left-or-right service at {url}")
     print(f"API docs: {url}docs")
     for line in runtime_summary_lines(status):
         print(line)

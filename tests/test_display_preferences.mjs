@@ -5,22 +5,29 @@ import vm from 'node:vm';
 import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
 
-function windowModule(area = {x:0,y:24,width:1440,height:876}) {
-  const sandbox = {module:{exports:{}}, __dirname:'/app/main', process,
-    require: name => name === 'electron' ? {app:{isPackaged:false},screen:{getDisplayMatching:()=>({workArea:area})}} : require(name)};
+function windowModule(area = {x:0,y:24,width:1440,height:876}, platform = process.platform) {
+  const sandbox = {module:{exports:{}}, __dirname:'/app/main', process:{...process,platform},
+    require: name => name === 'electron' ? {app:{isPackaged:false},screen:{getDisplayMatching:()=>({workArea:area})}} : name === './capture-options' ? require('../desktop/main/capture-options.js') : name === './command-key' ? {
+      getWindowsForegroundWindow:()=> '456',
+      restoreWindowsForegroundWindow:(target,expected)=>events.push(['restoreForeground',target,expected]),
+    } : require(name)};
   vm.runInNewContext(fs.readFileSync(new URL('../desktop/main/window.js', import.meta.url),'utf8'),sandbox);
   let bounds = {x:900,y:500,width:640,height:700};
   const events = [];
   const win = {isDestroyed:()=>false,getBounds:()=>bounds,
+    getNativeWindowHandle:()=>Buffer.from([123,0,0,0,0,0,0,0]),
     setSize:(width,height)=>{bounds={...bounds,width,height};},
     setPosition:(x,y)=>{bounds={...bounds,x,y};},
+    setBounds:value=>{bounds={...bounds,...value};},
     setOpacity:value=>events.push(['nativeOpacity',value]),
     setIgnoreMouseEvents:(ignore,options)=>events.push(['ignoreMouse',ignore,options]),
-    setFocusable:focusable=>events.push(['focusable',focusable]),
+    setFocusable:focusable=>{events.push(['focusable',focusable]);if(platform==='win32')win.taskbarSkipped=!focusable;},
+    setSkipTaskbar:skip=>{events.push(['skipTaskbar',skip]);win.taskbarSkipped=skip;},
+    taskbarSkipped:true,
     isVisible:()=>true,
     isFocused:()=>true,
     showInactive:()=>events.push(['showInactive']),
-    webContents:{send:(...args)=>events.push(args)}};
+    webContents:{send:(...args)=>events.push(args),setZoomFactor:value=>events.push(['zoom',value])}};
   return {api:sandbox.module.exports,win,events};
 }
 
@@ -44,6 +51,16 @@ test('compact restores the actual resized reading window and layouts stay within
   small.api.setSurface(small.win,{answer:true});
   small.api.setLayout(small.win,'wide');
   assert.deepEqual([small.win.getBounds().width,small.win.getBounds().height],[800,600]);
+});
+
+test('choosing a running display moves and fits the app onto that screen',()=>{
+  const {api,win}=windowModule();
+  api.moveToDisplay(win,{id:2,workArea:{x:-1280,y:0,width:1280,height:720}});
+  const b=win.getBounds();
+  assert.ok(b.x>=-1280 && b.x+b.width<=0);
+  assert.ok(b.y>=0 && b.y+b.height<=720);
+  api.moveToDisplay(win,{id:3,workArea:{x:1440,y:0,width:400,height:500}});
+  assert.deepEqual([win.getBounds().x,win.getBounds().y,win.getBounds().width,win.getBounds().height],[1440,0,400,500]);
 });
 
 test('opacity changes the background state while native text remains fully opaque',()=>{
@@ -79,6 +96,25 @@ test('idle surface grows for separate image previews and temporary settings then
   assert.equal(win.getBounds().height,76);
 });
 
+test('interview standby fits its controls without replacing the saved answer dimensions',()=>{
+  const {api,win}=windowModule();
+  api.setSurface(win,{answer:false,interview:true,transcriptOpen:false});
+  assert.deepEqual([win.getBounds().width,win.getBounds().height],[560,150]);
+  assert.equal(api.getDisplayState(win).compact,false);
+  api.changeZoom(win,.5);assert.equal(win.getBounds().height,225);
+  api.resetZoom(win);assert.equal(win.getBounds().height,150);
+  api.setSurface(win,{transcriptOpen:true});
+  assert.equal(win.getBounds().height,340);
+  api.setLayout(win,'wide');
+  assert.equal(win.getBounds().height,340);
+  api.toggleCompact(win);assert.equal(win.getBounds().height,76);
+  api.toggleCompact(win);assert.equal(win.getBounds().height,340);
+  api.setSurface(win,{answer:true});
+  assert.deepEqual([win.getBounds().width,win.getBounds().height],[1000,680]);
+  api.setSurface(win,{answer:false,interview:false,transcriptOpen:false});
+  assert.deepEqual([win.getBounds().width,win.getBounds().height],[560,76]);
+});
+
 test('the overlay passes clicks through by default and only captures them while Command is held',()=>{
   const {api,win,events}=windowModule();
   const lastIgnore=()=>[...events].reverse().find(([event])=>event==='ignoreMouse')?.[1];
@@ -97,6 +133,54 @@ test('the overlay passes clicks through by default and only captures them while 
   assert.equal(api.isInteractive(),false);
   assert.ok(events.some(([event,value])=>event==='focusable'&&value===false));
   assert.ok(events.some(([event,value])=>event==='cockpit:armed'&&value===false));
+  const mouseEvents = events.filter(([event])=>event==='ignoreMouse');
+  assert.equal(mouseEvents.length,3);
+  assert.ok(mouseEvents.every(([, , options])=>options.forward===false));
+});
+
+test('Windows Ctrl interaction restores foreground only after the overlay took focus',()=>{
+  const {api,win,events}=windowModule(undefined,'win32');
+  api.setInteractive(win,true);
+  assert.equal(api.isInteractive(),true);
+  assert.ok(!events.some(([event])=>event==='restoreForeground'));
+  api.setInteractive(win,false);
+  assert.deepEqual(events.find(([event])=>event==='restoreForeground'),['restoreForeground','456','123']);
+
+  const passive=windowModule(undefined,'win32');
+  passive.win.isFocused=()=>false;
+  passive.api.setInteractive(passive.win,true);
+  passive.api.setInteractive(passive.win,false);
+  assert.ok(!passive.events.some(([event])=>event==='restoreForeground'));
+});
+
+test('Windows focusability changes immediately restore taskbar exclusion',()=>{
+  const {api,win,events}=windowModule(undefined,'win32');
+  const assertSkipped=()=>assert.equal(win.taskbarSkipped,true);
+  api.showWindow(win);assertSkipped();
+  for(const held of [true,true,false,false,true,false]) {
+    api.setInteractive(win,held,{restore:false});assertSkipped();
+  }
+  events.forEach(([event],index)=>{
+    if(event==='focusable')assert.deepEqual(events[index+1],['skipTaskbar',true]);
+  });
+  assert.ok(events.some(([event,value])=>event==='focusable'&&value));
+  assert.ok(events.some(([event,value])=>event==='ignoreMouse'&&!value));
+});
+
+test('Mac focusability changes do not invoke the Windows taskbar workaround',()=>{
+  const {api,win,events}=windowModule(undefined,'darwin');
+  api.showWindow(win);
+  api.setInteractive(win,true,{restore:false});
+  api.setInteractive(win,false,{restore:false});
+  assert.ok(!events.some(([event])=>event==='skipTaskbar'));
+});
+
+test('a repeated unarmed state still forces native and renderer interaction off',()=>{
+  const {api,win,events}=windowModule(undefined,'win32');
+  api.setInteractive(win,false);
+  assert.ok(events.some(([event,ignore])=>event==='ignoreMouse'&&ignore===true));
+  assert.ok(events.some(([event,focusable])=>event==='focusable'&&focusable===false));
+  assert.ok(events.some(([event,armed])=>event==='cockpit:armed'&&armed===false));
 });
 
 test('preferences write outside app.asar and merge with existing gateway configuration',()=>{

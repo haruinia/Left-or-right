@@ -50,7 +50,7 @@ test('window movement steps in four directions and stays on screen', async () =>
   const sandbox = { module: { exports: {} }, __dirname: '/tmp/desktop/main', process,
     require: name => name === 'electron' ? { app: { isPackaged: false }, screen: {
       getDisplayMatching: () => ({ workArea: { x: 0, y: 24, width: 1440, height: 876 } }),
-    }} : require(name),
+    }} : name === './capture-options' ? require('../desktop/main/capture-options.js') : require(name),
   };
   vm.runInNewContext(fs.readFileSync(new URL('../desktop/main/window.js', import.meta.url), 'utf8'), sandbox);
   const { moveWindow } = sandbox.module.exports;

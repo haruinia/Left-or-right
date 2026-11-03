@@ -163,3 +163,6 @@ export function closeLightbox() {
   offsetY = 0;
   drag = null;
 }
+
+window.addEventListener("app:privacy-hidden", closeLightbox);
+document.addEventListener("visibilitychange", () => { if (document.hidden) closeLightbox(); });

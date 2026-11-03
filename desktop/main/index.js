@@ -1,16 +1,12 @@
 'use strict';
 
-const { pathToFileURL } = require('node:url');
-const path = require('node:path');
-const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences, screen } = require('electron');
+const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences, screen, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('./config');
 const {
   createWindow,
   moveWindow,
+  moveToDisplay,
   toggleCompact,
-  toggleVisible,
-  beginHoldInteract,
-  setClickThrough,
   changeOpacity,
   changeZoom,
   resetZoom,
@@ -20,12 +16,18 @@ const {
   setSurface,
   setTheme,
   setInteractive,
+  isInteractive,
 } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
-const { selectRegion } = require('./selector');
-const { startBackend, stopBackend, waitForHealth } = require('./backend');
+const { validateCaptureOptions, captureWindowDisplay } = require('./capture-options');
+const { selectRegion, cancelSelection } = require('./selector');
+const { ensureBackend, stopBackend } = require('./backend');
 const { startCommandKeyMonitor } = require('./command-key');
+const { openSettingsWindow, getSettingsWindow } = require('./settings-window');
+const { audioCapabilities, configureAudioCapture } = require('./audio-capture');
+const { createWindowVisibility } = require('./window-visibility');
+const { registerInterviewRelay } = require('./interview-relay');
 
 app.setName('左右');
 const config = loadConfig();
@@ -34,7 +36,13 @@ let failedHotkeys = [];
 let currentBindings = BINDINGS;
 let permissionPaneOpened = false;
 let lastScreenshotTime = 0;
+let nextCaptureId = 0;
 let stopCommandKeyMonitor = null;
+const visibility = createWindowVisibility({
+  getMainWindow: () => win,
+  getWindows: () => BrowserWindow.getAllWindows(),
+  setInteractive: held => setInteractive(win, held, {restore: !held}),
+});
 // 一次截图流程（框选 → 抓 → 恢复窗口）进行中时，再按截图键直接忽略。
 // 之前第二次 ⌘⇧U 会先取消旧框选再立刻开新的，而旧流程的收尾
 // 会把主面板重新 show 到新覆盖层上面，下一次点击就被面板吃掉了。
@@ -59,10 +67,15 @@ function screenAccessStatus() {
 // 每次按键挪 24px：比 32 更容易微调到贴边，按住方向键连发也不会冲过头。
 const STEP = 24;
 
+function toggleAppVisibility() {
+  if (screenBusy) cancelSelection();
+  visibility.toggle();
+}
+
 function hotkeyHandlers() {
   return {
-    toggleVisible: () => beginHoldInteract(win),
-    toggleWindow: () => toggleVisible(win),
+    toggleVisible: () => visibility.modifierChanged(true),
+    toggleWindow: () => toggleAppVisibility(),
     quitApp: () => app.quit(),
     clearShots: () => {
       if (win && !win.isDestroyed()) win.webContents.send('liuwa:clear-shots');
@@ -82,10 +95,13 @@ function hotkeyHandlers() {
     moveLeft: () => moveWindow(win, -STEP, 0),
     moveRight: () => moveWindow(win, STEP, 0),
 
-    captureRegion: () => attachScreenshot({ interactive: config.screenshotMode !== 'full' }),
+    captureRegion: () => attachScreenshot({ interactive: config.screenshotMode === 'area' }),
     // 全屏截图不该弹框选十字：screencapture 不带 -i 直接抓当前显示器的完整画面。
     captureScreen: () => attachScreenshot({ interactive: false }),
     sendChat: () => sendChat(),
+    toggleInterview: () => sendInterviewControl('toggle'),
+    muteInterviewMic: () => sendInterviewControl('mic'),
+    muteInterviewSystem: () => sendInterviewControl('system'),
     newQuestion: () => {
       if (win && !win.isDestroyed()) win.webContents.send('liuwa:new-question');
     },
@@ -122,10 +138,14 @@ function sendCapture(payload) {
   }
 }
 
-function sendCaptureError(detail) {
+function sendCaptureError(detail, captureId) {
   if (win && !win.isDestroyed()) {
-    win.webContents.send('liuwa:capture-error', { detail });
+    win.webContents.send('liuwa:capture-error', { detail, ...(captureId ? { captureId } : {}) });
   }
+}
+
+function sendInterviewControl(action) {
+  if (win && !win.isDestroyed()) win.webContents.send('liuwa:interview-control', action);
 }
 
 function sendChat() {
@@ -149,19 +169,13 @@ function sleep(ms) {
 }
 
 async function hideWindowForCapture() {
-  if (!win || win.isDestroyed() || !win.isVisible()) return false;
-  win.hide();
-  // Give the compositor a beat so the frosted panel is gone before the crosshair.
-  await sleep(160);
-  return true;
+  const snapshot = visibility.beginCapture();
+  if (snapshot.windows.length) await sleep(160);
+  return snapshot;
 }
 
-function restoreWindow(wasVisible) {
-  if (wasVisible && win && !win.isDestroyed()) {
-    win.showInactive();
-    win.setFocusable(false);
-    setClickThrough(win, true);
-  }
+function restoreWindow(snapshot) {
+  visibility.endCapture(snapshot);
 }
 
 async function attachScreenshot({ interactive }) {
@@ -172,38 +186,35 @@ async function attachScreenshot({ interactive }) {
     return;
   }
 
+  const captureId = String(++nextCaptureId);
+  if (win && !win.isDestroyed()) win.webContents.send('liuwa:capture-start', { captureId });
   screenBusy = true;
   const wasVisible = await hideWindowForCapture();
+  const canCapture = () => visibility.canCapture(wasVisible);
   try {
+    if (!canCapture()) return;
     const displays = screen.getAllDisplays();
-    const display = displays.find(d => String(d.id) === String(config.captureDisplayId)) || screen.getPrimaryDisplay();
-    const displayIndex = displays.findIndex(d => d.id === display.id) + 1;
-    let rect = null;
-    if (interactive) {
-      // 两点式框选：先让用户点两个角，再按矩形截。
-      // 取消（Esc / 右键）返回 null，此时不该截图也不该报错。
-      rect = await selectRegion(display);
-      if (!rect) {
-        restoreWindow(wasVisible);
-        return;
-      }
-    }
-    // 节流只统计真正发生了的截图：取消/重选不该被 800ms 挡回去。
-    lastScreenshotTime = Date.now();
-    const shot = await captureScreenshot({ interactive: false, rect, displayIndex });
-    restoreWindow(wasVisible);
-    sendCapture({
-      mime: shot.mime,
-      data: shot.data.toString('base64'),
+    const image = await captureWindowDisplay({
+      displays,
+      display: runningDisplay(),
+      interactive,
+      selectRegion: display => canCapture() ? selectRegion(display, canCapture) : null,
+      captureScreenshot: options => {
+        if (!canCapture()) throw new Error('截图已取消');
+        return captureScreenshot(options);
+      },
     });
+    if (!image || !canCapture()) return;
+    lastScreenshotTime = Date.now();
+    sendCapture({ ...image, captureId });
   } catch (error) {
-    restoreWindow(wasVisible);
+    if (!canCapture()) return;
     const raw = String(error.message || error);
     // Unpackaged builds often report 'not-determined' even when the host app is
     // authorized, so only 'denied' is trusted on its own; the screencapture stderr
     // message is the reliable missing-permission signal.
-    const permissionDenied =
-      raw.includes('could not create image') || screenAccessStatus() === 'denied';
+    const permissionDenied = process.platform === 'darwin' &&
+      (raw.includes('could not create image') || screenAccessStatus() === 'denied');
     if (permissionDenied) {
       if (!permissionPaneOpened) {
         permissionPaneOpened = true;
@@ -211,12 +222,13 @@ async function attachScreenshot({ interactive }) {
       }
       sendCaptureError(
         '缺少屏幕录制权限：已打开「系统设置 > 隐私与安全性 > 屏幕录制」，'
-        + '请给启动左右的应用（终端 / Qoder 等；打包安装后是「左右」本身）打开开关，再按一次截图。'
+        + '请给启动左右的应用（终端 / Qoder 等；打包安装后是「左右」本身）打开开关，再按一次截图。', captureId
       );
       return;
     }
-    sendCaptureError(raw);
+    sendCaptureError(raw, captureId);
   } finally {
+    restoreWindow(wasVisible);
     screenBusy = false;
   }
 }
@@ -231,22 +243,27 @@ function hotkeySnapshot() {
   };
 }
 
+function runningDisplay() {
+  return win && !win.isDestroyed() ? screen.getDisplayMatching(win.getBounds()) : screen.getPrimaryDisplay();
+}
+
 function captureOptions() {
   const displays = screen.getAllDisplays();
-  const selected = displays.find(d => String(d.id) === String(config.captureDisplayId)) || screen.getPrimaryDisplay();
-  return {mode:config.screenshotMode || 'area',displayId:String(selected.id),displays:displays.map((d,i)=>({id:String(d.id),label:d.label || `显示器 ${i+1}`,width:d.bounds.width,height:d.bounds.height,scaleFactor:d.scaleFactor}))};
+  return {mode:config.screenshotMode || 'full',displayId:String(runningDisplay().id),displays:displays.map((d,i)=>({id:String(d.id),label:d.label || `显示器 ${i+1}`,width:d.bounds.width,height:d.bounds.height,scaleFactor:d.scaleFactor}))};
 }
 
 function registerIpc() {
+  registerInterviewRelay({ ipcMain, getMainWindow: () => win, getSettingsWindow, gatewayUrl: config.gatewayUrl, visibility });
   ipcMain.handle('cockpit:getConfig', () => ({
     gatewayUrl: config.gatewayUrl,
     gatewayApiKey: config.gatewayApiKey,
     ...hotkeySnapshot(),
     display: getDisplayState(win),
     captureOptions: captureOptions(),
+    armed: isInteractive(),
   }));
   ipcMain.on('cockpit:getConfigSync', (event) => {
-    event.returnValue = { gatewayUrl: config.gatewayUrl, gatewayApiKey: config.gatewayApiKey };
+    event.returnValue = { gatewayUrl: config.gatewayUrl, gatewayApiKey: config.gatewayApiKey, audioCapture: audioCapabilities() };
   });
   ipcMain.handle('cockpit:toggleCompact', () => toggleCompact(win));
   ipcMain.handle('cockpit:setDisplay', (_event, patch) => {
@@ -267,25 +284,44 @@ function registerIpc() {
   });
   ipcMain.handle('cockpit:setCaptureOptions', (_event, patch) => {
     if(!patch || typeof patch !== 'object') throw new Error('Invalid capture settings');
-    if(['area','full'].includes(patch.mode)) config.screenshotMode = patch.mode;
-    if(patch.displayId !== undefined) {
-      if(!screen.getAllDisplays().some(d => String(d.id) === String(patch.displayId))) throw new Error('显示器已断开，请重新选择');
-      config.captureDisplayId = String(patch.displayId);
-    }
-    const saved = saveConfig({screenshotMode:config.screenshotMode || 'area',captureDisplayId:config.captureDisplayId || ''});
+    const displays = screen.getAllDisplays();
+    validateCaptureOptions(patch, displays);
+    if (patch.displayId !== undefined) moveToDisplay(win, displays.find((display) => String(display.id) === String(patch.displayId)));
+    if (patch.mode !== undefined) config.screenshotMode = patch.mode;
+    const options = captureOptions();
+    config.windowDisplayId = options.displayId;
+    const saved = saveConfig({screenshotMode:options.mode,windowDisplayId:options.displayId});
     return {...captureOptions(),saved};
   });
-  ipcMain.handle('cockpit:openSettings', (_event, section) => {
-    // 只接受固定分区的深链接，避免渲染层可导航到任意地址。
-    const anchor = ['study', 'models', 'assets'].includes(section) ? `#${section}` : '';
-    return shell.openExternal(`${config.gatewayUrl}/settings${anchor}`);
+  ipcMain.handle('settings:audioPermissions', async (event, kind) => {
+    const settings = getSettingsWindow();
+    if (process.platform !== 'darwin' || !settings || settings.isDestroyed() || event.sender !== settings.webContents || event.senderFrame !== settings.webContents.mainFrame || !['mic', 'system'].includes(kind)) return false;
+    const pane = kind === 'mic' ? 'Privacy_Microphone' : 'Privacy_ScreenCapture';
+    await shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+    return true;
+  });
+  ipcMain.handle('settings:close', event => {
+    const settings = getSettingsWindow();
+    if (!settings || settings.isDestroyed() || event.sender !== settings.webContents || event.senderFrame !== settings.webContents.mainFrame) return false;
+    settings.webContents.send('app:privacy-hidden');
+    settings.hide();
+    return true;
+  });
+  ipcMain.handle('cockpit:openSettings', async (_event, section) => {
+    const version = visibility.version();
+    if (!await ensureBackend(config)) {
+      if (visibility.canShow(version)) sendCaptureError('设置服务未能启动，请重启应用后重试。服务日志位于应用的 gateway.log 日志文件中。');
+      return false;
+    }
+    if (!visibility.canShow(version)) return false;
+    const opened = await openSettingsWindow(config, section, win, () => visibility.canShow(version));
+    if (!opened && visibility.canShow(version)) sendCaptureError('设置页未能打开，本地服务未能加载设置页面，请重试。');
+    return opened;
   });
   ipcMain.handle('liuwa:reset-view', () => { if(win && !win.isDestroyed()) win.webContents.send('liuwa:reset-view'); });
-  ipcMain.handle('cockpit:toggleVisible', () => {
-    toggleVisible(win);
-  });
+  ipcMain.handle('cockpit:toggleVisible', () => toggleAppVisibility());
   ipcMain.handle('liuwa:capture', (_event, options) =>
-    attachScreenshot({ interactive: typeof options?.interactive === 'boolean' ? options.interactive : config.screenshotMode !== 'full' }),
+    attachScreenshot({ interactive: typeof options?.interactive === 'boolean' ? options.interactive : config.screenshotMode === 'area' }),
   );
   ipcMain.handle('liuwa:send', () => sendChat());
 }
@@ -295,13 +331,7 @@ function registerIpc() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (win && !win.isDestroyed()) {
-      win.showInactive();
-      win.setFocusable(false);
-      setClickThrough(win, true);
-    }
-  });
+  app.on('second-instance', () => visibility.showMain());
   app.whenReady().then(boot);
 }
 
@@ -312,36 +342,41 @@ async function boot() {
     app.dock?.hide();
     app.setActivationPolicy('accessory');
   }
+  if (process.platform === 'win32') Menu.setApplicationMenu(null);
   nativeTheme.themeSource = 'light';
-  if (config.spawnBackend) {
-    startBackend(config);
-  }
-  await waitForHealth(config.gatewayUrl, {
-    timeoutMs: config.spawnBackend ? 30000 : 3000,
-  });
+  const startupVersion = visibility.version();
+  const backendReady = await ensureBackend(config);
   registerIpc();
   failedHotkeys = registerHotkeys(hotkeyHandlers(), currentBindings);
   win = createWindow(config, {
-    onMove: (bounds) => saveConfig({ windowBounds: bounds }),
+    canShow: () => visibility.canShow(startupVersion),
+    onMove: (bounds) => {
+      config.windowDisplayId = String(runningDisplay().id);
+      saveConfig({ windowBounds: bounds, windowDisplayId: config.windowDisplayId });
+    },
     onDisplay: (patch) => saveConfig(patch),
   });
-  stopCommandKeyMonitor = startCommandKeyMonitor((held) => {
-    setInteractive(win, held, { restore: !held });
-  });
+  if (!backendReady) {
+    win.webContents.once('did-finish-load', () => {
+      if (visibility.canShow(startupVersion)) sendCaptureError('本地服务未能启动，请重新打开应用。如果问题持续，请检查应用日志目录中的 gateway.log。');
+    });
+  }
+  const handleRemovedDisplay = (_event, removed) => {
+    if (!win || win.isDestroyed()) return;
+    if (String(removed.id) === config.windowDisplayId) {
+      moveToDisplay(win, screen.getPrimaryDisplay());
+      config.windowDisplayId = String(runningDisplay().id);
+      saveConfig({windowDisplayId:config.windowDisplayId});
+    }
+  };
+  screen.on('display-removed', handleRemovedDisplay);
+  win.on('closed', () => screen.removeListener('display-removed', handleRemovedDisplay));
+  stopCommandKeyMonitor = startCommandKeyMonitor(held => visibility.modifierChanged(held));
   refreshUiHotkeys();
   setInterval(refreshUiHotkeys, 4000);
 
-  const { session } = require('electron');
   const { RENDERER_INDEX } = require('./window');
-  const rendererUrl = pathToFileURL(RENDERER_INDEX).href;
-  const allowMedia = (wc, permission) =>
-    permission === 'media' && wc.getURL().split('?')[0] === rendererUrl;
-  session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
-    callback(allowMedia(wc, permission));
-  });
-  session.defaultSession.setPermissionCheckHandler((wc, permission) =>
-    Boolean(wc) && allowMedia(wc, permission),
-  );
+  configureAudioCapture({ gatewayUrl: config.gatewayUrl, rendererIndex: RENDERER_INDEX, getMainWindow: () => win, getSettingsWindow, getDisplay: runningDisplay });
 }
 
 app.on('will-quit', () => {

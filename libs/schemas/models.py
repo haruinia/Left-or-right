@@ -1192,6 +1192,9 @@ class UiHotkeys(BaseModel):
     toggleVisible: str = "CommandOrControl+Shift+Space"
     captureScreen: str = "CommandOrControl+Shift+Y"
     toggleCompact: str = "CommandOrControl+Shift+J"
+    toggleInterview: str = "CommandOrControl+Alt+I"
+    muteInterviewMic: str = "CommandOrControl+Alt+M"
+    muteInterviewSystem: str = "CommandOrControl+Alt+U"
 
     readPrev: str = "CommandOrControl+,"
     readNext: str = "CommandOrControl+."
@@ -1213,6 +1216,9 @@ class UiHotkeys(BaseModel):
         "toggleWindow",
         "quitApp",
         "toggleCompact",
+        "toggleInterview",
+        "muteInterviewMic",
+        "muteInterviewSystem",
         "captureRegion",
         "captureScreen",
         "sendChat",
@@ -1254,15 +1260,31 @@ class ChatHistoryTurn(BaseModel):
     text: str = Field(default="", max_length=8000)
 
 
+class InterviewTranscriptTurn(BaseModel):
+    source: Literal["mic", "system"]
+    speaker: Literal["candidate", "interviewer"]
+    text: str = Field(min_length=1, max_length=2000)
+    segment_id: str = Field(default="", max_length=64)
+
+
 class ChatStreamRequest(BaseModel):
     text: str = Field(default="", max_length=8000)
     images: list[str] = Field(default_factory=list, max_length=8)
     history: list[ChatHistoryTurn] = Field(default_factory=list, max_length=20)
+    context: Literal["study", "interview"] = "study"
+    interview_role: Literal["candidate", "interviewer"] | None = None
+    interview_transcript: list[InterviewTranscriptTurn] = Field(default_factory=list, max_length=12)
+    # 本轮要回答的那一句。为空表示按最新未回答内容作答。
+    interview_target: str = Field(default="", max_length=64)
+    # 语音解题走实现题结构，与普通口头回答分开。
+    interview_task: Literal["answer", "solve"] = "answer"
 
     @model_validator(mode="after")
     def require_text_or_images(self) -> "ChatStreamRequest":
         if not self.text.strip() and not self.images:
             raise ValueError("chat requires text or images")
+        if sum(len(turn.text) for turn in self.interview_transcript) > 8000:
+            raise ValueError("interview transcript exceeds context limit")
         return self
 
 
@@ -1272,9 +1294,12 @@ class UiSettings(BaseModel):
     study_specialty: str = Field(default="计算机 / 软件工程", max_length=120)
     study_language: str = Field(default="Python", max_length=80)
     study_goal: str = Field(default="看懂眼前这段代码或报错", max_length=1000)
-    study_answer_style: Literal["hints", "walkthrough", "solution"] = "walkthrough"
+    study_answer_style: Literal["hints", "walkthrough", "solution"] = "solution"
     study_instructions: str = Field(default="", max_length=2000)
     jd_text: str = ""
     resume_text: str = ""
     long_term_memory_consent: bool = False
+    interview_use_knowledge: bool = False
+    # 默认手动：自动回答会在录音中每次对方发言后消耗一次模型请求。
+    interview_auto_answer: bool = False
     hotkeys: UiHotkeys = Field(default_factory=UiHotkeys)

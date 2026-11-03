@@ -6,3 +6,11 @@ __pycache__
 *.pyc
 data
 .env
+.env.*
+asr_profiles.json
+model_profiles.json
+model_presets.json
+desktop/backend
+desktop/dist
+desktop/node_modules
+output

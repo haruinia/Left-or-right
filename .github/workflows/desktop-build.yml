@@ -1,0 +1,76 @@
+name: Native desktop builds
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: ${{ matrix.os }} native package
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            script: dist:win
+            artifact: windows-x64
+            installers: desktop/dist/*.exe
+          - os: macos-latest
+            script: dist:mac
+            artifact: macos-native
+            installers: desktop/dist/*.dmg
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - name: Install Python build dependencies
+        run: python -m pip install -e ".[desktop,dev]"
+      - name: Install Electron build dependencies
+        run: npm --prefix desktop ci
+      - name: Test packaging and local-service startup contracts
+        run: node --test tests/test_desktop_backend.mjs tests/test_desktop_packaging.mjs
+      - name: Test Python entry points
+        run: python -m pytest tests/test_desktop_packaging.py tests/test_script_help.py tests/test_config.py -q
+      - name: Build for the runner's native operating system
+        run: npm --prefix desktop run ${{ matrix.script }}
+      - name: Verify the packaged service without an external Python runtime
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          import sys
+          filename = 'left-or-right-gateway.exe' if sys.platform == 'win32' else 'left-or-right-gateway'
+          binaries = [p for p in pathlib.Path('desktop/dist').rglob(filename) if p.parent.name == 'backend' and p.parent.parent.name.lower() == 'resources']
+          if len(binaries) != 1:
+              raise RuntimeError('Expected one bundled native service in the packaged application')
+          binary = binaries[0]
+          subprocess.run([sys.executable, 'tests/smoke_desktop_bundle.py', '--binary', str(binary), '--web-root', str(binary.parent.parent / 'web')], check=True)
+      - name: Verify the packaged native Ctrl helper heartbeat
+        if: runner.os == 'Windows'
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          import sys
+          helpers = [p for p in pathlib.Path('desktop/dist').rglob('windows-interaction.exe') if p.parent.name == 'native' and p.parent.parent.name.lower() == 'resources']
+          if len(helpers) != 1:
+              raise RuntimeError('Expected one native Windows modifier helper in the packaged application')
+          subprocess.run([sys.executable, 'tests/smoke_windows_interaction.py', '--binary', str(helpers[0])], check=True)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Left-or-right-${{ matrix.artifact }}
+          path: ${{ matrix.installers }}
+          if-no-files-found: error
+          retention-days: 14

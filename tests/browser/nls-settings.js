@@ -1,0 +1,104 @@
+async (page, { base = new URL(page.url()).origin } = {}) => {
+  const errors = [], writes = [], reveals = [];
+  page.on('pageerror', error => errors.push(error.message));
+  const preferences = { assistant_role: 'candidate', study_specialty: '', study_language: 'Go', study_answer_style: 'solution', answer_language: 'zh-CN', study_goal: '', study_instructions: '', jd_text: '', resume_text: '', interview_use_knowledge: false };
+  let active = 'bailian', failSave = false, count = 0;
+  const secrets = { bailian: { api_key: 'fixture-bailian-key' } };
+  let profiles = [{ id: 'bailian', name: '百炼备用', provider: 'aliyun_ws', endpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference', model: 'paraformer-realtime-v2', auth_mode: 'token', language_hints: 'zh,en', vocabulary_id: '', api_key_configured: true, configured: true }];
+  const publicStore = () => ({ profiles, active_profile_id: active });
+  await page.route('**/api/ui/settings', route => route.fulfill({ json: preferences }));
+  await page.route('**/api/config/llm/profiles', route => route.fulfill({ json: { profiles: [], presets: [], active_profile_id: '' } }));
+  await page.route('**/api/learning-assets/**', route => route.fulfill({ json: { items: [] } }));
+  await page.route('**/api/config/asr/**', async route => {
+    const url = new URL(route.request().url()), method = route.request().method(), path = url.pathname;
+    if (path.endsWith('/check')) return route.fulfill({ json: { ok: true, detail: '连接验证通过；尚未进行语音识别。' } });
+    if (path.endsWith('/key')) { reveals.push(path); return route.fulfill({ json: { api_key: secrets[path.split('/')[5]]?.api_key || '' } }); }
+    if (path.includes('/secrets/')) { const parts = path.split('/'); reveals.push(path); return route.fulfill({ json: { value: secrets[parts[5]]?.[parts[7]] || '' } }); }
+    if (method === 'POST' && path.endsWith('/profiles')) {
+      const body = route.request().postDataJSON(); writes.push(body);
+      if (failSave) return route.fulfill({ status: 503, json: { detail: '模拟保存失败' } });
+      const id = body.id || `nls-${++count}`, old = profiles.find(item => item.id === id);
+      secrets[id] = { ...(secrets[id] || {}) };
+      const profile = { ...old, ...body, id, model: body.provider === 'aliyun_nls_ws' ? '' : body.model, configured: true };
+      for (const field of ['api_key', 'app_key', 'nls_token', 'access_key_id', 'access_key_secret']) {
+        if (Object.hasOwn(body, field)) secrets[id][field] = body[field];
+        profile[`${field}_configured`] = Boolean(secrets[id][field]); delete profile[field];
+      }
+      profiles = profiles.filter(item => item.id !== id); profiles.push(profile); active = id;
+    }
+    if (method === 'POST' && path.endsWith('/activate')) active = route.request().postDataJSON().profile_id;
+    return route.fulfill({ json: publicStore() });
+  });
+  const check = (ok, message) => { if (!ok) throw Error(message); };
+  await page.setViewportSize({ width: 1100, height: 850 });
+  await page.goto(`${base}/settings?nls-editor-test#models/asr`);
+  await page.locator('[data-asr-edit="bailian"]').waitFor();
+  check(!await page.locator('#asrForm').isVisible(), 'Saved speech list still exposes a full editor');
+  check(await page.locator('.settings-nav a[href="#asr"]').count() === 0, 'A duplicate speech settings page was added');
+  await page.locator('#asrNew').click();
+  await page.waitForFunction(() => !document.querySelector('#asrForm').hidden && document.querySelector('#asrProvider').value === 'aliyun_nls_ws');
+  check(await page.locator('#asrModel').isDisabled() && !await page.locator('#asrModelLabel').isVisible(), 'NLS still asks for a model');
+  check(await page.locator('#asrNlsTokenField').isVisible() && !await page.locator('#asrApiKeyField').isVisible(), 'NLS token fields are not isolated from API Key fields');
+  check((await page.locator('#asrNlsTokenField').textContent()).includes('测试 Token 会过期'), 'Temporary token lifetime is misrepresented');
+  await page.locator('#asrName').fill('个人 NLS');
+  await page.locator('#asrAppKey').fill('fixture-project-appkey');
+  await page.locator('#asrNlsToken').fill('fixture-expiring-token');
+  failSave = true; await page.locator('#asrSave').click();
+  await page.getByText(/保存失败/).waitFor();
+  check(await page.locator('#asrAppKey').inputValue() === 'fixture-project-appkey' && await page.locator('#asrNlsToken').inputValue() === 'fixture-expiring-token', 'Failed save discarded NLS credentials');
+  failSave = false; await page.locator('#asrSave').click();
+  await page.locator('[data-asr-edit="nls-1"]').waitFor();
+  check(!await page.locator('#asrForm').isVisible(), 'Saved NLS editor did not return to its list');
+  check((await page.locator('#asrProfileCards').textContent()).includes('阿里云 NLS'), 'NLS provider is not identifiable on its card');
+  const created = writes.at(-1);
+  check(created.provider === 'aliyun_nls_ws' && created.auth_mode === 'token' && !Object.hasOwn(created, 'model') && !Object.hasOwn(created, 'api_key'), 'NLS save used the wrong protocol fields');
+  await page.locator('[data-asr-edit="nls-1"]').click();
+  await page.waitForFunction(() => document.querySelector('#asrAppKey').value === '************');
+  check(await page.locator('#asrProvider').isDisabled(), 'Editing a saved connection permits a protocol change');
+  check(await page.locator('#asrNlsToken').inputValue() === '************', 'Saved token is not masked');
+  await page.locator('#asrToggleAppKey').click();
+  await page.waitForFunction(() => document.querySelector('#asrAppKey').type === 'text');
+  check(await page.locator('#asrAppKey').inputValue() === 'fixture-project-appkey', 'AppKey reveal did not use the selected profile');
+  check(reveals.at(-1) === '/api/config/asr/profiles/nls-1/secrets/app_key', 'AppKey reveal used an incorrect secret route');
+  await page.locator('#asrToggleNlsToken').click();
+  await page.waitForFunction(() => document.querySelector('#asrNlsToken').type === 'text');
+  check(await page.locator('#asrNlsToken').inputValue() === 'fixture-expiring-token', 'Token reveal failed');
+  await page.evaluate(() => window.dispatchEvent(new Event('app:privacy-hidden')));
+  check(await page.locator('#asrAppKey').inputValue() === '************' && await page.locator('#asrNlsToken').inputValue() === '************', 'Privacy hide left NLS secrets visible');
+  await page.locator('#asrName').fill('个人 NLS 更新');
+  await page.locator('#asrSave').click(); await page.locator('[data-asr-edit="nls-1"]').waitFor();
+  check(!Object.hasOwn(writes.at(-1), 'app_key') && !Object.hasOwn(writes.at(-1), 'nls_token'), 'Unchanged saved secrets were resubmitted');
+  await page.locator('[data-asr-edit="nls-1"]').click();
+  await page.waitForFunction(() => document.querySelector('#asrAppKey').value === '************');
+  await page.locator('#asrAuthMode').selectOption('access_key');
+  check(!await page.locator('#asrNlsTokenField').isVisible() && await page.locator('#asrAccessKeySecretField').isVisible(), 'Automatic token fields were not disclosed on demand');
+  check((await page.locator('#asrAccessKeySecretField').textContent()).includes('仅保存在本机后端'), 'AccessKey security boundary is missing');
+  const beforeEmpty = writes.length;
+  await page.locator('#asrSave').click(); await page.getByText('请填写 AccessKey ID。', { exact: true }).waitFor();
+  check(writes.length === beforeEmpty, 'Empty AccessKey fields were sent');
+  await page.locator('#asrAccessKeyId').fill('fixture-ram-id'); await page.locator('#asrAccessKeySecret').fill('fixture-ram-secret');
+  await page.locator('#asrSave').click(); await page.locator('[data-asr-edit="nls-1"]').waitFor();
+  const automatic = writes.at(-1);
+  check(automatic.auth_mode === 'access_key' && automatic.access_key_id === 'fixture-ram-id' && automatic.access_key_secret === 'fixture-ram-secret' && !Object.hasOwn(automatic, 'nls_token') && !Object.hasOwn(automatic, 'app_key'), 'Automatic token save mixed stored and new credential fields');
+  await page.locator('[data-asr-edit="nls-1"]').click();
+  await page.waitForFunction(() => document.querySelector('#asrAccessKeySecret').value === '************');
+  await page.locator('#asrToggleAccessKeySecret').click(); await page.waitForFunction(() => document.querySelector('#asrAccessKeySecret').type === 'text');
+  check(await page.locator('#asrAccessKeySecret').inputValue() === 'fixture-ram-secret', 'AccessKey Secret reveal failed');
+  await page.locator('.settings-nav a[href="#briefing"]').click();
+  check(await page.locator('#asrAccessKeySecret').inputValue() === '************' && await page.locator('#asrAccessKeySecret').getAttribute('type') === 'password', 'Leaving the editor retained a revealed AccessKey');
+  await page.locator('.settings-nav a[href="#models"]').click(); await page.locator('#connectionTabs a[href="#models/asr"]').click();
+  await page.locator('[data-asr-edit="bailian"]').click(); await page.waitForFunction(() => document.querySelector('#asrApiKey').value === '************');
+  check(await page.locator('#asrProvider').inputValue() === 'aliyun_ws' && !await page.locator('#asrModel').isDisabled() && await page.locator('#asrModelLabel').evaluate(label => !label.hidden), 'Existing百炼 profile changed provider');
+  check(!await page.locator('.asr-advanced').getAttribute('open'), 'Opening a saved profile unnecessarily expanded advanced parameters');
+  await page.locator('#asrToggleKey').click(); await page.waitForFunction(() => document.querySelector('#asrApiKey').type === 'text');
+  check(await page.locator('#asrApiKey').inputValue() === 'fixture-bailian-key', 'Existing API Key reveal stopped working');
+  await page.locator('#asrCancel').click(); await page.locator('#asrNew').click();
+  await page.locator('#asrAppKey').fill('must-not-transfer'); await page.locator('#asrNlsToken').fill('must-not-transfer-token');
+  await page.locator('#asrProvider').selectOption('aliyun_ws');
+  check(await page.locator('#asrAppKey').inputValue() === '' && await page.locator('#asrNlsToken').inputValue() === '' && await page.locator('#asrApiKey').inputValue() === '', 'New provider change reused another protocol secret');
+  check(await page.locator('#asrEndpoint').inputValue() === 'wss://dashscope.aliyuncs.com/api-ws/v1/inference', '百炼 endpoint default is incorrect');
+  await page.setViewportSize({ width: 375, height: 812 });
+  check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'NLS editor overflows narrow layout');
+  check(errors.length === 0, errors.join('\n'));
+  return { passed: true, nlsDefault: true, bothServices: true, providerImmutable: true, temporaryAndAutomaticToken: true, allCredentialsMasked: true, fieldScopedReveal: true, unchangedSecretsOmitted: true, privacyRemasking: true, savedDraftOnFailure: true, separateEditor: true, narrowLayout: true, cloudCalls: false };
+}

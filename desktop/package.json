@@ -7,11 +7,14 @@
   "main": "main/index.js",
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder --mac"
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win --x64"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "45.2.1",
+    "electron-builder": "^25.0.0",
+    "playwright-core": "1.60.0"
   },
   "build": {
     "appId": "com.shuihuo.killer.cockpit",
@@ -22,6 +25,7 @@
       "config.example.json",
       "assets/**"
     ],
+    "beforePack": "main/build-backend.js",
     "extraResources": [
       {
         "from": "../web",
@@ -30,15 +34,34 @@
       {
         "from": "native",
         "to": "native"
+      },
+      {
+        "from": "backend/left-or-right-gateway",
+        "to": "backend"
       }
     ],
+    "artifactName": "Left-or-right-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "assets/icon.png",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
+    },
     "mac": {
+      "sign": "main/sign-mac.js",
       "category": "public.app-category.productivity",
       "target": [
         "dmg"
       ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "实时转写面试对话需要麦克风权限。",
+        "NSAudioCaptureUsageDescription": "将会议中的系统声音转写为文字，需要系统音频录制权限。",
         "NSScreenCaptureUsageDescription": "笔试截图出题需要屏幕录制权限。"
       },
       "icon": "assets/icon.icns"

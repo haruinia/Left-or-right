@@ -1,10 +1,14 @@
+import "./protected-controls.js";
 import { DEFAULT_HOTKEYS, formatAccelerator, acceleratorFromEvent, shortcutConflict } from "./shortcuts.js";
-import { isExamSpecialty } from "./study-presets.js";
+import { SPECIALTY_GROUPS, LANGUAGE_GROUPS, isExamSpecialty, fillStudyChoice, syncStudyCustom, readStudyChoice } from "./study-presets.js";
 import { parseDocumentFile } from "./documents.js";
 import { fetchGatewayJson, postJson } from "./gateway.js";
 import { state } from "./state.js";
 import { loadProfiles, wireModelConfig } from "./model-config.js";
+import { settingsRoute, navigateSettings, returnToConnections } from './settings-navigation.js';
 import "./assets.js";
+import "./asr-config.js";
+import "./interview-transcription.js";
 
 const $ = (selector) => document.querySelector(selector);
 document.addEventListener("pointerdown", () => { document.documentElement.dataset.keyboardFocus = "false"; });
@@ -19,7 +23,8 @@ const studyFields = {
   assistant_role: $("#studyAssistantRole"),
 };
 const shortcutGroups = [
-  ["截图与对话", { captureRegion: "截图", captureScreen: "全屏截图", sendChat: "处理截图", newQuestion: "新对话", resetView: "重置视图", deleteLastShot: "删除最后一张截图", clearShots: "清空截图" }],
+  ["截图与对话", { captureRegion: "截图", captureScreen: "全屏截图", sendChat: "回答 / 解题", newQuestion: "新对话", resetView: "重置对话", deleteLastShot: "删除最后一张截图", clearShots: "清空截图" }],
+  ["面试语音", { toggleInterview: "开始 / 停止面试", muteInterviewMic: "麦克风静音 / 恢复", muteInterviewSystem: "系统声音静音 / 恢复" }],
   ["阅读", { readPrev: "回答上一页", readNext: "回答下一页", scrollUp: "回答内容上滚", scrollDown: "回答内容下滚" }],
   ["窗口", { toggleWindow: "隐藏 / 显示", toggleVisible: "按住操作面板", toggleCompact: "紧凑 / 展开", moveUp: "窗口上移", moveDown: "窗口下移", moveLeft: "窗口左移", moveRight: "窗口右移", opacityDown: "降低不透明度", opacityUp: "提高不透明度", zoomOut: "缩小字号", zoomReset: "还原字号", zoomIn: "放大字号", quitApp: "退出应用" }],
 ];
@@ -43,9 +48,11 @@ function fillHotkeys(hotkeys) {
 function readSettings() {
   return {
     ...Object.fromEntries(Object.entries(studyFields).map(([key, input]) => [key, input.value.trim()])),
+    study_specialty: readStudyChoice(studyFields.study_specialty, $("#studySpecialtyCustom")),
+    study_language: readStudyChoice(studyFields.study_language, $("#studyLanguageCustom")),
     jd_text: $("#jdText").value,
     resume_text: $("#resumeText").value,
-    long_term_memory_consent: $("#longTermMemoryConsent").checked,
+    interview_use_knowledge: $("#interviewUseKnowledge").checked,
     hotkeys: readHotkeys(),
   };
 }
@@ -66,7 +73,11 @@ function validateHotkeys() {
   return !conflict;
 }
 function syncDirty() {
-  $("#studySpecialtyHint").hidden = !isExamSpecialty(studyFields.study_specialty.value);
+  syncStudyCustom(studyFields.study_specialty, $("#studySpecialtyCustom"));
+  const exam = isExamSpecialty(readStudyChoice(studyFields.study_specialty, $("#studySpecialtyCustom")));
+  $("#studySpecialtyHint").hidden = !exam;
+  studyFields.study_language.disabled = exam || !savedSettings;
+  syncStudyCustom(studyFields.study_language, $("#studyLanguageCustom"));
   if (!savedSettings || saving) return;
   const valid = validateHotkeys();
   const dirty = Object.keys(changedSettings()).length > 0;
@@ -76,9 +87,14 @@ function syncDirty() {
 function fillSettings(saved) {
   savedSettings = saved;
   for (const [key, input] of Object.entries(studyFields)) input.value = saved[key] ?? "";
+  studyFields.study_specialty.disabled = false;
+  studyFields.study_language.disabled = false;
+  fillStudyChoice(studyFields.study_specialty, $("#studySpecialtyCustom"), SPECIALTY_GROUPS, saved.study_specialty);
+  fillStudyChoice(studyFields.study_language, $("#studyLanguageCustom"), LANGUAGE_GROUPS, saved.study_language);
   $("#jdText").value = saved.jd_text || "";
   $("#resumeText").value = saved.resume_text || "";
-  $("#longTermMemoryConsent").checked = Boolean(saved.long_term_memory_consent);
+  $("#interviewUseKnowledge").checked = Boolean(saved.interview_use_knowledge);
+  $("#interviewUseKnowledge").disabled = false;
   fillHotkeys(saved.hotkeys || DEFAULT_HOTKEYS);
   $("#resetHotkeys").disabled = false;
 }
@@ -98,6 +114,7 @@ async function saveSettings(event) {
     const saved = await postJson("/api/ui/settings", changes, { method: "PATCH" });
     // 请求期间的新输入仍留在表单里，只更新保存基线。
     savedSettings = saved;
+    window.dispatchEvent(new Event('settings:saved'));
     saveState.textContent = "已保存并同步到应用";
   } catch { saveState.textContent = "保存失败，修改仍保留在页面中。"; }
   finally {
@@ -130,28 +147,78 @@ for (const kind of ["jd", "resume"]) {
   });
 }
 
-const views = [...document.querySelectorAll(".settings-view")];
-const links = [...document.querySelectorAll(".settings-nav a")];
+const views = [...document.querySelectorAll('.settings-view')];
+const links = [...document.querySelectorAll('.settings-nav a')];
+let renderedHash = '';
 function showView() {
-  let id = location.hash.slice(1) || "models";
-  if (id === "legacySettings") id = "briefing";
-  if (!views.some((view) => view.id === id)) id = "models";
-  views.forEach((view) => { view.hidden = view.id !== id; });
-  links.forEach((link) => {
-    if (link.hash === `#${id}`) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
+  const previousHash = renderedHash;
+  renderedHash = '';
+  let route = settingsRoute();
+  let id = route.section;
+  if (!views.some(view => view.id === id)) { id = 'models'; route = settingsRoute('#models'); }
+  if (location.hash === '#asr') history.replaceState(history.state, '', '#models/asr');
+  views.forEach(view => { view.hidden = view.id !== id; });
+  document.body.classList.toggle('audio-start-view', id === 'interview');
+  links.forEach(link => {
+    if (link.hash === `#${id}`) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
   });
-  $("#settingsSavebar").hidden = !["study", "briefing", "shortcuts"].includes(id);
-  document.title = `${links.find((link) => link.hash === `#${id}`).textContent} · 左右`;
+  const connectionDetail = id === 'models' && route.kind !== 'list';
+  $('#connectionsHeading').hidden = connectionDetail;
+  $('#connectionTabs').hidden = connectionDetail;
+  $('#llmPane').hidden = route.tab === 'asr';
+  $('#asr').hidden = route.tab !== 'asr';
+  $('#llmList').hidden = route.kind !== 'list';
+  $('#llmForm').hidden = route.kind !== 'editor' || route.tab !== 'llm' || $('#llmForm').dataset.profileMissing === 'true';
+  $('#llmImport').hidden = route.kind !== 'import';
+  $('#asrList').hidden = route.kind !== 'list';
+  $('#asrForm').hidden = route.kind !== 'editor' || route.tab !== 'asr' || $('#asrForm').dataset.profileMissing === 'true';
+  $('#connectionTabs').querySelectorAll('a').forEach(link => {
+    if ((route.tab === 'asr') === (link.hash === '#models/asr')) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+  $('#settingsSavebar').hidden = !['study', 'briefing', 'shortcuts'].includes(id);
+  const title = id === 'interview' ? '开始面试' : links.find(link => link.hash === `#${id}`)?.textContent || '接入设置';
+  document.title = `${title} · 左右`;
+  const assetDetail = id === 'assets' && location.hash.split('/').length > 2;
+  $('#settingsBack').textContent = connectionDetail || assetDetail ? '← 返回列表' : '← 返回';
+  $('#settingsBack').setAttribute('aria-label', connectionDetail || assetDetail ? '返回列表' : '返回应用');
+  if (id !== 'assets') {
+    if (previousHash !== location.hash) {
+      window.scrollTo({ top: history.state?.settingsScroll || 0, behavior: 'instant' });
+      const focus = history.state?.settingsFocus;
+      if (focus?.kind === 'button') document.getElementById(focus.id)?.focus({ preventScroll: true });
+      if (focus?.kind === 'llm') [...document.querySelectorAll('[data-edit]')].find(button => button.dataset.edit === focus.id)?.focus({ preventScroll: true });
+      if (focus?.kind === 'asr') [...document.querySelectorAll('[data-asr-edit]')].find(button => button.dataset.asrEdit === focus.id)?.focus({ preventScroll: true });
+    }
+    renderedHash = location.hash;
+  }
 }
-window.addEventListener("hashchange", showView);
-links.forEach((link) => link.addEventListener("click", (event) => {
+for (const event of ['hashchange', 'popstate', 'settings:navigate']) window.addEventListener(event, showView);
+for (const link of [...links, ...$('#connectionTabs').querySelectorAll('a')]) link.addEventListener('click', event => {
   event.preventDefault();
-  history.pushState(null, "", link.hash);
-  showView();
-  window.scrollTo({ top: 0, behavior: "instant" });
-}));
-window.addEventListener("popstate", showView);
+  if (location.hash === link.hash) return;
+  history.replaceState({ ...history.state, assetScroll: window.scrollY }, '');
+  navigateSettings(link.hash);
+});
+window.addEventListener('scroll', () => {
+  if (renderedHash === location.hash && settingsRoute().section !== 'assets') history.replaceState({ ...history.state, settingsScroll: window.scrollY }, '');
+}, { passive: true });
+$('#settingsBack').addEventListener('click', () => {
+  const route = settingsRoute();
+  if (route.section === 'models' && route.kind !== 'list') { returnToConnections(route.tab); return; }
+  if (route.section === 'assets' && location.hash.split('/').length > 2) {
+    document.querySelector('#assets [data-asset-back]')?.click(); return;
+  }
+  if (window.interviewBridge?.closeSettings) window.interviewBridge.closeSettings();
+  else window.location.href = '/';
+});
+document.querySelector('.wordmark').addEventListener('click', event => {
+  if (!window.interviewBridge?.closeSettings) return;
+  event.preventDefault(); window.interviewBridge.closeSettings();
+});
+const header = document.querySelector('.site-header');
+new ResizeObserver(() => document.documentElement.style.setProperty('--settings-header-height', `${header.getBoundingClientRect().height}px`)).observe(header);
 
 if (!state.gatewayApiKey && typeof window.__GATEWAY_KEY__ === "string") state.gatewayApiKey = window.__GATEWAY_KEY__.trim();
 showView();

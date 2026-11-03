@@ -12,7 +12,7 @@ export function extractKnowledgeFromSession(record) {
   for (let i = 0; i < record.turns.length - 1; i += 2) {
     const userTurn = record.turns[i];
     const assistantTurn = record.turns[i + 1];
-    if (userTurn.role !== "user" || assistantTurn.role !== "assistant") continue;
+    if (userTurn.role !== "user" || assistantTurn.role !== "assistant" || userTurn.partial || assistantTurn.partial || record.partial) continue;
     // 跳过太短的问答（可能是闲聊）
     if (userTurn.text.length < 5 || assistantTurn.text.length < 20) continue;
     items.push({
@@ -21,6 +21,7 @@ export function extractKnowledgeFromSession(record) {
       answer: assistantTurn.text.slice(0, 8000),
       tags: guessTags(userTurn.text + " " + assistantTurn.text),
       sourceSessionId: record.id,
+      answerOrigin: "model",
       createdAt: record.endedAt || new Date().toISOString(),
       reviewCount: 0,
       lastReviewedAt: null,

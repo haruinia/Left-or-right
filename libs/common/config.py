@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     otel_exporter_otlp_endpoint: str = ""
     otel_service_name: str = "shuihuo-killer-gateway"
     llm_provider: Literal["mock", "openai_compatible"] = "mock"
-    llm_model: str = "mimo-v2.5-pro"
-    llm_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
+    llm_model: str = "example-model"
+    llm_base_url: str = "https://api.example.com/v1"
     llm_api_path: str = "/chat/completions"
     # auto: infer from the endpoint path; explicit values override it.
     llm_protocol: Literal[

@@ -1,12 +1,14 @@
+import "./protected-controls.js";
 import { formatAccelerator, acceleratorFromEvent } from "./shortcuts.js";
 import { fallbackGatewayOrigins, state } from "./state.js";
 import { saveSessionRecord } from "./session-store.js";
 import { saveExamRecord } from "./exam-store.js";
-import { renderAnswer, stepAnswerTab } from "./answer-view.js";
+import { renderAnswer, stepAnswerTab, exportAnswerReadingState, restoreAnswerReadingState } from "./answer-view.js";
 import { closeLightbox, isLightboxOpen, openLightbox } from "./lightbox.js";
 import { page, resetReading } from "./reading.js";
 import { syncSections, jumpToSection } from "./answer-navigation.js";
 import { applyDisplay } from "./display.js";
+import { mountInterviewOverlay } from './interview-overlay.js';
 import './quick-settings.js';
 
 const thread = document.querySelector("#liuwaThread");
@@ -14,7 +16,6 @@ const idle = document.querySelector("#liuwaIdle");
 const shots = document.querySelector("#liuwaShots");
 const statusNode = document.querySelector("#liuwaStatus");
 const hintCapture = document.querySelector("#hintCapture");
-const stopBtn = document.querySelector("#liuwaStop");
 const pagination = document.querySelector("#liuwaPagination");
 const readingPrev = document.querySelector("#liuwaReadingPrev");
 const readingNext = document.querySelector("#liuwaReadingNext");
@@ -34,6 +35,7 @@ function rememberReadingPosition() {
   if (!entry || !box) return;
   entry.scrollTop = box.scrollTop || 0;
   entry.panel = box.dataset.answerPanel || '';
+  entry.readingState = exportAnswerReadingState(box);
 }
 
 function syncQuestionSelector() {
@@ -54,9 +56,10 @@ function syncQuestionSelector() {
   questionSelect.disabled = streaming;
 }
 
-function showQuestion(entry) {
+function showQuestion(entry, { restoreContext = false } = {}) {
   if (!entry) return;
   viewedQuestionId = entry.id;
+  showQuestionText(entry.text || '');
   thread.querySelectorAll('.liuwa-turn').forEach((turn) => turn.remove());
   const body = appendAssistantTurn();
   renderAnswer(entry.markdown, body, {complete: true});
@@ -64,19 +67,23 @@ function showQuestion(entry) {
   if (entry.panel) {
     document.querySelector(`#liuwaAnswerTabs [data-panel="${entry.panel}"]`)?.click();
   }
-  body.scrollTop = entry.scrollTop || 0;
+  const restoredScroll = entry.scrollTop || 0;
   // 顶部的题图属于当前这道题：切题时换成它当时的截图，避免图和答案对不上。
   // 只替换「已发送」的历史截图，用户还没发的新截图必须保留。
-  const drafts = pending.filter((shot) => !shot.sent);
-  pending.length = 0;
-  (entry.shots || []).forEach((dataUrl) => pending.push({ id: String(nextShotId++), dataUrl, sent: true }));
-  drafts.forEach((shot) => pending.push(shot));
-  activeShotId = "";
-  if (pending.length) shotsExpanded = true;
+  if (!restoreContext) {
+    const drafts = pending.filter((shot) => !shot.sent);
+    pending.length = 0;
+    (entry.shots || []).forEach((dataUrl) => pending.push({ id: String(nextShotId++), dataUrl, sent: true }));
+    drafts.forEach((shot) => pending.push(shot));
+    activeShotId = "";
+    if (pending.length) shotsExpanded = true;
+  }
   renderPending();
   syncQuestionSelector();
   syncReadingControls();
   syncEmpty();
+  if (entry.readingState) restoreAnswerReadingState(body, entry.readingState);
+  else body.scrollTop = restoredScroll;
 }
 
 // 截图题解固定在当前阅读位置；自动追尾只适用于实时语音面板。
@@ -113,6 +120,138 @@ let shotsExpanded = true;
 let surfaceSignature = '';
 let resetAccelerator = 'CommandOrControl+R';
 let sessionStartedAt = new Date().toISOString();
+let chatMode = 'screenshot';
+let sessionRecordId = '';
+let interviewSaveTask = Promise.resolve();
+
+function persistInterviewAnswer() {
+  const id = sessionRecordId ||= `interview_qa_${crypto.randomUUID()}`;
+  const turns = history.map(turn => ({ ...turn, ...(turn.images ? { images: turn.images.slice() } : {}) }));
+  const startedAt = sessionStartedAt;
+  interviewSaveTask = interviewSaveTask.then(() => saveSessionRecord({ id, turns, startedAt, note: '面试问答' })).catch(() => {
+    if (chatMode === 'interview' && sessionRecordId === id) setStatus('问答保存失败，当前内容仍保留；重置时会重试保存。');
+  });
+}
+let interviewOverlay = null;
+let switchingMode = false;
+let modeSwitchTask = Promise.resolve();
+const modeContexts = new Map();
+const captureGenerations = new Map();
+const currentQuestion = document.querySelector('#liuwaCurrentQuestion');
+let interviewRunId = '';
+let requestedInterviewRunId = '';
+let preparingInterviewSession = false;
+let activeResetTask = null;
+
+function emptyModeContext() {
+  return { history: [], questions: [], viewedQuestionId: '', nextQuestionId: 1, pending: [], nextShotId: 1, activeShotId: '', shotsExpanded: true, sessionStartedAt: new Date().toISOString(), sessionRecordId: '' };
+}
+
+function beginInterviewSession(runId) {
+  requestedInterviewRunId = runId;
+  if (runId === interviewRunId) return Promise.resolve(true);
+  preparingInterviewSession = true;
+  if (chatMode === 'interview') stopChat();
+  const previousModeTask = modeSwitchTask;
+  const previousResetTask = activeResetTask;
+  const transition = Promise.all([previousModeTask, previousResetTask]).then(async () => {
+    if (runId !== requestedInterviewRunId) return false;
+    switchingMode = true;
+    document.querySelector('#quickMode').disabled = true;
+    try {
+      if (chatMode === 'interview') {
+        stopChat();
+        if (activeSendTask) await activeSendTask;
+        rememberReadingPosition();
+      }
+      const oldContext = chatMode === 'interview'
+        ? { history: history.slice(), sessionStartedAt, sessionRecordId }
+        : modeContexts.get('interview');
+      if (oldContext?.history.length) {
+        await interviewSaveTask;
+        await saveSessionRecord({ id: oldContext.sessionRecordId || undefined, turns: oldContext.history, startedAt: oldContext.sessionStartedAt, note: '面试问答' });
+      }
+      if (runId !== requestedInterviewRunId) return false;
+      const fresh = emptyModeContext();
+      modeContexts.set('interview', fresh);
+      if (chatMode === 'interview') {
+        history.length = 0; questions.length = 0; pending.length = 0;
+        ({ viewedQuestionId, nextQuestionId, nextShotId, activeShotId, shotsExpanded, sessionStartedAt, sessionRecordId } = fresh);
+        sessionGeneration += 1; captureGenerations.clear();
+        closeLightbox();
+        thread.querySelectorAll('.liuwa-turn').forEach(turn => turn.remove());
+        const tabs = document.querySelector('#liuwaAnswerTabs');
+        tabs.hidden = true; tabs.replaceChildren(); delete tabs.dataset.signature;
+        delete questionSelect.dataset.questions;
+        showQuestionText(); renderPending(); syncQuestionSelector(); syncEmpty();
+      }
+      interviewRunId = runId;
+      preparingInterviewSession = false;
+      return true;
+    } catch {
+      if (runId === requestedInterviewRunId) setStatus('上一场面试问答保存失败，已保留原内容；请重试保存后再开始新一场。');
+      return false;
+    } finally {
+      switchingMode = false;
+      document.querySelector('#quickMode').disabled = false;
+      interviewOverlay?.refresh();
+    }
+  });
+  modeSwitchTask = transition;
+  return transition;
+}
+
+function showQuestionText(text = '') {
+  if (!currentQuestion) return;
+  currentQuestion.textContent = text;
+  currentQuestion.hidden = !text;
+}
+
+function setChatMode(next) {
+  if (!['screenshot', 'interview'].includes(next)) return Promise.resolve(false);
+  modeSwitchTask = modeSwitchTask.then(async () => {
+    if (next === chatMode) { document.querySelector('#liuwaDisplay').open = false; return true; }
+    if (savingSession || resetting) { document.querySelector('#quickMode').value = chatMode; return false; }
+    switchingMode = true;
+    document.querySelector('#quickMode').disabled = true;
+    try {
+      stopChat();
+      if (activeSendTask) await activeSendTask;
+      rememberReadingPosition();
+      modeContexts.set(chatMode, { history: history.slice(), questions: questions.slice(), viewedQuestionId, nextQuestionId, pending: pending.slice(), nextShotId, activeShotId, shotsExpanded, sessionStartedAt, sessionRecordId });
+      const restored = modeContexts.get(next) || emptyModeContext();
+      history.splice(0, history.length, ...restored.history);
+      questions.splice(0, questions.length, ...restored.questions);
+      pending.splice(0, pending.length, ...restored.pending);
+      ({ viewedQuestionId, nextQuestionId, nextShotId, activeShotId, shotsExpanded, sessionStartedAt, sessionRecordId } = restored);
+      chatMode = next;
+      sessionGeneration += 1;
+      captureGenerations.clear();
+      closeLightbox();
+      document.body.classList.toggle('interview-mode', next === 'interview');
+      document.querySelector('#quickMode').value = next;
+      document.querySelector('#liuwaDisplay').open = false;
+      document.querySelector('#liuwaSendLabel').textContent = next === 'interview' ? '回答' : '解题';
+      document.querySelector('#liuwaDelete').hidden = next === 'interview';
+      interviewOverlay?.setMode(next);
+      thread.querySelectorAll('.liuwa-turn').forEach(turn => turn.remove());
+      const tabs = document.querySelector('#liuwaAnswerTabs');
+      tabs.hidden = true; tabs.replaceChildren(); delete tabs.dataset.signature;
+      delete questionSelect.dataset.questions;
+      showQuestionText();
+      const entry = questions.find(question => question.id === viewedQuestionId);
+      if (entry) showQuestion(entry, { restoreContext: true });
+      else { renderPending(); syncQuestionSelector(); syncEmpty(); }
+      setStatus('');
+      return true;
+    } finally {
+      switchingMode = false;
+      document.querySelector('#quickMode').disabled = false;
+      interviewOverlay?.refresh();
+    }
+  }).catch(error => { setStatus(error.message || '工作模式未能切换。'); return false; });
+  return modeSwitchTask;
+}
 
 function syncActiveShot() {
   if (pending.some((shot) => shot.id === activeShotId)) return;
@@ -154,10 +293,11 @@ function syncEmpty() {
   if (pagination) pagination.hidden = empty;
   if (empty) document.querySelector('#liuwaAnswerTabs').hidden = true;
   syncReadingControls();
-  const surface = {answer:!empty,shotCount:shotsExpanded ? pending.length : 0};
+  const surface = {answer:!empty,shotCount:shotsExpanded ? pending.length : 0,interview:chatMode === 'interview',transcriptOpen:chatMode === 'interview' && document.querySelector('#liuwaTranscript').open};
   const signature = JSON.stringify(surface);
   if(signature !== surfaceSignature) {
-    if(!surfaceSignature || JSON.parse(surfaceSignature).answer !== surface.answer) applyDisplay({compact:empty,answer:!empty});
+    const previous = surfaceSignature ? JSON.parse(surfaceSignature) : null;
+    if(!previous || previous.answer !== surface.answer || previous.interview !== surface.interview) applyDisplay({compact:!(surface.answer || surface.interview),answer:surface.answer});
     surfaceSignature = signature;
     window.cockpit?.setSurface?.(surface).then(applyDisplay).catch(()=>setStatus('窗口显示状态未能更新。'));
   }
@@ -200,36 +340,42 @@ function renderPending() {
   syncEmpty();
 }
 
-function addShot(dataUrl, generation = sessionGeneration) {
+function addShots(dataUrls, generation = sessionGeneration) {
   // 截图和文件读取是异步的：重置后到达的旧结果不能落进新会话。
-  if (generation !== sessionGeneration) return;
+  if (generation !== sessionGeneration || !dataUrls.length) return;
   if (savingSession) {
     setStatus("正在保存会话，请稍候。");
     return;
   }
-  // 仅当真正在流式生成时才禁止添加截图；历史残留的 is-busy/is-stopped 样式不再阻塞。
   if (streaming) {
-    setStatus("");
+    setStatus("正在生成回答，请结束后重新截图。");
     return;
   }
-  if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl)) {
+  if (dataUrls.some(dataUrl=>!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(dataUrl))) {
     setStatus("请选择 PNG、JPEG、WebP 或 GIF 图片。");
     return;
   }
-  if (pending.length >= 8) {
-    setStatus("一次最多带 8 张图。");
+  if (pending.length + dataUrls.length > 8) {
+    setStatus(`本次包含 ${dataUrls.length} 张图，当前已有 ${pending.length} 张；一次最多带 8 张图，请先删图后重新截图。`);
     return;
   }
-  pending.push({ id: String(nextShotId), dataUrl });
+  for(const dataUrl of dataUrls) pending.push({ id: String(nextShotId++), dataUrl });
   shotsExpanded = true;
-  nextShotId += 1;
   renderPending();
   setStatus("");
 }
 
-function addShotFromBase64(mime, data, generation = sessionGeneration) {
-  const type = mime || "image/png";
-  addShot(`data:${type};base64,${data}`, generation);
+function addShot(dataUrl, generation = sessionGeneration) {
+  addShots([dataUrl], generation);
+}
+
+function receiveCapture(payload, generation = sessionGeneration) {
+  if(generation !== sessionGeneration)return;
+  const images=Array.isArray(payload?.images) ? payload.images : payload?.data ? [payload] : [];
+  if(images.some(image=>!image || typeof image.data !== 'string' || !image.data)) {
+    setStatus('截图数据不完整，请重新截图。');return;
+  }
+  addShots(images.map(image=>`data:${image.mime || 'image/png'};base64,${image.data}`),generation);
 }
 
 function readImageFile(file) {
@@ -282,29 +428,29 @@ function authHeaders(headers = {}) {
   return state.gatewayApiKey ? { ...headers, "X-API-Key": state.gatewayApiKey } : headers;
 }
 
-// 截图已经在底部 dock 的缩略图里看得到，对话流里不再重复贴图，
-// 也不写「已发送截图」这类说明——用户刚按下发送，不需要再被告知一次。
-// 纯截图轮没有文字，就整条不插：一个空 <article> 还要占 14px 外边距，
-// 而正文区本来就靠这点高度吃饭。
-function appendUserTurn(images, text, carriedCount = 0) {
-  if (!text) return null;
-  const article = document.createElement("article");
-  article.className = "liuwa-turn is-user";
-  article.innerHTML = `<p>${escapeHtml(text)}</p>`;
-  thread.append(article);
-  return article;
-}
-
-function appendAssistantTurn() {
+function appendAssistantTurn({ generating = false } = {}) {
   if (sections) { sections.value = ''; delete sections.dataset.sections; }
   const tabs = document.querySelector('#liuwaAnswerTabs');
   if(tabs) { tabs.hidden = true; tabs.replaceChildren(); delete tabs.dataset.signature; }
   // 主面板只展示当前题解；历史保留在 history，不能挤占下一题的阅读高度。
   thread.querySelectorAll(".liuwa-turn").forEach((turn) => turn.remove());
   const article = document.createElement("article");
-  article.className = "liuwa-turn is-assistant is-stream";
+  article.className = `liuwa-turn is-assistant${generating ? " is-stream" : ""}`;
+  if (generating) {
+    const waiting = document.createElement("div");
+    waiting.className = "liuwa-analysis-status";
+    waiting.setAttribute("role", "status");
+    const spinner = document.createElement("span");
+    spinner.className = "liuwa-analysis-spinner";
+    spinner.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = "正在分析题目…";
+    waiting.append(spinner, label);
+    article.append(waiting);
+  }
   const body = document.createElement("div");
   body.className = "liuwa-stream md";
+  body.hidden = generating;
   article.append(body);
   thread.append(article);
   resetReading();
@@ -434,13 +580,39 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
 }
 
 let activeSendTask = null;
-function sendChat() {
-  if(activeSendTask) return activeSendTask;
-  activeSendTask = runChat().finally(()=>{activeSendTask=null;});
+let activeRequest = null;
+let queuedInterviewRequest = null;
+let replacingInterviewTask = null;
+function sendChat(request = {}) {
+  if (resetting || savingSession || (chatMode === 'interview' && preparingInterviewSession)) return Promise.resolve(false);
+  if (switchingMode) return modeSwitchTask.then(() => sendChat(request));
+  if (request.context === 'interview' && chatMode !== 'interview') return Promise.resolve(false);
+  if (chatMode === 'interview' && typeof request.text !== 'string') request = interviewOverlay?.question() || {};
+  const text = typeof request.text === 'string' ? request.text.trim() : '';
+  if (text.length > 8000) { setStatus('问题较长，请在转录中选择具体一条。'); return Promise.resolve(false); }
+  if (chatMode === 'interview' && request.run_id && request.run_id !== interviewRunId) return Promise.resolve(false);
+  const transcript = request.interview_transcript || interviewOverlay?.transcript() || [];
+  const snapshot = { ...request, text, context: chatMode === 'interview' ? 'interview' : 'study', interview_role: request.interview_role || interviewOverlay?.role() || 'candidate', interview_transcript: transcript.map(item => ({ source: item.source, speaker: item.speaker, text: item.text, segment_id: item.segment_id || '' })) };
+  if (activeSendTask) {
+    if (snapshot.context !== 'interview' || (activeRequest?.text === snapshot.text && activeRequest?.interview_role === snapshot.interview_role)) return activeSendTask;
+    queuedInterviewRequest = snapshot;
+    activeAbort?.abort();
+    if (!replacingInterviewTask) replacingInterviewTask = (async () => {
+      while (queuedInterviewRequest) {
+        if (activeSendTask) await activeSendTask;
+        const next = queuedInterviewRequest; queuedInterviewRequest = null;
+        if (!next || chatMode !== 'interview' || switchingMode || resetting) break;
+        await sendChat(next);
+      }
+    })().finally(() => { replacingInterviewTask = null; });
+    return replacingInterviewTask;
+  }
+  activeRequest = snapshot;
+  activeSendTask = runChat(snapshot).finally(() => { activeSendTask = null; activeRequest = null; interviewOverlay?.finished(snapshot); interviewOverlay?.refresh(); });
   return activeSendTask;
 }
 
-async function runChat() {
+async function runChat(request) {
   if (savingSession) {
     setStatus("正在保存会话，请稍候。");
     return;
@@ -463,11 +635,16 @@ async function runChat() {
   const images = unsentShots.map((shot) => shot.dataUrl);
   const unsent = images;
   renderPending();
-  if (!unsent.length) {
-    setStatus("先截一张屏。");
+  if (!unsent.length && !request.text) {
+    setStatus(request.context === 'interview' ? '尚无完整问题，可展开转录选择一句。' : "先截一张屏。");
     return;
   }
+  const requestGeneration = sessionGeneration;
+  const requestMode = chatMode;
+  const previousQuestion = questions.find(question => question.id === viewedQuestionId);
   streaming = true;
+  if (request.context === 'interview') interviewOverlay?.begin(request);
+  interviewOverlay?.refresh();
   const controller = new AbortController();
   activeAbort = controller;
   // 长答案现在可以输出到 16k tokens，给足时间；超时和手动停止要区分开。
@@ -478,31 +655,38 @@ async function runChat() {
   }, 600_000);
   document.body.classList.add("is-busy");
   syncQuestionSelector();
-  setStatus("正在分析题目…");
+  setStatus("");
   shots.querySelectorAll("[data-remove]").forEach((button) => { button.disabled = true; });
-  if (stopBtn) stopBtn.hidden = false;
-  const userTurn = appendUserTurn(unsent, "", images.length - unsent.length);
   rememberReadingPosition();
-  const streamNode = appendAssistantTurn();
+  showQuestionText(request.text);
+  const streamNode = appendAssistantTurn({ generating: true });
   const assistantTurn = streamNode.parentElement;
+  const waiting = assistantTurn.querySelector('.liuwa-analysis-status');
   syncEmpty();
   let reply = "";
+  let hasBodyOutput = false;
   let flushTimer = null;
   const flush = (complete = false) => {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
     const answer = renderAnswer(reply, streamNode, {complete});
-    if (answer.full.trim() && !streamNode.dataset.hasContent) {
-      streamNode.dataset.hasContent = 'true';
-    }
+    const hasContent = Boolean(answer.full.replace(/^#{1,6}[^\n]*$/gm, '').trim());
+    hasBodyOutput = hasBodyOutput || hasContent;
+    waiting.hidden = hasBodyOutput || complete;
+    streamNode.hidden = !hasBodyOutput && !complete;
+    if (hasContent) streamNode.dataset.hasContent = 'true';
+    if (!hasBodyOutput) document.querySelector('#liuwaAnswerTabs').hidden = true;
+    if (pagination) pagination.hidden = !hasBodyOutput;
     syncReadingControls();
   };
   const commitTurn = (complete = true) => {
     // 部分回答虽需保留，但不能把待处理截图标成完成，否则连接中断后再按处理键无效。
-    if (complete) pending.forEach((shot) => { shot.sent = true; });
+    if (complete) unsentShots.forEach((shot) => { shot.sent = true; });
     // 每道题在本次会话里留一份完整 Markdown，题目选择器靠它切回旧题。
     const entry = {
       id: String(nextQuestionId++),
       markdown: reply,
+      text: request.text,
+      context: request.context,
       partial: !complete,
       scrollTop: 0,
       panel: '',
@@ -514,13 +698,18 @@ async function runChat() {
     syncQuestionSelector();
     history.push({
       role: "user",
-      text: "请讲解这道截图题目",
+      text: request.text || (request.context === 'interview' ? '请回答这道面试题' : '请讲解这道截图题目'),
       images: unsent.slice(0, 3),
       imageCount: unsent.length,
     });
-    history.push({ role: "assistant", text: reply });
+    history.push({ role: "assistant", text: reply, partial: !complete });
     // 每次问答独立存一条笔试记录：题目缩略图 + 发送内容 + 模型回答，
     // 失败静默（记录属于增值功能，不能影响主流程）。
+    if (request.context === 'interview') {
+      interviewOverlay?.committed(request);
+      persistInterviewAnswer();
+      return;
+    }
     saveExamRecord({
       images: unsent.slice(0, 3),
       query: "请讲解这道截图题目",
@@ -547,14 +736,21 @@ async function runChat() {
         accept: "text/event-stream",
       }),
       body: JSON.stringify({
-        text: "",
+        text: request.text,
+        context: request.context,
+        ...(request.context === 'interview' ? {
+          interview_role: request.interview_role,
+          interview_transcript: request.interview_transcript,
+          ...(request.interview_target ? { interview_target: request.interview_target } : {}),
+          ...(request.interview_task === 'solve' ? { interview_task: 'solve' } : {}),
+        } : {}),
         images,
-        history: history.slice(-16).map((turn) => ({ ...turn, text: turn.text.slice(0, 8000) })),
+        history: history.slice(-16).map((turn) => ({ role: turn.role, text: turn.text.slice(0, 8000) })),
       }),
     });
     await readSse(response, onDelta, controller.signal);
-    if (!reply.trim()) throw new Error("模型没有返回内容，请重试或检查模型接入配置。");
     flush(true);
+    if (!hasBodyOutput) throw new Error("模型没有返回内容，请重试或检查模型接入配置。");
     assistantTurn.classList.remove("is-stream");
     commitTurn();
     setStatus("");
@@ -568,27 +764,24 @@ async function runChat() {
       : /RemoteProtocolError|incomplete chunked read|peer closed connection/i.test(rawMessage)
         ? "模型连接中断，可重新处理当前截图。"
         : rawMessage;
-    if (reply.trim()) {
+    if (hasBodyOutput) {
       // 已经流出一大段内容：不管是主动停止还是中途报错，都保留下来。
       // 之前只有「主动停止」保留，报错会把用户眼看着生成的整段解析删掉。
       finalizeStopped(streamNode, reply, assistantTurn, aborted ? "（已中断）" : `（中断：${message}）`);
       commitTurn(false);
       setStatus(aborted ? "已停止。" : message);
     } else {
-      userTurn?.remove();
       assistantTurn.remove();
-      syncEmpty();
+      if (previousQuestion && requestGeneration === sessionGeneration && requestMode === chatMode && !switchingMode && !resetting && !preparingInterviewSession && !queuedInterviewRequest) showQuestion(previousQuestion, { restoreContext: true });
+      else syncEmpty();
       setStatus(aborted ? "已停止。" : message);
     }
   } finally {
     clearTimeout(timeoutGuard);
-    // 只有当前这轮还是「活跃请求」时才清全局状态。停止后立刻再发，
-    // 旧请求的 finally 晚到会把新请求的 streaming/stopBtn 一起清掉，
-    // 新回答看着像没在生成、也停不下来。
+    // 旧请求的收尾不能清除新一轮生成状态。
     if (activeAbort === controller) {
       streaming = false;
       activeAbort = null;
-      if (stopBtn) stopBtn.hidden = true;
       document.body.classList.remove("is-busy");
     }
     if (assistantTurn.isConnected) assistantTurn.classList.remove("is-stream");
@@ -598,6 +791,7 @@ async function runChat() {
 }
 
 function stopChat() {
+  queuedInterviewRequest = null;
   if (streaming && activeAbort) activeAbort.abort();
 }
 
@@ -633,24 +827,38 @@ function applyTheme(cfg) {
 }
 
 function wireDesktop(cockpit) {
+  document.body.classList.remove("liuwa-armed");
+  document.body.inert = true;
+  let receivedArmedState=false;
   document.documentElement.classList.add("liuwa-host");
   document.body.classList.add("liuwa-shell");
   cockpit.onHotkeys?.(applyHotkeyHints);
-  cockpit.onNewQuestion?.(newQuestion);
+  cockpit.onNewQuestion?.(resetView);
   cockpit.onReset?.(resetView);
+  cockpit.onInterviewControl?.(action => interviewOverlay?.control(action));
   cockpit.onClearShots?.(clearShots);
   cockpit.onDeleteLastShot?.(deleteLastShot);
   cockpit.onTheme?.(applyTheme);
+  const taggedCaptures = typeof cockpit.onCaptureStart === 'function';
+  cockpit.onCaptureStart?.(({ captureId }) => {
+    captureGenerations.clear();
+    if (typeof captureId === 'string') captureGenerations.set(captureId, sessionGeneration);
+  });
   if (typeof cockpit.onCapture === "function") {
-    // 主进程截图可能晚于重置返回：记录发起时的世代，重置后丢弃。
-    const generation = sessionGeneration;
     cockpit.onCapture((payload) => {
-      if (!payload || !payload.data) return;
-      addShotFromBase64(payload.mime, payload.data, generation);
+      const generation = taggedCaptures ? captureGenerations.get(payload?.captureId) : sessionGeneration;
+      if (taggedCaptures) captureGenerations.delete(payload?.captureId);
+      if (generation === undefined) return;
+      receiveCapture(payload, generation);
     });
   }
   if (typeof cockpit.onCaptureError === "function") {
     cockpit.onCaptureError((payload) => {
+      if (taggedCaptures && payload?.captureId) {
+        const generation = captureGenerations.get(payload.captureId);
+        captureGenerations.delete(payload.captureId);
+        if (generation !== sessionGeneration) return;
+      }
       setStatus(payload && payload.detail ? payload.detail : "截图失败");
     });
   }
@@ -678,11 +886,17 @@ function wireDesktop(cockpit) {
   }
   if (typeof cockpit.onArmed === "function") {
     cockpit.onArmed((value) => {
+      receivedArmedState=true;
       document.body.classList.toggle("liuwa-armed", Boolean(value));
+      document.body.inert = !value;
     });
   }
   if (typeof cockpit.getConfig === "function") {
     cockpit.getConfig().then((cfg) => {
+      if(!receivedArmedState) {
+        document.body.classList.toggle('liuwa-armed', Boolean(cfg?.armed));
+        document.body.inert = !cfg?.armed;
+      }
       applyHotkeyHints(cfg || {});
       applyTheme(cfg || {});
       applyDisplay(cfg.display || {});
@@ -730,10 +944,9 @@ shots?.addEventListener("keydown", (event) => {
   stepActiveShot(event.key === "ArrowRight" ? 1 : -1);
 });
 
-stopBtn?.addEventListener("click", stopChat);
 readingPrev?.addEventListener("click", () => stepReading(-1));
 readingNext?.addEventListener("click", () => stepReading(1));
-document.querySelector('#liuwaSend')?.addEventListener('click',sendChat);
+document.querySelector('#liuwaSend')?.addEventListener('click',()=>sendChat());
 document.querySelector('#liuwaDelete')?.addEventListener('click',deleteLastShot);
 document.querySelector('#liuwaReset')?.addEventListener('click',resetView);
 document.addEventListener('keydown',event=>{
@@ -813,9 +1026,7 @@ async function refreshContext() {
     const configResponse = await fetch(`${state.apiOrigin}/api/config/status`, { headers: authHeaders(), cache: "no-store", signal: AbortSignal.timeout(3500) });
     if (!configResponse.ok) throw new Error("请在设置页检查服务连接。");
     const config = await configResponse.json();
-    const mock = config.llm_provider === "mock" || !config.llm_api_key_configured || !config.llm_base_url_configured;
-    currentModel = mock ? "" : config.llm_model || "";
-    if (mock) setStatus("演示模式：未连接真实 AI，请到设置页配置模型。");
+    currentModel = config.llm_provider === "mock" ? "" : config.llm_model || "";
   } catch (error) {
     setStatus("本地服务未连接，请启动网关。");
   } finally {
@@ -862,7 +1073,7 @@ function clearShots() {
 }
 
 async function newQuestion() {
-  if (savingSession) return;
+  if (savingSession) return false;
   if (streaming) {
     setStatus("正在生成，稍候。");
     return;
@@ -873,10 +1084,11 @@ async function newQuestion() {
     savingSession = true;
     setStatus("正在保存会话…");
     try {
-      await saveSessionRecord({ turns: history, note: "", startedAt: sessionStartedAt });
+      if (chatMode === 'interview') await interviewSaveTask;
+      await saveSessionRecord({ id: sessionRecordId || undefined, turns: history, note: chatMode === 'interview' ? '面试问答' : '', startedAt: sessionStartedAt });
     } catch (error) {
       setStatus(`会话保存失败，已保留当前内容：${error.message || error}`);
-      return;
+      return false;
     } finally {
       savingSession = false;
     }
@@ -887,6 +1099,9 @@ async function newQuestion() {
   history.length = 0;
   pending.length = 0;
   sessionGeneration += 1;
+  captureGenerations.clear();
+  sessionRecordId = '';
+  showQuestionText();
   activeShotId = "";
   nextShotId = 1;
   // 题目选择器只覆盖当前这次会话；会话保存后新题从空列表重新开始。
@@ -898,22 +1113,35 @@ async function newQuestion() {
   resetReading();
   renderPending();
   setStatus("");
+  return true;
 }
 let resetting = false;
-async function resetView() {
+function resetView() {
+  if (activeResetTask) return activeResetTask;
+  activeResetTask = runResetView().finally(() => { activeResetTask = null; });
+  return activeResetTask;
+}
+async function runResetView() {
   if(resetting)return;
+  if(switchingMode)await modeSwitchTask;
   resetting=true;
+  const resetRunId = interviewOverlay?.runId();
   try {
     stopChat();
     if(activeSendTask)await activeSendTask;
-    await newQuestion();
+    if(chatMode === 'interview' && !await interviewOverlay.stopForReset(resetRunId)) { setStatus('音频会话尚未结束，当前内容已保留，请稍后重试。'); return; }
+    const cleared = await newQuestion();
+    if(cleared && chatMode === 'interview')interviewOverlay.clear(resetRunId);
     if(document.body.classList.contains('is-empty')) document.querySelector('#liuwaDisplay').open=false;
-  } finally {resetting=false;}
+  } finally {resetting=false;interviewOverlay?.refresh();}
 }
 window.addEventListener("focus", refreshContext);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshContext();
 });
 
+interviewOverlay = mountInterviewOverlay({ setMode: setChatMode, answer: sendChat, setStatus, onNewSession: beginInterviewSession, isBlocked: () => switchingMode || resetting || preparingInterviewSession });
+document.querySelector('#quickMode')?.addEventListener('change', event => setChatMode(event.target.value));
+document.querySelector('#liuwaTranscript')?.addEventListener('toggle', syncEmpty);
 syncEmpty();
 refreshContext();

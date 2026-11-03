@@ -30,10 +30,10 @@ function compressImage(dataUrl, maxWidth = 200, quality = 0.6) {
 }
 
 // 把一轮对话保存为一条记录
-export async function saveSessionRecord({ turns, note, startedAt }) {
+export async function saveSessionRecord({ turns, note, startedAt, id }) {
   if (!turns || !turns.length) return null;
   const record = {
-    id: makeRecordId(),
+    id: id || makeRecordId(),
     startedAt: startedAt || new Date().toISOString(),
     endedAt: new Date().toISOString(),
     note: note || "",
@@ -46,7 +46,8 @@ export async function saveSessionRecord({ turns, note, startedAt }) {
       );
       return {
         role: turn.role,
-        text: String(turn.text || "").slice(0, 12000),
+        text: String(turn.text || ""),
+        ...(typeof turn.partial === 'boolean' ? { partial: turn.partial } : {}),
         images: thumbnails.filter(Boolean),
         imageCount: turn.imageCount ?? images.length,
       };
@@ -88,6 +89,7 @@ export async function exportSessionRecordsAsMarkdown() {
     for (const turn of record.turns) {
       const label = turn.role === "user" ? "**问**" : "**答**";
       md += `${label} ${turn.text}\n\n`;
+      if (turn.partial) md += '*（回答已中断，内容不完整）*\n\n';
       if (turn.imageCount) md += `*（含 ${turn.imageCount} 张截图）*\n\n`;
     }
     md += "---\n\n";

@@ -13,9 +13,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-MODELS = ["mimo-v2.5-pro", "mimo2.5pro", "mimo-2.5-pro", "mimo-v2.5"]
-
-
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Try common OpenAI-compatible LLM auth header variants."
@@ -45,7 +42,7 @@ def main() -> int:
     ]
     print(f"url: {url}")
     any_success = False
-    for model in MODELS:
+    for model in [settings.llm_model]:
         print(f"\nmodel: {model}")
         payload = {
             "model": model,

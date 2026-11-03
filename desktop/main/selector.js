@@ -52,23 +52,35 @@ let wired = false;
 function wireOnce() {
   if (wired) return;
   wired = true;
-  ipcMain.on('selector:commit', (_event, rect) => {
+  ipcMain.on('selector:commit', (event, rect) => {
+    if (!overlay || event.sender !== overlay.webContents) return;
     // 渲染层用的是 CSS 像素坐标；screencapture 要的是物理像素，
     // Retina 屏上差 2 倍，不换算会截到左上角四分之一的区域。
     // clientX/clientY 是覆盖层内坐标；裁剪的是选中屏幕的截图，不叠加桌面原点。
     const display = selectedDisplay || screen.getPrimaryDisplay();
     const scale = display?.scaleFactor || 1;
+    if (!rect || !['left', 'top', 'width', 'height'].every((key) => Number.isFinite(rect[key]))
+        || rect.left < 0 || rect.top < 0 || rect.width < 4 || rect.height < 4
+        || rect.left + rect.width > display.bounds.width || rect.top + rect.height > display.bounds.height) {
+      settle(null);
+      return;
+    }
+    const x = Math.round(rect.left * scale);
+    const y = Math.round(rect.top * scale);
     settle({
-      x: Math.round(rect.left * scale),
-      y: Math.round(rect.top * scale),
-      width: Math.round(rect.width * scale),
-      height: Math.round(rect.height * scale),
+      x,
+      y,
+      width: Math.round((rect.left + rect.width) * scale) - x,
+      height: Math.round((rect.top + rect.height) * scale) - y,
     });
   });
-  ipcMain.on('selector:cancel', () => settle(null));
+  ipcMain.on('selector:cancel', event => {
+    if (overlay && event.sender === overlay.webContents) settle(null);
+  });
 }
 
-function selectRegion(display = screen.getPrimaryDisplay()) {
+function selectRegion(display = screen.getPrimaryDisplay(), canShow = () => true) {
+  if (!canShow()) return Promise.resolve(null);
   wireOnce();
   if (overlay) {
     // 上一次还没选完又按了一次：当作取消，重新开始。
@@ -84,6 +96,7 @@ function selectRegion(display = screen.getPrimaryDisplay()) {
       width: bounds.width,
       height: bounds.height,
       frame: false,
+      show: false,
       transparent: true,
       backgroundColor: '#00000000',
       hasShadow: false,
@@ -110,22 +123,25 @@ function selectRegion(display = screen.getPrimaryDisplay()) {
     win.setContentProtection(true);
     win.loadFile(selectorPage());
     win.once('ready-to-show', () => {
+      if (overlay !== win || win.isDestroyed()) return;
+      if (!canShow()) { settle(null); return; }
       // showInactive：前台还是用户的做题窗口，这里只是"浮"在上面等两次点击。
       win.showInactive();
       // 不抢焦点就收不到键盘，Esc 改由全局快捷键兜底。
       // register() 失败时只返回 false、不抛异常；注册不上就靠超时兜底，
       // 否则一个看不见的覆盖层会一直吞点击。
       try {
-        escShortcut = globalShortcut.register('Escape', () => settle(null)) === true;
+        escShortcut = globalShortcut.register('Escape', () => { if (overlay === win) settle(null); }) === true;
       } catch {
         escShortcut = false;
       }
     });
     // 兜底：框选超过 2 分钟没完成就自动取消，避免覆盖层永久占住屏幕。
-    const timeout = setTimeout(() => settle(null), 120000);
+    const timeout = setTimeout(() => { if (overlay === win) settle(null); }, 120000);
     win.once('closed', () => clearTimeout(timeout));
     win.on('closed', () => {
-      if (overlay === win) overlay = null;
+      if (overlay !== win) return;
+      overlay = null;
       releaseEsc();
       if (pendingResolve) {
         const p = pendingResolve;
@@ -136,4 +152,4 @@ function selectRegion(display = screen.getPrimaryDisplay()) {
   });
 }
 
-module.exports = { selectRegion };
+module.exports = { selectRegion, cancelSelection: () => settle(null) };

@@ -54,38 +54,166 @@ function showError(target, error) {
 
 function action(target, callback) {
   return async (event) => {
+    const epoch = routeEpoch;
     try {
       target?.querySelector(".asset-error")?.remove();
       await callback(event);
-    } catch (error) { showError(target, error); }
+    } catch (error) { if (epoch === routeEpoch) showError(target, error); }
   };
 }
 
+let routeEpoch = 0;
+let renderedRoute = "";
+let closeDialog = () => {};
+let dialogRevision = 0;
+
+function assetRoute() {
+  const [section, tab, id] = location.hash.slice(1).split("/");
+  let recordId = "";
+  try { recordId = decodeURIComponent(id || ""); } catch { /* Invalid links fall back to the list. */ }
+  return { section, tab: Object.hasOwn(panes, tab) ? tab : "exams", id: recordId };
+}
+
+function navigateAssets(tab, id = "", replace = false) {
+  const target = `#assets/${tab}${id ? `/${encodeURIComponent(id)}` : ""}`;
+  if (location.hash === target) return;
+  history.replaceState({ ...history.state, assetScroll: window.scrollY, ...(id ? { assetFocus: id } : {}) }, "");
+  history[replace ? "replaceState" : "pushState"]({ assetScroll: 0, assetParent: id ? location.hash : null }, "", target);
+  window.dispatchEvent(new Event("settings:navigate"));
+}
+
+function backToList() {
+  const { tab } = assetRoute();
+  const parent = history.state?.assetParent;
+  if (parent === `#assets/${tab}` || (tab === "exams" && parent === "#assets")) history.back();
+  else navigateAssets(tab, "", true);
+}
+
 function initAssets() {
-  // 页签切换
+  history.scrollRestoration = "manual";
   tabs.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-asset-tab]");
-    if (!tab) return;
-    tabs.querySelectorAll(".asset-tab").forEach((t) => {
-      t.classList.toggle("is-active", t === tab);
-      t.setAttribute("aria-pressed", String(t === tab));
-    });
-    Object.entries(panes).forEach(([key, pane]) => { pane.hidden = key !== tab.dataset.assetTab; });
-    renderAll();
+    if (tab) navigateAssets(tab.dataset.assetTab);
   });
-
+  document.querySelector("#assets").addEventListener("click", (event) => {
+    const image = event.target.closest("[data-preview-image]");
+    if (image) previewImages(image);
+    if (event.target.closest("[data-asset-back]")) backToList();
+  });
+  for (const name of ["hashchange", "popstate", "settings:navigate"]) {
+    window.addEventListener(name, renderAll);
+  }
+  window.addEventListener("scroll", () => {
+    if (renderedRoute === location.hash && assetRoute().section === "assets") {
+      history.replaceState({ ...history.state, assetScroll: window.scrollY }, "");
+    }
+  }, { passive: true });
+  const dismiss = () => { dialogRevision += 1; closeDialog(); };
+  window.addEventListener("app:privacy-hidden", dismiss);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) dismiss(); });
   initRecords();
   initKB();
   initExams();
   renderAll();
 }
 
-function renderAll() {
-  return Promise.all([
-    action(panes.records, renderRecords)(),
-    action(panes.kb, renderKB)(),
-    action(panes.exams, renderExams)(),
-  ]);
+async function renderAll() {
+  const epoch = ++routeEpoch;
+  renderedRoute = "";
+  dialogRevision += 1;
+  closeDialog();
+  const route = assetRoute();
+  if (route.section !== "assets") return;
+  tabs.querySelectorAll(".asset-tab").forEach((tab) => {
+    const active = tab.dataset.assetTab === route.tab;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-pressed", String(active));
+  });
+  Object.entries(panes).forEach(([key, pane]) => { pane.hidden = key !== route.tab; });
+  const scroll = history.state?.assetScroll || 0;
+  await action(panes[route.tab], { records: renderRecords, exams: renderExams, kb: renderKB }[route.tab])();
+  if (epoch !== routeEpoch) return;
+  const back = panes[route.tab].querySelector("[data-asset-back]");
+  const origin = [...panes[route.tab].querySelectorAll("[data-id]")].find(item => item.dataset.id === history.state?.assetFocus);
+  (back || origin?.querySelector(".asset-preview-link"))?.focus({ preventScroll: true });
+  window.scrollTo({ top: scroll, behavior: "instant" });
+  renderedRoute = location.hash;
+}
+
+function gallery(images, label) {
+  return `<div class="asset-gallery">${(images || []).filter(image => /^data:image\/(png|jpe?g|webp|gif);base64,/i.test(image)).map((image, index) =>
+    `<button type="button" class="asset-image" data-preview-image aria-label="放大${label} ${index + 1}"><img src="${escapeHtml(image)}" alt="${label} ${index + 1}" loading="lazy" /></button>`
+  ).join("")}</div>`;
+}
+
+function openDialog(content, className = "") {
+  closeDialog();
+  const previous = document.activeElement;
+  const dialog = document.createElement("dialog");
+  dialog.className = `asset-dialog ${className}`;
+  dialog.innerHTML = content;
+  dialog.setAttribute("aria-labelledby", "assetDialogTitle");
+  document.body.append(dialog);
+  const close = () => {
+    if (!dialog.isConnected) return;
+    dialog.close();
+    dialog.remove();
+    if (previous?.isConnected) previous.focus({ preventScroll: true });
+    if (closeDialog === close) closeDialog = () => {};
+  };
+  closeDialog = close;
+  dialog.addEventListener("cancel", event => { event.preventDefault(); close(); });
+  dialog.addEventListener("click", event => {
+    if (event.target === dialog || event.target.closest("[data-dialog-close]")) close();
+  });
+  dialog.showModal();
+  return { dialog, close };
+}
+
+function confirmAction(message) {
+  return new Promise(resolve => {
+    const { dialog, close } = openDialog(`<h2 id="assetDialogTitle">${escapeHtml(message)}</h2><div class="asset-dialog-actions"><button type="button" class="secondary" data-dialog-close autofocus>取消</button><button type="button" data-confirm>确定删除</button></div>`);
+    let accepted = false;
+    dialog.addEventListener("close", () => resolve(accepted), { once: true });
+    dialog.querySelector("[data-confirm]").addEventListener("click", () => { accepted = true; close(); });
+  });
+}
+
+function showNotice(message) {
+  openDialog(`<h2 id="assetDialogTitle">${escapeHtml(message)}</h2><div class="asset-dialog-actions"><button type="button" data-dialog-close autofocus>知道了</button></div>`);
+}
+
+function previewImages(button) {
+  const buttons = [...button.closest(".asset-gallery").querySelectorAll("[data-preview-image]")];
+  let index = buttons.indexOf(button);
+  const { dialog } = openDialog(`<header><h2 id="assetDialogTitle">图片预览</h2><button type="button" class="secondary" data-dialog-close autofocus>关闭</button></header><div class="asset-image-stage"><img alt="" /></div><p class="asset-image-error" role="status" hidden>图片无法读取。</p><footer><button type="button" class="secondary" data-image-prev>上一张</button><span data-image-count></span><button type="button" class="secondary" data-image-next>下一张</button><button type="button" class="secondary" data-image-zoom aria-pressed="false">放大</button></footer>`, "asset-image-dialog");
+  const image = dialog.querySelector(".asset-image-stage img");
+  const zoom = dialog.querySelector("[data-image-zoom]");
+  const render = () => {
+    const original = buttons[index].querySelector("img");
+    image.src = original.src;
+    image.alt = original.alt;
+    dialog.querySelector("[data-image-count]").textContent = `${index + 1} / ${buttons.length}`;
+    dialog.querySelector("[data-image-prev]").disabled = index === 0;
+    dialog.querySelector("[data-image-next]").disabled = index === buttons.length - 1;
+    dialog.querySelector(".asset-image-error").hidden = true;
+    dialog.classList.remove("is-zoomed");
+    zoom.setAttribute("aria-pressed", "false");
+    zoom.textContent = "放大";
+  };
+  image.addEventListener("error", () => { dialog.querySelector(".asset-image-error").hidden = false; });
+  const step = delta => { index = Math.max(0, Math.min(buttons.length - 1, index + delta)); render(); };
+  dialog.querySelector("[data-image-prev]").addEventListener("click", () => step(-1));
+  dialog.querySelector("[data-image-next]").addEventListener("click", () => step(1));
+  dialog.addEventListener("keydown", event => {
+    if (["ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); step(event.key === "ArrowLeft" ? -1 : 1); }
+  });
+  zoom.addEventListener("click", () => {
+    const expanded = dialog.classList.toggle("is-zoomed");
+    zoom.setAttribute("aria-pressed", String(expanded));
+    zoom.textContent = expanded ? "适应窗口" : "放大";
+  });
+  render();
 }
 
 // ===== 会话记录 =====
@@ -96,20 +224,31 @@ function initRecords() {
   recordsList?.addEventListener("click", action(panes.records, async (event) => {
     const deleteId = event.target.closest("[data-delete]")?.dataset.delete;
     const viewId = event.target.closest("[data-view]")?.dataset.view;
-    if (deleteId && confirm("确定删除这条会话记录吗？")) {
+    if (deleteId && await confirmAction("确定删除这条会话记录吗？")) {
       await deleteSessionRecord(deleteId);
       await renderRecords();
     }
-    if (viewId) {
-      const record = (await listSessionRecords()).find((r) => r.id === viewId);
-      if (record) renderRecordDetail(record);
+    if (viewId) navigateAssets("records", viewId);
+    const link = event.target.closest(".asset-preview-link");
+    if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      navigateAssets("records", link.closest("[data-id]").dataset.id);
     }
   }));
 }
 
 async function renderRecords() {
   if (!recordsList) return;
+  const epoch = routeEpoch;
   const records = await listSessionRecords();
+  if (epoch !== routeEpoch) return;
+  const { id } = assetRoute();
+  if (id) {
+    const record = records.find(item => item.id === id);
+    if (record) renderRecordDetail(record);
+    else recordsList.innerHTML = '<button type="button" class="secondary" data-asset-back>返回列表</button><p class="asset-empty">这条会话记录已不存在。</p>';
+    return;
+  }
   if (!records.length) {
     recordsList.innerHTML = '<p class="asset-empty">还没有保存的会话记录。在桌面端点「新对话」时会自动保存当前会话。</p>';
     return;
@@ -123,7 +262,7 @@ async function renderRecords() {
           <time>${escapeHtml(date)}</time>
           <span class="asset-count">${record.turnCount} 轮</span>
         </header>
-        <p class="asset-preview">${escapeHtml(preview)}${preview.length >= 60 ? "…" : ""}</p>
+        <a class="asset-preview-link" href="#assets/records/${encodeURIComponent(record.id)}">${escapeHtml(preview)}${preview.length >= 60 ? "…" : ""}</a>
         <footer>
           <button type="button" class="secondary" data-view="${escapeHtml(record.id)}">查看</button>
           <button type="button" class="secondary" data-delete="${escapeHtml(record.id)}">删除</button>
@@ -137,27 +276,23 @@ function renderRecordDetail(record) {
   recordsList.innerHTML = `
     <article class="asset-detail">
       <header>
-        <button type="button" class="secondary" id="assetBack">← 返回列表</button>
+        <button type="button" class="secondary" id="assetBack" data-asset-back>← 返回列表</button>
         <time>${new Date(record.startedAt).toLocaleString("zh-CN")}</time>
       </header>
       ${record.note ? `<p class="asset-note">备注：${escapeHtml(record.note)}</p>` : ""}
       <div class="asset-turns">
         ${record.turns.map((turn) => `
           <div class="asset-turn is-${turn.role === "user" ? "user" : "assistant"}">
-            <strong>${turn.role === "user" ? "问" : "答"}</strong>
-            ${turn.images && turn.images.length ? `
-              <div class="asset-gallery">
-                ${turn.images.map((img) => `<img src="${escapeHtml(img)}" alt="截图" />`).join("")}
-              </div>
-            ` : ""}
+            <strong>${record.kind === 'transcription' ? `${turn.source === 'mic' ? '麦克风' : '系统声音'} · ${turn.speaker === 'interviewer' ? '面试官' : '候选人'}` : turn.role === "user" ? "问" : "答"}</strong>
+            ${gallery(turn.images, "截图")}
             <p>${escapeHtml(turn.text)}</p>
+            ${turn.role === 'assistant' && turn.partial ? '<span class="asset-note">回答已中断，内容不完整</span>' : ''}
             ${turn.imageCount ? `<span class="asset-images">（含 ${turn.imageCount} 张截图）</span>` : ""}
           </div>
         `).join("")}
       </div>
     </article>
   `;
-  document.querySelector("#assetBack")?.addEventListener("click", action(panes.records, renderRecords));
 }
 
 // ===== 知识库 =====
@@ -171,13 +306,15 @@ let kbListEpoch = 0;
 function initKB() {
   document.querySelector("#kbExport")?.addEventListener("click", action(panes.kb, exportKnowledgeBaseAsMarkdown));
   document.querySelector("#kbImport")?.addEventListener("click", action(panes.kb, async () => {
+    const revision = dialogRevision;
     const records = await listSessionRecords();
+    if (revision !== dialogRevision) return;
     if (!records.length) {
-      alert("没有可导入的会话记录。");
+      showNotice("没有可导入的会话记录。");
       return;
     }
     const imported = await importSessionRecords(records);
-    alert(`已从会话记录导入 ${imported} 条知识。`);
+    if (revision === dialogRevision) showNotice(`已从会话记录导入 ${imported} 条知识。`);
     await renderKB();
   }));
   kbTags?.addEventListener("click", action(panes.kb, async (event) => {
@@ -195,7 +332,7 @@ function initKB() {
       await markReviewed(reviewId);
       await renderKBStats();
     }
-    if (deleteId && confirm("确定删除这条知识吗？")) {
+    if (deleteId && await confirmAction("确定删除这条知识吗？")) {
       await deleteKnowledgeItem(deleteId);
       await renderKB();
     }
@@ -264,20 +401,31 @@ function initExams() {
   examsList?.addEventListener("click", action(panes.exams, async (event) => {
     const deleteId = event.target.closest("[data-delete-exam]")?.dataset.deleteExam;
     const viewId = event.target.closest("[data-view-exam]")?.dataset.viewExam;
-    if (deleteId && confirm("确定删除这条笔试记录吗？")) {
+    if (deleteId && await confirmAction("确定删除这条笔试记录吗？")) {
       await deleteExamRecord(deleteId);
       await renderExams();
     }
-    if (viewId) {
-      const record = (await listExamRecords()).find((r) => r.id === viewId);
-      if (record) renderExamDetail(record);
+    if (viewId) navigateAssets("exams", viewId);
+    const link = event.target.closest(".asset-preview-link");
+    if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      navigateAssets("exams", link.closest("[data-id]").dataset.id);
     }
   }));
 }
 
 async function renderExams() {
   if (!examsList) return;
+  const epoch = routeEpoch;
   const records = await listExamRecords();
+  if (epoch !== routeEpoch) return;
+  const { id } = assetRoute();
+  if (id) {
+    const record = records.find(item => item.id === id);
+    if (record) renderExamDetail(record);
+    else examsList.innerHTML = '<button type="button" class="secondary" data-asset-back>返回列表</button><p class="asset-empty">这条笔试记录已不存在。</p>';
+    return;
+  }
   if (!records.length) {
     examsList.innerHTML = '<p class="asset-empty">还没有笔试记录。桌面端每次截图提问都会自动保存题目和回答。</p>';
     return;
@@ -291,7 +439,7 @@ async function renderExams() {
           <time>${escapeHtml(date)}</time>
           <span class="asset-count">${record.imageCount ? `${record.imageCount} 图` : ""}${record.partial ? " · 中断" : ""}</span>
         </header>
-        <p class="asset-preview">${escapeHtml(preview)}${preview.length >= 80 ? "…" : ""}</p>
+        <a class="asset-preview-link" href="#assets/exams/${encodeURIComponent(record.id)}">${escapeHtml(preview)}${preview.length >= 80 ? "…" : ""}</a>
         <footer>
           <button type="button" class="secondary" data-view-exam="${escapeHtml(record.id)}">查看</button>
           <button type="button" class="secondary" data-delete-exam="${escapeHtml(record.id)}">删除</button>
@@ -305,22 +453,17 @@ function renderExamDetail(record) {
   examsList.innerHTML = `
     <article class="asset-detail">
       <header>
-        <button type="button" class="secondary" id="examsBack">← 返回列表</button>
+        <button type="button" class="secondary" id="examsBack" data-asset-back>← 返回列表</button>
         <time>${new Date(record.createdAt).toLocaleString("zh-CN")}</time>
       </header>
       ${record.model ? `<p class="asset-note">模型：${escapeHtml(record.model)}${record.partial ? "（回答中断）" : ""}</p>` : ""}
-      ${record.images && record.images.length ? `
-        <div class="asset-gallery">
-          ${record.images.map((img) => `<img src="${escapeHtml(img)}" alt="题图" />`).join("")}
-        </div>
-      ` : ""}
+      ${gallery(record.images, "题图")}
       <div class="asset-turns">
         ${record.query ? `<div class="asset-turn is-user"><strong>问</strong><p>${escapeHtml(record.query)}</p></div>` : ""}
         <div class="asset-turn is-assistant"><strong>答</strong><p>${escapeHtml(record.answer)}</p></div>
       </div>
     </article>
   `;
-  document.querySelector("#examsBack")?.addEventListener("click", action(panes.exams, renderExams));
 }
 
 // Initialize after every DOM reference and state binding is ready (avoid TDZ on import).

@@ -18,7 +18,8 @@ export function stripAnswerMetadata(markdown) {
   const match = source.match(/^\s*<!--\s*liuwa:type=([a-z]+)\s*-->\s*/i);
   if (match && TYPES.has(match[1].toLowerCase())) return {type:match[1].toLowerCase(), text:source.slice(match[0].length)};
   // 分片中的元信息不应短暂泄露到正文。
-  if (/^\s*<!--\s*liuwa:/.test(source) && !source.includes('-->')) return {type:null, text:''};
+  const start = source.trimStart();
+  if (!source.includes('-->') && (start.startsWith('<!--') || '<!--'.startsWith(start))) return {type:null, text:''};
   return {type:null, text:source};
 }
 
@@ -65,23 +66,19 @@ export function splitAnswer(markdown) {
     else if (groups.has('thought') && !groups.has('answer')) type = 'reasoning';
     else type = 'general';
   }
-  // 某些模型会把 SQL 等代码题标成 general；已有明确代码小节时仍应默认展示代码。
   if (type === 'general' && groups.has('code')) type = 'programming';
-  const priority = type === 'mixed' ? ['all','answer','code','thought','analysis','other']
-    : type === 'programming' ? ['code','thought','analysis','answer','other','all']
-    : type === 'reasoning' ? ['thought','answer','analysis','code','other','all']
+  const priority = type === 'mixed' ? ['answer','all','code','thought','analysis','other']
+    : type === 'programming' ? ['answer','code','thought','analysis','other','all']
     : ['answer','thought','analysis','code','other','all'];
   const panels = recognized ? [...groups].map(([key, parts]) => ({
     key, label:type === 'essay' && key === 'answer' ? '参考作答' : LABELS[key],
     markdown:parts.map(p => [p.prefix,p.lines.join('\n')].filter(Boolean).join('\n\n')).join('\n\n'),
     hasContent:parts.some(p => p.body.join('\n').trim()),
   })) : [];
-  const expected = declaredType && declaredType !== 'general' ? priority[0] : null;
-  if(expected && expected !== 'all' && !panels.some(p => p.key === expected)) {
-    panels.push({key:expected,label:type === 'essay' && expected === 'answer' ? '参考作答' : LABELS[expected],markdown:'',hasContent:false});
-  }
-  panels.push({key:'all',label:LABELS.all,markdown:full,hasContent:Boolean(full.trim())});
+  panels.push({key:'all',label:LABELS.all,markdown:full,hasContent:chunks.some(p => p.body.join('\n').trim())});
   panels.sort((a,b)=>priority.indexOf(a.key)-priority.indexOf(b.key));
-  const preferred = expected || panels.find(p => p.hasContent)?.key || 'all';
+  const preferred = type === 'mixed' && !panels.some(p => p.key === 'answer' && p.hasContent)
+    ? 'all'
+    : panels.find(p => p.hasContent)?.key || panels[0]?.key || 'all';
   return {type,full,panels,preferred};
 }
