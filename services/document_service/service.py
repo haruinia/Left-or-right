@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
+from time import monotonic
 from typing import Literal
 from xml.etree import ElementTree
 
@@ -26,6 +27,44 @@ PDF_MIME_TYPES = {"application/pdf"}
 DOCX_MIME_TYPES = {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
 DOC_MIME_TYPES = {"application/msword"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+KNOWLEDGE_TEXT_SUFFIXES = frozenset({
+    ".md", ".markdown", ".txt", ".rst", ".json", ".jsonl", ".csv", ".log",
+    ".yaml", ".yml", ".toml", ".ini", ".cfg", ".xml", ".html", ".css", ".scss",
+    ".js", ".jsx", ".ts", ".tsx", ".py", ".java", ".go", ".rs", ".c", ".h",
+    ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift", ".kt", ".kts", ".sql",
+    ".sh", ".bash", ".zsh", ".vue", ".svelte",
+})
+KNOWLEDGE_SUFFIXES = KNOWLEDGE_TEXT_SUFFIXES | {".pdf", ".docx"}
+KNOWLEDGE_MAX_BYTES = 5 * 1024 * 1024
+KNOWLEDGE_MAX_CHARS = 200000
+
+
+def extract_local_document(filename: str, data: bytes) -> str:
+    if not data or len(data) > KNOWLEDGE_MAX_BYTES:
+        raise ValueError("文件为空或超过 5 MiB。")
+    suffix = Path(filename).suffix.lower()
+    if suffix in KNOWLEDGE_TEXT_SUFFIXES:
+        if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+            try:
+                text = data.decode("utf-16")
+            except UnicodeDecodeError as exc:
+                raise ValueError("文本编码无法读取。") from exc
+        else:
+            text = _decode_text(data, preserve_whitespace=True)
+        if "\x00" in text or any(ord(char) < 32 and char not in "\t\n\r" for char in text):
+            raise ValueError("文件包含二进制内容，不作为文本导入。")
+    elif suffix == ".docx":
+        text = _extract_docx(data, bounded=True)
+    elif suffix == ".pdf":
+        text = _extract_pdf(data, bounded=True)
+    else:
+        raise ValueError("此文件类型不支持本地导入。")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        raise ValueError("未提取到文本。")
+    if len(text) > KNOWLEDGE_MAX_CHARS:
+        raise ValueError("文档正文超过 200,000 字符。")
+    return text
 
 
 class DocumentParseResult(BaseModel):
@@ -95,20 +134,30 @@ def _normalize_content_type(content_type: str) -> str:
     return content_type.split(";", 1)[0].strip().lower()
 
 
-def _decode_text(data: bytes) -> str:
+def _decode_text(data: bytes, *, preserve_whitespace: bool = False) -> str:
     for encoding in ("utf-8-sig", "utf-8", "gb18030", "utf-16"):
         try:
             text = data.decode(encoding)
-            return _require_text(text)
+            _require_text(text)
+            return text if preserve_whitespace else text.strip()
         except UnicodeDecodeError:
             continue
     raise ValueError("text document encoding is not supported")
 
 
-def _extract_docx(data: bytes) -> str:
+def _extract_docx(data: bytes, *, bounded: bool = False) -> str:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            if bounded:
+                entries = archive.infolist()
+                if len(entries) > 2000 or sum(item.file_size for item in entries) > 20 * 1024 * 1024:
+                    raise ValueError("DOCX 解包大小或条目数超过限制。")
+                document = archive.getinfo("word/document.xml")
+                if document.file_size > 5 * 1024 * 1024 or document.file_size > max(1, document.compress_size) * 200:
+                    raise ValueError("DOCX 正文解包大小或压缩比超过限制。")
             xml = archive.read("word/document.xml")
+        if bounded and re.search(br"<!\s*(?:DOCTYPE|ENTITY)\b", xml.replace(b"\x00", b""), re.IGNORECASE):
+            raise ValueError("DOCX 正文包含不支持的 XML 声明。")
         root = ElementTree.fromstring(xml)
     except (KeyError, zipfile.BadZipFile, ElementTree.ParseError) as exc:
         raise ValueError("docx document is invalid or unreadable") from exc
@@ -122,14 +171,28 @@ def _extract_docx(data: bytes) -> str:
     return _require_text("\n".join(paragraphs))
 
 
-def _extract_pdf(data: bytes) -> str:
+def _extract_pdf(data: bytes, *, bounded: bool = False) -> str:
     try:
         from pypdf import PdfReader
     except ImportError as exc:
         raise ValueError("PDF parsing requires pypdf; install project dependencies first") from exc
     try:
+        deadline = monotonic() + 10
         reader = PdfReader(io.BytesIO(data))
-        texts = [(page.extract_text() or "").strip() for page in reader.pages]
+        if bounded and len(reader.pages) > 200:
+            raise ValueError("PDF 超过 200 页。")
+        texts = []
+        characters = 0
+        for page in reader.pages:
+            if bounded and monotonic() > deadline:
+                raise ValueError("PDF 本地提取超时。")
+            text = (page.extract_text() or "").strip()
+            if bounded and monotonic() > deadline:
+                raise ValueError("PDF 本地提取超时。")
+            characters += len(text)
+            if bounded and characters > KNOWLEDGE_MAX_CHARS:
+                raise ValueError("PDF 正文超过 200,000 字符。")
+            texts.append(text)
     except Exception as exc:
         raise ValueError("pdf document is invalid or unreadable") from exc
     text = "\n".join(text for text in texts if text).strip()

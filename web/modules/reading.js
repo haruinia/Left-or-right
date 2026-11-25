@@ -12,6 +12,7 @@ const thread = () => document.querySelector("#liuwaThread");
 // 主面板始终只有当前答案，无论它是否已溢出，都使用同一个正文容器。
 // 不能在内容增长时动态换容器，否则分页位置和滚动高度会发生跳变。
 export function readingBox() {
+  if (document.body?.classList.contains('interview-mode')) return document.querySelector('#liuwaInterviewStack');
   const outer = thread();
   if (!outer) return null;
   return outer.querySelector(".liuwa-stream") || outer;

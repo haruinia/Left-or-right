@@ -1,8 +1,14 @@
 export function settingsRoute(hash = location.hash) {
   const parts = hash.replace(/^#/, '').split('/');
   if (parts[0] === 'asr') return { section: 'models', tab: 'asr', kind: 'list', hash: '#models/asr' };
-  const section = parts[0] === 'legacySettings' ? 'briefing' : parts[0] || 'models';
-  if (section !== 'models') return { section, hash: `#${section}` };
+  const section = ['legacySettings', 'interview'].includes(parts[0]) ? 'briefing' : parts[0] || 'models';
+  if (section !== 'models') {
+    let detail = parts[1] || '', id = '';
+    if (section === 'briefing' && !['identity', 'jd', 'resume', 'knowledge'].includes(detail)) detail = '';
+    if (section === 'study' && detail !== 'instructions') detail = '';
+    try { id = decodeURIComponent(parts[2] || ''); } catch { detail = ''; }
+    return { section, detail, id, kind: detail ? 'detail' : 'list', hash: `#${section}${detail ? `/${detail}${id ? `/${encodeURIComponent(id)}` : ''}` : ''}` };
+  }
   if (parts[1] === 'import') return { section, tab: 'llm', kind: 'import', hash: '#models/import' };
   const tab = parts[1] === 'asr' ? 'asr' : 'llm';
   let id = '';
@@ -19,6 +25,12 @@ export function navigateSettings(hash, { replace = false, focus = null } = {}) {
 
 export function returnToConnections(tab = 'llm') {
   const target = tab === 'asr' ? '#models/asr' : '#models';
+  if (history.state?.settingsParent === target) history.back();
+  else navigateSettings(target, { replace: true });
+}
+
+export function returnToSettingsList(section) {
+  const target = `#${section}`;
   if (history.state?.settingsParent === target) history.back();
   else navigateSettings(target, { replace: true });
 }

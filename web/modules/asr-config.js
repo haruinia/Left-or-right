@@ -3,9 +3,10 @@ import { settingsRoute, navigateSettings, returnToConnections, confirmSettingsAc
 
 const $ = selector => document.querySelector(selector);
 const KEY_MASK = '************';
-const ENDPOINTS = { aliyun_nls_ws: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1', aliyun_ws: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference' };
+const ENDPOINTS = { aliyun_nls_ws: 'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1', aliyun_ws: 'wss://dashscope.aliyuncs.com/api-ws/v1/inference', xfyun_rtasr: 'wss://rtasr.xfyun.cn/v1/ws' };
 const SECRET_FIELDS = {
   api_key: { id: 'asrApiKey', toggle: 'asrToggleKey', label: 'API Key' },
+  app_id: { id: 'asrAppId', toggle: 'asrToggleAppId', label: 'APPID' },
   app_key: { id: 'asrAppKey', toggle: 'asrToggleAppKey', label: 'AppKey' },
   nls_token: { id: 'asrNlsToken', toggle: 'asrToggleNlsToken', label: 'AccessToken' },
   access_key_id: { id: 'asrAccessKeyId', toggle: 'asrToggleAccessKeyId', label: 'AccessKey ID' },
@@ -22,7 +23,11 @@ function secretState(profile) {
 }
 
 function provider() { return $('#asrProvider').value || 'aliyun_nls_ws'; }
-function relevantSecrets() { return provider() === 'aliyun_ws' ? ['api_key'] : $('#asrAuthMode').value === 'access_key' ? ['app_key', 'access_key_id', 'access_key_secret'] : ['app_key', 'nls_token']; }
+function relevantSecrets() {
+  if (provider() === 'aliyun_ws') return ['api_key'];
+  if (provider() === 'xfyun_rtasr') return ['app_id', 'api_key'];
+  return $('#asrAuthMode').value === 'access_key' ? ['app_key', 'access_key_id', 'access_key_secret'] : ['app_key', 'nls_token'];
+}
 
 function remask() {
   for (const [field, detail] of Object.entries(SECRET_FIELDS)) {
@@ -35,16 +40,18 @@ function remask() {
 }
 
 function syncFields() {
-  const nls = provider() === 'aliyun_nls_ws', automatic = nls && $('#asrAuthMode').value === 'access_key';
-  const visible = new Set(nls ? ['app_key', ...(automatic ? ['access_key_id', 'access_key_secret'] : ['nls_token'])] : ['api_key']);
+  const current = provider(), nls = current === 'aliyun_nls_ws', bailian = current === 'aliyun_ws', xfyun = current === 'xfyun_rtasr';
+  const automatic = nls && $('#asrAuthMode').value === 'access_key';
+  const visible = new Set(nls ? ['app_key', ...(automatic ? ['access_key_id', 'access_key_secret'] : ['nls_token'])] : xfyun ? ['app_id', 'api_key'] : ['api_key']);
   for (const [field, detail] of Object.entries(SECRET_FIELDS)) {
     $(`#${detail.id}Label`).hidden = !visible.has(field);
     $(`#${detail.id}Field`).hidden = !visible.has(field);
     $(`#${detail.id}`).disabled = !visible.has(field);
   }
   $('#asrAuthModeLabel').hidden = !nls; $('#asrAuthMode').hidden = !nls; $('#asrAuthMode').disabled = !nls;
-  $('#asrModelLabel').hidden = nls; $('#asrModel').disabled = nls; $('#asrModel').required = !nls;
-  $('#asrLanguageHintsLabel').hidden = nls; $('#asrLanguageHints').disabled = nls;
+  $('#asrModelLabel').hidden = !bailian; $('#asrModel').disabled = !bailian; $('#asrModel').required = bailian;
+  $('#asrLanguageHintsLabel').hidden = !bailian; $('#asrLanguageHints').disabled = !bailian;
+  $('#asrVocabularyLabel').hidden = xfyun; $('#asrVocabulary').disabled = xfyun;
   $('#asrProvider').disabled = Boolean(editingId);
 }
 
@@ -104,7 +111,7 @@ function renderCards() {
     const name = document.createElement('strong'); name.textContent = profile.name; top.append(name);
     if (profile.id === activeId) { const badge = document.createElement('span'); badge.className = 'model-badge'; badge.textContent = '使用中'; top.append(badge); }
     const model = document.createElement('p'); model.className = 'model-card-model';
-    model.textContent = profile.provider === 'aliyun_nls_ws' ? '阿里云 NLS' : `阿里云百炼 · ${profile.model}`;
+    model.textContent = profile.provider === 'aliyun_nls_ws' ? '阿里云 NLS' : profile.provider === 'xfyun_rtasr' ? '讯飞实时转写' : `阿里云百炼 · ${profile.model}`;
     const endpoint = document.createElement('p'); endpoint.className = 'model-card-url'; endpoint.textContent = profile.endpoint;
     const footer = document.createElement('footer');
     if (profile.id !== activeId) footer.append(button('使用', 'asrActivate', profile.id));
@@ -158,7 +165,7 @@ async function save(event) {
   const payload = {
     ...(editingId ? { id: editingId } : {}), name: $('#asrName').value.trim(), provider: provider(),
     endpoint: $('#asrEndpoint').value.trim(), vocabulary_id: $('#asrVocabulary').value.trim(),
-    ...(provider() === 'aliyun_ws' ? { model: $('#asrModel').value.trim(), language_hints: $('#asrLanguageHints').value.trim() } : { auth_mode: $('#asrAuthMode').value }),
+    ...(provider() === 'aliyun_ws' ? { model: $('#asrModel').value.trim(), language_hints: $('#asrLanguageHints').value.trim() } : provider() === 'aliyun_nls_ws' ? { auth_mode: $('#asrAuthMode').value } : {}),
   };
   for (const field of relevantSecrets()) if (!secrets[field]?.configured || secrets[field].changed) payload[field] = $(`#${SECRET_FIELDS[field].id}`).value.trim();
   busy = true; $('#asrSave').disabled = true; status('正在保存…');

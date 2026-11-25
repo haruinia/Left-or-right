@@ -3260,10 +3260,15 @@ def test_gateway_settings_page_keeps_only_current_features(tmp_path: Path, monke
     client = _client(tmp_path, monkeypatch)
     page = client.get("/settings")
     assert page.status_code == 200
-    for label in ("接入设置", "回答模型", "语音识别", "答题偏好", "面试资料", "快捷键", "学习记录", "岗位信息", "简历信息"):
+    for label in ("接入设置", "回答模型", "语音识别", "答题偏好", "面试资料", "快捷键", "知识库", "历史笔记", "岗位信息", "简历信息"):
         assert label in page.text
     for element in ("jdText", "resumeText", "saveUiSettings", "studySpecialty", "studySpecialtyCustom", "studyLanguage", "studyLanguageCustom", "studyAnswerStyle", "llmToggleKey"):
         assert f'id="{element}"' in page.text
+    assert 'id="knowledgeApp"' in page.text
+    assert 'href="#assets">记录</a>' in page.text
+    assert 'id="interview"' not in page.text
+    assert 'id="kbImport"' not in page.text
+    assert 'class="site-footer"' not in page.text
     assert 'src="modules/settings.js"' in page.text
     assert 'href="modules/settings.css"' in page.text
     assert 'href="styles.css"' not in page.text

@@ -19,8 +19,8 @@ async (page, { base = new URL(page.url()).origin } = {}) => {
       if (failSave) return route.fulfill({ status: 503, json: { detail: '模拟保存失败' } });
       const id = body.id || `nls-${++count}`, old = profiles.find(item => item.id === id);
       secrets[id] = { ...(secrets[id] || {}) };
-      const profile = { ...old, ...body, id, model: body.provider === 'aliyun_nls_ws' ? '' : body.model, configured: true };
-      for (const field of ['api_key', 'app_key', 'nls_token', 'access_key_id', 'access_key_secret']) {
+      const profile = { ...old, ...body, id, model: body.provider === 'aliyun_ws' ? body.model : '', configured: true };
+      for (const field of ['api_key', 'app_id', 'app_key', 'nls_token', 'access_key_id', 'access_key_secret']) {
         if (Object.hasOwn(body, field)) secrets[id][field] = body[field];
         profile[`${field}_configured`] = Boolean(secrets[id][field]); delete profile[field];
       }
@@ -92,6 +92,22 @@ async (page, { base = new URL(page.url()).origin } = {}) => {
   check(!await page.locator('.asr-advanced').getAttribute('open'), 'Opening a saved profile unnecessarily expanded advanced parameters');
   await page.locator('#asrToggleKey').click(); await page.waitForFunction(() => document.querySelector('#asrApiKey').type === 'text');
   check(await page.locator('#asrApiKey').inputValue() === 'fixture-bailian-key', 'Existing API Key reveal stopped working');
+  await page.locator('#asrCancel').click(); await page.locator('#asrNew').click();
+  await page.locator('#asrProvider').selectOption('xfyun_rtasr');
+  check(await page.locator('#asrAppIdField').isVisible() && await page.locator('#asrApiKeyField').isVisible(), 'XFYUN credential fields are missing');
+  check(!await page.locator('#asrAppKeyField').isVisible() && !await page.locator('#asrAuthMode').isVisible() && !await page.locator('#asrModelLabel').isVisible() && !await page.locator('#asrLanguageHintsLabel').isVisible() && !await page.locator('#asrVocabularyLabel').isVisible(), 'XFYUN exposes unrelated provider options');
+  check(await page.locator('#asrEndpoint').inputValue() === 'wss://rtasr.xfyun.cn/v1/ws', 'XFYUN endpoint default is incorrect');
+  await page.locator('#asrName').fill('讯飞实时转写');
+  await page.locator('#asrAppId').fill('fixture-xfyun-app-id'); await page.locator('#asrApiKey').fill('fixture-xfyun-api-key');
+  await page.locator('#asrSave').click(); await page.locator('[data-asr-edit="nls-2"]').waitFor();
+  const xfyun = writes.at(-1);
+  check(xfyun.provider === 'xfyun_rtasr' && xfyun.app_id === 'fixture-xfyun-app-id' && xfyun.api_key === 'fixture-xfyun-api-key' && !Object.hasOwn(xfyun, 'model') && !Object.hasOwn(xfyun, 'auth_mode'), 'XFYUN save mixed provider fields');
+  await page.locator('[data-asr-edit="nls-2"]').click(); await page.waitForFunction(() => document.querySelector('#asrAppId').value === '************');
+  await page.locator('#asrToggleAppId').click(); await page.waitForFunction(() => document.querySelector('#asrAppId').type === 'text');
+  check(await page.locator('#asrAppId').inputValue() === 'fixture-xfyun-app-id', 'XFYUN APPID reveal failed');
+  check(reveals.at(-1) === '/api/config/asr/profiles/nls-2/secrets/app_id', 'XFYUN APPID reveal used an incorrect route');
+  await page.evaluate(() => window.dispatchEvent(new Event('app:privacy-hidden')));
+  check(await page.locator('#asrAppId').inputValue() === '************' && await page.locator('#asrApiKey').inputValue() === '************', 'XFYUN secrets were not remasked');
   await page.locator('#asrCancel').click(); await page.locator('#asrNew').click();
   await page.locator('#asrAppKey').fill('must-not-transfer'); await page.locator('#asrNlsToken').fill('must-not-transfer-token');
   await page.locator('#asrProvider').selectOption('aliyun_ws');

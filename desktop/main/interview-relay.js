@@ -1,22 +1,29 @@
 'use strict';
 
+const { pathToFileURL } = require('node:url');
+
 const PHASES = new Set(['acquiring', 'connecting', 'recording', 'stopping', 'idle']);
 const SOURCES = new Set(['mic', 'system']);
 const ROLES = new Set(['candidate', 'interviewer']);
 const validId = value => typeof value === 'string' && /^[\w-]{1,100}$/.test(value);
 const sourcesValid = values => Array.isArray(values) && values.length > 0 && values.length <= 2 && new Set(values).size === values.length && values.every(source => SOURCES.has(source));
 
-function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gatewayUrl, visibility }) {
+function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gatewayUrl, visibility, rendererIndex, now = Date.now }) {
   const origin = new URL(gatewayUrl).origin;
-  let state = { revision: 0, run_id: '', session_id: '', phase: 'idle', role: 'candidate', sources: [], transcripts: [], partials: { mic: null, system: null }, muted: { mic: false, system: false }, error: '', saved: false };
+  let state = { revision: 0, run_id: '', conversation_id: '', session_id: '', phase: 'idle', role: 'candidate', sources: [], transcripts: [], partials: { mic: null, system: null }, muted: { mic: false, system: false }, error: '', saved: false, elapsed_ms: 0, recording_started_at: 0 };
   let sourceWindow = null;
   let startVersion = 0;
+  let timelineOffset = 0;
   const retired = new Set();
   const alive = window => window && !window.isDestroyed();
   function owned(event, window) {
     return alive(window) && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame;
   }
   function fromSettings(event) {
+    const main = getMainWindow();
+    if (rendererIndex && owned(event, main)) {
+      return main.webContents.getURL().split(/[?#]/)[0] === pathToFileURL(rendererIndex).href;
+    }
     const window = getSettingsWindow();
     if (!owned(event, window)) return false;
     try {
@@ -34,11 +41,18 @@ function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gat
     if (state.run_id) retired.add(state.run_id);
     if (retired.size > 100) retired.delete(retired.values().next().value);
   }
+  function setPhase(phase) {
+    if (state.phase === 'recording' && phase !== 'recording') {
+      state.elapsed_ms += Math.max(0, now() - state.recording_started_at);
+      state.recording_started_at = 0;
+    } else if (phase === 'recording' && state.phase !== 'recording') state.recording_started_at = now();
+    state.phase = phase;
+  }
   function invalidate(window) {
     if (window !== sourceWindow) return;
     retire();
     if (state.phase !== 'idle') state.error = '录音窗口已关闭，转写已停止。';
-    state.phase = 'idle';
+    setPhase('idle');
     state.partials = { mic: null, system: null };
     publish();
   }
@@ -55,12 +69,13 @@ function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gat
   }
   ipcMain.on('interview:publish', (event, data) => {
     if (!fromSettings(event) || !data || !validId(data.run_id) || retired.has(data.run_id)) return;
-    const window = getSettingsWindow();
+    const window = owned(event, getMainWindow()) ? getMainWindow() : getSettingsWindow();
     watch(window);
     if (data.type === 'state' && data.state === 'acquiring' && data.run_id !== state.run_id) {
-      if (state.phase !== 'idle' || !ROLES.has(data.role) || !sourcesValid(data.sources)) return;
+      if (state.phase !== 'idle' || !ROLES.has(data.role) || !sourcesValid(data.sources) || (state.conversation_id && data.role !== state.role)) return;
+      if (state.conversation_id) timelineOffset = Math.max(timelineOffset, ...state.transcripts.map(item => item.end_ms)) + 2000;
       retire();
-      state = { ...state, run_id: data.run_id, session_id: '', phase: 'acquiring', role: data.role, sources: [...data.sources], transcripts: [], partials: { mic: null, system: null }, muted: { mic: false, system: false }, error: '', saved: false };
+      state = { ...state, run_id: data.run_id, conversation_id: state.conversation_id || data.run_id, session_id: '', phase: 'acquiring', role: data.role, sources: [...data.sources], partials: { mic: null, system: null }, muted: { mic: false, system: false }, error: '', saved: false };
       startVersion = visibility.version();
       publish();
       return;
@@ -70,8 +85,8 @@ function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gat
       case 'state':
         if (!PHASES.has(data.state)) return;
         if (state.phase === 'idle' && data.state !== 'idle') return;
-        state.phase = data.state;
-        if (data.state === 'recording' && visibility.canShow(startVersion) && alive(getMainWindow()) && getMainWindow().isVisible() && window.isVisible()) {
+        setPhase(data.state);
+        if (window !== getMainWindow() && data.state === 'recording' && visibility.canShow(startVersion) && alive(getMainWindow()) && getMainWindow().isVisible() && window.isVisible()) {
           window.webContents.send('app:privacy-hidden');
           window.hide();
         }
@@ -83,17 +98,20 @@ function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gat
       case 'transcript': {
         if (state.phase === 'idle' || !state.session_id || !state.sources.includes(data.source) || typeof data.text !== 'string' || !data.text.trim() || typeof data.is_final !== 'boolean') return;
         if (!Number.isSafeInteger(data.start_ms) || data.start_ms < 0 || !Number.isSafeInteger(data.end_ms) || data.end_ms < data.start_ms) return;
+        const start_ms = data.start_ms + timelineOffset, end_ms = data.end_ms + timelineOffset;
+        if (!Number.isSafeInteger(start_ms) || !Number.isSafeInteger(end_ms)) return;
         const text = data.text.length > 8000 ? `${data.text.slice(0, 7999)}…` : data.text;
         const speaker = data.source === 'mic' ? state.role : state.role === 'candidate' ? 'interviewer' : 'candidate';
-        const item = { source: data.source, speaker, text, start_ms: data.start_ms, end_ms: data.end_ms, is_final: data.is_final, segment_id: `${data.source}:${data.start_ms}` };
+        const item = { source: data.source, speaker, text, start_ms, end_ms, is_final: data.is_final, segment_id: `${data.source}:${start_ms}` };
         const index = state.transcripts.findIndex(entry => entry.segment_id === item.segment_id);
         if (item.is_final) {
           if (index >= 0) state.transcripts[index] = item;
           else state.transcripts.push(item);
-          if (state.partials[data.source]?.segment_id === item.segment_id) state.partials[data.source] = null;
+          const partial = state.partials[data.source];
+          if (partial && (partial.segment_id === item.segment_id || (partial.start_ms < item.end_ms && partial.end_ms <= item.end_ms))) state.partials[data.source] = null;
           state.transcripts.sort((left, right) => left.start_ms - right.start_ms || left.source.localeCompare(right.source) || left.segment_id.localeCompare(right.segment_id));
           trimHistory();
-        } else if (index < 0) state.partials[data.source] = item;
+        } else if (index < 0 && !state.transcripts.some(entry => entry.source === item.source && item.start_ms < entry.end_ms && item.end_ms <= entry.end_ms)) state.partials[data.source] = item;
         break;
       }
       case 'mute':
@@ -106,7 +124,8 @@ function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gat
         break;
       case 'stopped':
         if (typeof data.saved !== 'boolean') return;
-        state.phase = 'idle';
+        setPhase('idle');
+        state.partials = { mic: null, system: null };
         state.saved = data.saved;
         break;
       default: return;
@@ -115,8 +134,17 @@ function registerInterviewRelay({ ipcMain, getMainWindow, getSettingsWindow, gat
   });
   ipcMain.handle('interview:getState', event => owned(event, getMainWindow()) ? snapshot() : null);
   ipcMain.handle('interview:command', (event, command) => {
-    const settings = getSettingsWindow();
-    if (!owned(event, getMainWindow()) || !alive(settings) || !command || command.run_id !== state.run_id || state.phase === 'idle') return false;
+    const settings = sourceWindow;
+    if (!owned(event, getMainWindow()) || !command || command.run_id !== state.run_id) return false;
+    if (command.action === 'reset') {
+      if (state.phase !== 'idle') return false;
+      retire();
+      timelineOffset = 0;
+      state = { ...state, run_id: '', conversation_id: '', session_id: '', phase: 'idle', role: 'candidate', sources: [], transcripts: [], partials: { mic: null, system: null }, muted: { mic: false, system: false }, error: '', saved: false, elapsed_ms: 0, recording_started_at: 0 };
+      publish();
+      return true;
+    }
+    if (!alive(settings) || state.phase === 'idle') return false;
     let safe;
     if (command.action === 'stop') safe = { run_id: state.run_id, action: 'stop' };
     else if (command.action === 'mute' && state.phase === 'recording' && state.sources.includes(command.source) && typeof command.muted === 'boolean') safe = { run_id: state.run_id, action: 'mute', source: command.source, muted: command.muted };

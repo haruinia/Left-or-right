@@ -30,7 +30,7 @@ function configureAudioCapture({ gatewayUrl, rendererIndex, getMainWindow, getSe
     const settings = getSettingsWindow();
     const main = getMainWindow();
     const isSettings = live(settings) && settings.webContents === contents;
-    if (permission === 'display-capture' && (!isSettings || !audioCapabilities().systemAudioSupported)) return false;
+    if (permission === 'display-capture' && !audioCapabilities().systemAudioSupported) return false;
     if (!isSettings && !(live(main) && main.webContents === contents)) return false;
     return trustedUrl(contents.getURL(), isSettings) && (!details.requestingUrl || trustedUrl(details.requestingUrl, isSettings));
   }
@@ -46,11 +46,10 @@ function configureAudioCapture({ gatewayUrl, rendererIndex, getMainWindow, getSe
     let responded = false;
     const respond = streams => { if (!responded) { responded = true; callback(streams); } };
     const trusted = () => {
-      const window = getSettingsWindow();
-      return live(window) && request.frame === window.webContents.mainFrame && trustedUrl(request.frame.url, true);
+      return [getMainWindow(), getSettingsWindow()].some(window => live(window) && request.frame === window.webContents.mainFrame && trustedUrl(request.frame.url, window === getSettingsWindow()));
     };
     try {
-      if (!audioCapabilities().systemAudioSupported || request.userGesture === false || !request.audioRequested || !trusted()) return respond(null);
+      if (!audioCapabilities().systemAudioSupported || (request.userGesture === false && request.frame !== getMainWindow()?.webContents.mainFrame) || !request.audioRequested || !trusted()) return respond(null);
       // getDisplayMedia requires video, but audio-only capture does not need a physical screen.
       if (process.platform === 'darwin') return respond({ video: request.frame, audio: 'loopback' });
       const displayId = String(getDisplay().id);

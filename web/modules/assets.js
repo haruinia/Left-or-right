@@ -8,11 +8,10 @@ import {
 import {
   importSessionRecords,
   listKnowledgeItems,
+  getKnowledgeItem,
   listTags,
   deleteKnowledgeItem,
-  markReviewed,
   exportKnowledgeBaseAsMarkdown,
-  getKBStats,
 } from "./knowledge-base.js";
 import {
   listExamRecords,
@@ -229,6 +228,14 @@ function initRecords() {
       await renderRecords();
     }
     if (viewId) navigateAssets("records", viewId);
+    const noteId = event.target.closest('[data-save-note]')?.dataset.saveNote;
+    if (noteId) {
+      const revision = dialogRevision;
+      const record = (await listSessionRecords()).find(item => item.id === noteId);
+      if (!record || revision !== dialogRevision) return;
+      const imported = await importSessionRecords([record]);
+      if (revision === dialogRevision) showNotice(imported ? `已保存 ${imported} 条历史笔记。` : '没有新的完整问答可保存。');
+    }
     const link = event.target.closest(".asset-preview-link");
     if (link && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) {
       event.preventDefault();
@@ -278,6 +285,7 @@ function renderRecordDetail(record) {
       <header>
         <button type="button" class="secondary" id="assetBack" data-asset-back>← 返回列表</button>
         <time>${new Date(record.startedAt).toLocaleString("zh-CN")}</time>
+        ${record.kind !== 'transcription' ? `<button type="button" class="secondary" data-save-note="${escapeHtml(record.id)}">保存历史笔记</button>` : ''}
       </header>
       ${record.note ? `<p class="asset-note">备注：${escapeHtml(record.note)}</p>` : ""}
       <div class="asset-turns">
@@ -298,25 +306,12 @@ function renderRecordDetail(record) {
 // ===== 知识库 =====
 const kbList = document.querySelector("#kbList");
 const kbTags = document.querySelector("#kbTags");
-const kbStats = document.querySelector("#kbStats");
 const kbSearch = document.querySelector("#kbSearch");
 let currentKBTag = "";
 let kbListEpoch = 0;
 
 function initKB() {
   document.querySelector("#kbExport")?.addEventListener("click", action(panes.kb, exportKnowledgeBaseAsMarkdown));
-  document.querySelector("#kbImport")?.addEventListener("click", action(panes.kb, async () => {
-    const revision = dialogRevision;
-    const records = await listSessionRecords();
-    if (revision !== dialogRevision) return;
-    if (!records.length) {
-      showNotice("没有可导入的会话记录。");
-      return;
-    }
-    const imported = await importSessionRecords(records);
-    if (revision === dialogRevision) showNotice(`已从会话记录导入 ${imported} 条知识。`);
-    await renderKB();
-  }));
   kbTags?.addEventListener("click", action(panes.kb, async (event) => {
     const tag = event.target.closest("[data-tag]")?.dataset.tag;
     if (tag !== undefined) {
@@ -326,12 +321,9 @@ function initKB() {
   }));
   kbSearch?.addEventListener("input", action(panes.kb, renderKBList));
   kbList?.addEventListener("click", action(panes.kb, async (event) => {
-    const reviewId = event.target.closest("[data-review]")?.dataset.review;
+    const viewId = event.target.closest('[data-view-kb]')?.dataset.viewKb;
+    if (viewId) { event.preventDefault(); navigateAssets('kb', viewId); return; }
     const deleteId = event.target.closest("[data-delete-kb]")?.dataset.deleteKb;
-    if (reviewId) {
-      await markReviewed(reviewId);
-      await renderKBStats();
-    }
     if (deleteId && await confirmAction("确定删除这条知识吗？")) {
       await deleteKnowledgeItem(deleteId);
       await renderKB();
@@ -340,13 +332,7 @@ function initKB() {
 }
 
 async function renderKB() {
-  await Promise.all([renderKBStats(), renderKBTags(), renderKBList()]);
-}
-
-async function renderKBStats() {
-  if (!kbStats) return;
-  const stats = await getKBStats();
-  kbStats.innerHTML = `<span>共 ${stats.totalItems} 条</span><span>${stats.totalTags} 个标签</span><span>已复习 ${stats.reviewedItems} 条</span>`;
+  await Promise.all([renderKBTags(), renderKBList()]);
 }
 
 async function renderKBTags() {
@@ -366,10 +352,16 @@ async function renderKBList() {
   if (!kbList) return;
   const epoch = ++kbListEpoch;
   const search = kbSearch?.value?.trim() || "";
-  const items = await listKnowledgeItems({ tag: currentKBTag || undefined, search });
+  const id = assetRoute().id;
+  const items = id ? [await getKnowledgeItem(id)].filter(Boolean) : await listKnowledgeItems({ tag: currentKBTag || undefined, search });
   if (epoch !== kbListEpoch) return;
+  if (id) {
+    const item = items.find(note => note.id === id);
+    kbList.innerHTML = item ? `<article class="asset-detail"><header><button type="button" class="secondary" data-asset-back>← 返回历史笔记</button><span>${item.answerOrigin === 'model' ? 'AI 参考回答 · 非个人经历' : '历史参考 · 未核实个人经历'}</span></header><h2>${escapeHtml(item.question)}</h2><p class="asset-note">${item.sourceSessionId ? `<a href="#assets/records/${encodeURIComponent(item.sourceSessionId)}">查看原会话</a>` : '历史问答摘录'}</p><div class="asset-answer"><p>${escapeHtml(item.answer)}</p></div></article>` : '<button type="button" class="secondary" data-asset-back>返回历史笔记</button><p class="asset-empty">笔记已不存在。</p>';
+    return;
+  }
   if (!items.length) {
-    kbList.innerHTML = '<p class="asset-empty">知识库为空。点「从会话导入」把历史会话沉淀为可检索的知识。</p>';
+    kbList.innerHTML = '<p class="asset-empty">还没有历史笔记。可在完整会话详情中保存问答。</p>';
     return;
   }
   kbList.innerHTML = items.map((item) => `
@@ -380,13 +372,9 @@ async function renderKBList() {
         </div>
         <time>${new Date(item.createdAt).toLocaleDateString("zh-CN")}</time>
       </header>
-      <p class="asset-question">${escapeHtml(item.question.slice(0, 120))}${item.question.length > 120 ? "…" : ""}</p>
-      <details class="asset-answer">
-        <summary>查看解答</summary>
-        <p>${escapeHtml(item.answer.slice(0, 500))}${item.answer.length > 500 ? "…" : ""}</p>
-      </details>
+      <a class="asset-preview-link" href="#assets/kb/${encodeURIComponent(item.id)}" data-view-kb="${escapeHtml(item.id)}">${escapeHtml(item.question.slice(0, 120))}${item.question.length > 120 ? "…" : ""}</a>
+      <p class="asset-note">${item.answerOrigin === 'model' ? 'AI 参考回答 · 非个人经历' : '历史参考 · 未核实个人经历'}</p>
       <footer>
-        <button type="button" class="secondary" data-review="${escapeHtml(item.id)}">复习 +1</button>
         <button type="button" class="secondary" data-delete-kb="${escapeHtml(item.id)}">删除</button>
       </footer>
     </article>

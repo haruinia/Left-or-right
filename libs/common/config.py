@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     memory_repo_max_repos: int = Field(default=20, ge=1)
     memory_recall_limit: int = Field(default=3, ge=1, le=20)
     memory_recall_min_score: float = Field(default=0.12, ge=0.0, le=1.0)
-    asr_provider: Literal["stub", "http", "aliyun_ws", "aliyun_nls_ws", "sherpa_onnx"] = "stub"
+    asr_provider: Literal["stub", "http", "aliyun_ws", "aliyun_nls_ws", "xfyun_rtasr", "sherpa_onnx"] = "stub"
     asr_base_url: str = ""
     asr_api_path: str = "/transcribe"
     asr_api_key: str = ""
@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     aliyun_ak_secret: str = ""
     aliyun_nls_token_endpoint: str = "https://nls-meta.cn-shanghai.aliyuncs.com/"
     aliyun_nls_token_region: str = "cn-shanghai"
+    xfyun_app_id: str = ""
+    xfyun_api_key: str = ""
+    xfyun_rtasr_endpoint: str = "wss://rtasr.xfyun.cn/v1/ws"
+    xfyun_sample_rate: Literal[16000] = 16000
+    xfyun_format: Literal["pcm"] = "pcm"
     # Local streaming ASR via sherpa-onnx (optional extra: pip install -e ".[sherpa]").
     sherpa_asr_model_dir: str = "models/sherpa-onnx-streaming-paraformer-bilingual-zh-en"
     sherpa_asr_sample_rate: int = Field(default=16000, gt=0)
@@ -173,6 +178,13 @@ class Settings(BaseSettings):
             raise ValueError("ASR_AUTH_HEADER is required when ASR_API_KEY is configured")
         if self.asr_provider == "aliyun_ws" and not self.aliyun_asr_api_key.strip():
             raise ValueError("ASR_PROVIDER=aliyun_ws requires ALIYUN_ASR_API_KEY")
+        if self.asr_provider == "xfyun_rtasr":
+            if not self.xfyun_app_id.strip() or not self.xfyun_api_key.strip():
+                raise ValueError(
+                    "ASR_PROVIDER=xfyun_rtasr requires XFYUN_APP_ID and XFYUN_API_KEY"
+                )
+            if not self.xfyun_rtasr_endpoint.strip():
+                raise ValueError("ASR_PROVIDER=xfyun_rtasr requires XFYUN_RTASR_ENDPOINT")
         if self.asr_provider == "sherpa_onnx" and not self.sherpa_asr_model_dir.strip():
             raise ValueError("ASR_PROVIDER=sherpa_onnx requires SHERPA_ASR_MODEL_DIR")
         if self.asr_provider == "aliyun_nls_ws":

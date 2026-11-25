@@ -235,12 +235,13 @@ def test_nls_uses_independent_sources_and_drains_last_finals(nls_runtime, role):
     assert all(session.settings.aliyun_asr_api_key == "" for session in owner.sessions)
 
 
-def test_nls_handshake_checks_do_not_send_audio(nls_runtime):
+def test_connection_check_sends_a_bounded_audio_probe_and_drains_transcripts(nls_runtime):
     client, _settings, _directory, owner = nls_runtime
     identifier = asr_config.list_response()["active_profile_id"]
     response = client.post(f"/api/config/asr/profiles/{identifier}/check", headers=ORIGIN).json()
-    assert response["ok"] and "尚未进行语音识别" in response["detail"]
-    assert len(owner.sessions) == 1 and owner.sessions[0].closed and not owner.sessions[0].sent
+    assert response["ok"] and "音频验证通过" in response["detail"]
+    assert len(owner.sessions) == 1 and owner.sessions[0].closed
+    assert len(owner.sessions[0].sent) == 1 and len(owner.sessions[0].sent[0]) == 1600
 
 
 @pytest.mark.parametrize("reason,expected", [
@@ -258,6 +259,24 @@ def test_nls_errors_are_actionable_without_exposing_provider_credentials(nls_run
     assert not response["ok"] and expected in response["detail"]
     assert "private-token" not in json.dumps(response)
     assert owner.sessions[0].closed
+
+
+def test_nls_http_token_rejection_maps_to_actionable_error_without_raw_credentials(nls_runtime):
+    import asyncio
+    from types import SimpleNamespace
+
+    profile, _settings = asr_config.snapshot()
+
+    async def reject():
+        raise RuntimeError('server rejected WebSocket connection: HTTP 403 private-token')
+
+    session = SimpleNamespace(error_reason='', started=False, connect=reject)
+    with pytest.raises(RuntimeError):
+        asyncio.run(transcription._connect_provider(session, profile))
+    assert session.error_reason == 'invalid token'
+    detail = transcription._provider_failure_detail(session.error_reason, profile.provider)
+    assert 'Token 无效或已过期' in detail
+    assert 'private-token' not in detail
 
 
 def test_nls_connection_failure_closes_both_sources(nls_runtime):
@@ -336,4 +355,4 @@ def test_invalid_cached_auto_token_is_retried_once_before_any_audio(nls_runtime,
     result = client.post(f"/api/config/asr/profiles/{identifier}/check", headers=ORIGIN).json()
     assert result["ok"]
     assert calls == [True, True]
-    assert owner.sessions[0].connects == 2 and owner.sessions[0].sent == []
+    assert owner.sessions[0].connects == 2 and len(owner.sessions[0].sent) == 1

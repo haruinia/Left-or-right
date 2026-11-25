@@ -4,13 +4,13 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { settingsRoute as parseRoute } from '../web/modules/settings-navigation.js';
 
-const secretIds={api_key:['asrApiKey','asrToggleKey'],app_key:['asrAppKey','asrToggleAppKey'],nls_token:['asrNlsToken','asrToggleNlsToken'],access_key_id:['asrAccessKeyId','asrToggleAccessKeyId'],access_key_secret:['asrAccessKeySecret','asrToggleAccessKeySecret']};
+const secretIds={api_key:['asrApiKey','asrToggleKey'],app_id:['asrAppId','asrToggleAppId'],app_key:['asrAppKey','asrToggleAppKey'],nls_token:['asrNlsToken','asrToggleNlsToken'],access_key_id:['asrAccessKeyId','asrToggleAccessKeyId'],access_key_secret:['asrAccessKeySecret','asrToggleAccessKeySecret']};
 function fixture(provider='aliyun_ws') {
-  const ids=['asrForm','asrName','asrEndpoint','asrProvider','asrAuthMode','asrAuthModeLabel','asrModel','asrModelLabel','asrLanguageHints','asrLanguageHintsLabel','asrVocabulary','asrFormTitle','asrCheck','asrProfileCards','asrProfileState','asrNew','asrCancel','asrRefresh','asrSave'];
+  const ids=['asrForm','asrName','asrEndpoint','asrProvider','asrAuthMode','asrAuthModeLabel','asrModel','asrModelLabel','asrLanguageHints','asrLanguageHintsLabel','asrVocabulary','asrVocabularyLabel','asrFormTitle','asrCheck','asrProfileCards','asrProfileState','asrNew','asrCancel','asrRefresh','asrSave'];
   for(const [input,toggle] of Object.values(secretIds))ids.push(input,toggle,input+'Label',input+'Field');
   const node=()=>({value:'',textContent:'',type:'password',disabled:false,hidden:false,children:[],attributes:{},dataset:{},listeners:{},addEventListener(event,callback){this.listeners[event]=callback;},setAttribute(name,value){this.attributes[name]=value;},replaceChildren(...children){this.children=children;},append(...children){this.children.push(...children);},focus(){},select(){}});
   const elements=new Map(ids.map(id=>['#'+id,node()]));
-  const selected={id:'primary',name:'语音服务',provider,endpoint:provider==='aliyun_ws'?'wss://asr.example.test/inference':'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1',model:provider==='aliyun_ws'?'asr-model':'',auth_mode:'token',language_hints:'zh,en',vocabulary_id:'',api_key_configured:provider==='aliyun_ws',app_key_configured:provider==='aliyun_nls_ws',nls_token_configured:provider==='aliyun_nls_ws',access_key_id_configured:false,access_key_secret_configured:false,configured:true};
+  const selected={id:'primary',name:'语音服务',provider,endpoint:provider==='aliyun_ws'?'wss://asr.example.test/inference':provider==='xfyun_rtasr'?'wss://rtasr.xfyun.cn/v1/ws':'wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1',model:provider==='aliyun_ws'?'asr-model':'',auth_mode:'token',language_hints:'zh,en',vocabulary_id:'',api_key_configured:provider!=='aliyun_nls_ws',app_id_configured:provider==='xfyun_rtasr',app_key_configured:provider==='aliyun_nls_ws',nls_token_configured:provider==='aliyun_nls_ws',access_key_id_configured:false,access_key_secret_configured:false,configured:true};
   const store={active_profile_id:'primary',profiles:[selected]},calls=[],events=[],listeners={};
   let context;
   const sandbox={document:{querySelector:selector=>elements.get(selector),createElement:()=>node()},structuredClone,settingsRoute:()=>parseRoute(sandbox.location.hash),navigateSettings:value=>{sandbox.location.hash=value;vm.runInContext('syncEditorRoute()',context);},returnToConnections:()=>{sandbox.location.hash='#models/asr';vm.runInContext('syncEditorRoute()',context);},confirmSettingsAction:async()=>true,location:{hash:'#models'},Event:class{constructor(type){this.type=type;}},window:{addEventListener(name,fn){listeners[name]=fn;},dispatchEvent(event){events.push(event.type);}},asrRequest:async(path,options={})=>{
@@ -122,6 +122,32 @@ test('new provider changes clear credentials and switch the protocol-specific de
   const f=fixture();await f.open('new');f.input('asrAppKey','not-for-bailian');f.input('asrNlsToken','private-token');f.change('asrProvider','aliyun_ws');
   assert.equal(f.elements.get('#asrAppKey').value,'');assert.equal(f.elements.get('#asrNlsToken').value,'');assert.equal(f.elements.get('#asrApiKey').value,'');
   assert.match(f.elements.get('#asrEndpoint').value,/dashscope/);assert.equal(f.elements.get('#asrModelLabel').hidden,false);assert.equal(f.elements.get('#asrModel').required,true);
+});
+
+test('XFYUN fields save defaults and reveal private APPID through local secret API',async()=>{
+  const f=fixture('xfyun_rtasr');await f.open();
+  assert.equal(f.elements.get('#asrAppId').value,'************');assert.equal(f.elements.get('#asrApiKey').value,'************');
+  assert.equal(f.elements.get('#asrAppKeyField').hidden,true);assert.equal(f.elements.get('#asrAuthMode').hidden,true);
+  assert.equal(f.elements.get('#asrModelLabel').hidden,true);assert.equal(f.elements.get('#asrLanguageHintsLabel').hidden,true);
+  assert.equal(f.elements.get('#asrVocabularyLabel').hidden,true);assert.equal(f.elements.get('#asrVocabulary').disabled,true);
+  await f.run("reveal('app_id')");assert.equal(f.elements.get('#asrAppId').value,'test-saved-app_id');
+  assert.equal(f.calls.at(-1).path,'/api/config/asr/profiles/primary/secrets/app_id');
+  f.input('asrAppId','replacement-app');await save(f);
+  assert.deepEqual(JSON.parse(JSON.stringify(saved(f).body)),{id:'primary',name:'语音服务',provider:'xfyun_rtasr',endpoint:'wss://rtasr.xfyun.cn/v1/ws',vocabulary_id:'',app_id:'replacement-app'});
+  assert.ok(JSON.stringify(f.elements.get('#asrProfileCards').children).includes('讯飞实时转写'));
+  assert.ok(!JSON.stringify(f.elements.get('#asrProfileCards').children).includes('replacement-app'));
+});
+
+test('switching to XFYUN clears NLS secrets and requires both new credentials',async()=>{
+  const f=fixture();await f.open('new');f.input('asrAppKey','private-nls');f.input('asrNlsToken','private-token');
+  f.change('asrProvider','xfyun_rtasr');f.input('asrName','讯飞测试');
+  assert.equal(f.elements.get('#asrAppKey').value,'');assert.equal(f.elements.get('#asrNlsToken').value,'');
+  assert.match(f.elements.get('#asrEndpoint').value,/rtasr\.xfyun\.cn/);
+  await save(f);assert.equal(f.calls.length,1);assert.match(f.elements.get('#asrProfileState').textContent,/APPID/);
+  f.input('asrAppId','test-app');await save(f);assert.match(f.elements.get('#asrProfileState').textContent,/API Key/);
+  f.input('asrApiKey','test-key');await save(f);
+  assert.equal(saved(f).body.provider,'xfyun_rtasr');assert.equal(saved(f).body.app_id,'test-app');assert.equal(saved(f).body.api_key,'test-key');
+  assert.equal(Object.hasOwn(saved(f).body,'model'),false);assert.equal(Object.hasOwn(saved(f).body,'auth_mode'),false);
 });
 
 test('privacy hide and navigation mask all saved secrets and invalidate their pending reveals',async()=>{

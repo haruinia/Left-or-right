@@ -10,7 +10,8 @@ function fixture({ platform = 'darwin', release = '25.3.0', electron = '45.2.1',
   let destroyed = false;
   const frame = { url: `${gatewayUrl}/settings#interview` };
   const contents = { getURL: () => frame.url, mainFrame: frame };
-  const mainContents = { getURL: () => 'file:///app/web/index.html' };
+  const mainFrame = {url:'file:///app/web/index.html'};
+  const mainContents = { getURL: () => mainFrame.url, mainFrame };
   const main = { isDestroyed: () => false, webContents: mainContents };
   const settings = { isDestroyed: () => destroyed, webContents: contents };
   let getSources = async options => { calls.push(options); return [{ id: 'wrong', display_id: '1' }, { id: 'right', display_id: '2' }]; };
@@ -25,7 +26,7 @@ function fixture({ platform = 'darwin', release = '25.3.0', electron = '45.2.1',
   vm.runInNewContext(source, context);
   context.module.exports.configureAudioCapture({ gatewayUrl, rendererIndex: '/app/web/index.html', getMainWindow: () => main, getSettingsWindow: () => settings, getDisplay: () => ({ id: 2 }) });
   const capture = async overrides => { let result; await handlers.display({ frame, audioRequested: true, userGesture: true, ...overrides }, value => { result = value; }); return result; };
-  return { api: context.module.exports, handlers, contents, mainContents, frame, calls, capture, destroy: () => { destroyed = true; }, sources: fn => { getSources = fn; } };
+  return { api: context.module.exports, handlers, contents, mainContents, mainFrame, frame, calls, capture, destroy: () => { destroyed = true; }, sources: fn => { getSources = fn; } };
 }
 
 test('system audio capability requires a supported native runtime and operating system', () => {
@@ -40,7 +41,7 @@ test('only owned trusted main-frame pages receive microphone permission', () => 
   const f = fixture();
   assert.equal(f.handlers.check(f.contents, 'media', 'http://127.0.0.1:9958', {}), true);
   assert.equal(f.handlers.check(f.contents, 'display-capture', 'http://127.0.0.1:9958', {}), true);
-  assert.equal(f.handlers.check(f.mainContents, 'display-capture', 'file://', {}), false);
+  assert.equal(f.handlers.check(f.mainContents, 'display-capture', 'file://', {}), true);
   assert.equal(f.handlers.check(f.contents, 'media', 'http://127.0.0.1:9958', {mediaType:'video'}), false);
   assert.equal(f.handlers.check(f.mainContents, 'media', 'file://', {}), true);
   assert.equal(f.handlers.check(f.contents, 'media', 'https://external.test', {}), false);
@@ -102,4 +103,11 @@ test('source failure or an unavailable display is denied without leaking source 
   assert.equal(await f.capture(),null);
   f.sources(async()=>[{id:'wrong',display_id:'1'}]);
   assert.equal(await f.capture(),null);
+});
+
+test('only the owned main frame can capture audio from the inline recording shortcut',async()=>{
+ const f=fixture();
+ const result=await f.capture({frame:f.mainFrame,userGesture:false});
+ assert.equal(result.video,f.mainFrame);assert.equal(result.audio,'loopback');
+ assert.equal(await f.capture({frame:{url:f.mainFrame.url},userGesture:false}),null);
 });

@@ -10,12 +10,17 @@ const COMPACT = { width: 560, height: 76 };
 // 560 时卡片内宽只有 460，长代码行仍然折；对齐 Gank 的实际阅读宽度。
 const EXPANDED = { width: 780, height: 760 };
 const LAYOUTS = { narrow: {width: 560, height: 720}, standard: EXPANDED, wide: {width: 1000, height: 680} };
+// 转录 + 回答两栏的最小可用宽度；用户手动调整后按调整值记住。
+const INTERVIEW = { width: 900, height: 700 };
 
 let compact = false;
 let layout = 'standard';
 let expandedSize = {...EXPANDED};
+let interviewSize = {...INTERVIEW};
 let onDisplayChange = null;
 let displayRevision = 0;
+let displaySaved = true;
+let readingFontSize = 18;
 let theme = 'light';
 let surface = {answer:false, shotCount:0, settingsOpen:false, notice:false, interview:false, transcriptOpen:false};
 
@@ -38,9 +43,15 @@ function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) 
   layout = config?.surfaceVersion === 1 && Object.hasOwn(LAYOUTS, config?.windowLayout) ? config.windowLayout : 'narrow';
   theme = ['light','dark','transparent-black','transparent-white'].includes(config?.panelTheme) ? config.panelTheme : 'light';
   opacity = Number.isFinite(config?.panelOpacity) ? config.panelOpacity : .9;
+  readingFontSize = [16,18,20,22,24].includes(config?.readingFontSize) ? config.readingFontSize : 18;
+  zoomFactor = Number.isFinite(config?.zoomFactor) ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(config.zoomFactor * 10) / 10)) : 1;
   expandedSize = {
     width: config?.surfaceVersion === 1 && Number.isFinite(saved?.width) ? Math.max(320, saved.width) : LAYOUTS[layout].width,
     height: config?.surfaceVersion === 1 && Number.isFinite(saved?.height) ? Math.max(300, saved.height) : LAYOUTS[layout].height,
+  };
+  interviewSize = {
+    width: Number.isFinite(saved?.interviewWidth) ? Math.max(720, saved.interviewWidth) : INTERVIEW.width,
+    height: Number.isFinite(saved?.interviewHeight) ? Math.max(480, saved.interviewHeight) : INTERVIEW.height,
   };
   onDisplayChange = onDisplay;
   const win = new BrowserWindow({
@@ -73,9 +84,16 @@ function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) 
       backgroundThrottling: false,
     },
   });
+  const endTextEditing = () => setTextEditing(win, false, {restore: false});
+  win.on('blur', endTextEditing);
+  win.on('hide', endTextEditing);
+  win.on('closed', endTextEditing);
+  win.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) endTextEditing(); });
+  win.webContents.on('did-navigate', endTextEditing);
+  win.webContents.on('render-process-gone', endTextEditing);
   const target = startupDisplay(config, screen.getAllDisplays(), screen.getPrimaryDisplay());
   if (screen.getDisplayMatching(win.getBounds()).id !== target.id) moveToDisplay(win, target);
-  fitWindow(win, COMPACT);
+  fitSurface(win);
   clampToArea(win);
   setOpacity(win, opacity);
 
@@ -98,6 +116,7 @@ function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) 
   // A window that is invisible to screen capture must never navigate away from the
   // bundled UI: anything else (role join links included) opens in a real browser.
   win.webContents.on('will-navigate', (event, url) => {
+    endTextEditing();
     if (url !== win.webContents.getURL()) {
       event.preventDefault();
       shell.openExternal(url);
@@ -108,6 +127,9 @@ function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) 
     return { action: 'deny' };
   });
 
+  win.webContents.on('did-finish-load', () => {
+    if (!win.isDestroyed()) win.webContents.setZoomFactor(zoomFactor);
+  });
   win.loadFile(RENDERER_INDEX);
   win.once('ready-to-show', () => {
     if (win.isDestroyed() || !canShow()) return;
@@ -119,9 +141,7 @@ function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) 
     setClickThrough(win, true);
     win.showInactive();
   });
-  // 松开 Command 由 command-key.js 的系统级监听负责。这里保留一个
-  // 窗口已获得焦点时的兜底：即使原生监听暂不可用，Command 的 keyUp
-  // 仍能恢复穿透。
+  // 两种工作面松开修饰键都立即恢复穿透。
   win.webContents.on('before-input-event', (_event, input) => {
     if (!interact || input.type !== 'keyUp') return;
     if (
@@ -153,8 +173,9 @@ function createWindow(config, { onMove, onDisplay, canShow = () => true } = {}) 
       if (win.isDestroyed()) return;
       const { x, y, width, height } = win.getBounds();
       // 收起尺寸不覆盖阅读尺寸；重启仍恢复最后的阅读窗口。
-      if (!compact && !surface.settingsOpen && (!surface.interview || surface.answer)) expandedSize = {width,height};
-      onMove({ x, y, ...expandedSize });
+      if (!compact && !surface.settingsOpen && surface.interview) interviewSize = {width,height};
+      else if (!compact && !surface.settingsOpen) expandedSize = {width,height};
+      onMove({ x, y, ...expandedSize, interviewWidth: interviewSize.width, interviewHeight: interviewSize.height });
     }, 400);
   };
   win.on('move', persistBounds);
@@ -171,14 +192,15 @@ const OPACITY_STEP = 0.1;
 let opacity = .9;
 
 function getDisplayState(win) {
-  return {revision:displayRevision, opacity, layout, compact, theme, ...surface, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
+  return {revision:displayRevision, saved:displaySaved, opacity, layout, compact, theme, readingFontSize, zoomFactor, ...surface, ...(win && !win.isDestroyed() ? win.getBounds() : {})};
 }
 
 function notifyDisplay(win) {
   displayRevision += 1;
   const display = getDisplayState(win);
+  displaySaved = onDisplayChange?.({panelOpacity: opacity, windowLayout: layout, panelTheme:theme, readingFontSize, zoomFactor, surfaceVersion:1}, display) !== false;
+  display.saved = displaySaved;
   if (win && !win.isDestroyed()) win.webContents.send('cockpit:display', display);
-  onDisplayChange?.({panelOpacity: opacity, windowLayout: layout, panelTheme:theme, surfaceVersion:1});
   return display;
 }
 
@@ -203,12 +225,21 @@ const ZOOM_STEP = 0.1;
 let zoomFactor = 1;
 
 function setZoom(win, value) {
+  if (!Number.isFinite(value)) return zoomFactor;
   zoomFactor = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(value * 10) / 10));
   if (win && !win.isDestroyed()) {
     win.webContents.setZoomFactor(zoomFactor);
-    if (!compact && surface.interview && !surface.answer) fitSurface(win);
+    fitSurface(win);
   }
+  notifyDisplay(win);
   return zoomFactor;
+}
+
+function setReadingFontSize(win, value) {
+  if (![16,18,20,22,24].includes(value)) return readingFontSize;
+  readingFontSize = value;
+  notifyDisplay(win);
+  return readingFontSize;
 }
 
 function changeZoom(win, delta) {
@@ -251,7 +282,10 @@ function moveWindow(win, dx, dy) {
 
 function toggleCompact(win) {
   if (!win || win.isDestroyed()) return compact;
-  if (!compact && !surface.settingsOpen && (!surface.interview || surface.answer)) {
+  if (!compact && !surface.settingsOpen && surface.interview) {
+    const {width, height} = win.getBounds();
+    interviewSize = {width, height};
+  } else if (!compact && !surface.settingsOpen) {
     const {width, height} = win.getBounds();
     expandedSize = {width, height};
   }
@@ -282,10 +316,11 @@ function setLayout(win, value) {
 
 function fitSurface(win) {
   const additions = (surface.shotCount ? 84 : 0) + (surface.notice ? 26 : 0);
-  const size = compact ? {...COMPACT, height:COMPACT.height + additions}
-    : surface.interview && !surface.answer ? {...COMPACT, height:COMPACT.height + 74 + (surface.transcriptOpen ? 190 : 0) + additions}
+  // 面试是独立工作面：左转录右回答，需要真正的横向空间，而不是把一个窄窗拉高。
+  const compactScale = Math.max(1, zoomFactor);
+  const size = compact ? {width:COMPACT.width * compactScale, height:(COMPACT.height + additions) * compactScale}
+    : surface.interview ? {...interviewSize}
     : {...expandedSize};
-  if (!compact && surface.interview && !surface.answer) size.height *= zoomFactor;
   if(surface.settingsOpen) size.height = Math.max(size.height, 650);
   fitWindow(win, size);
   clampToArea(win);
@@ -294,6 +329,7 @@ function fitSurface(win) {
 function setSurface(win, patch = {}) {
   if(!win || win.isDestroyed()) return getDisplayState(win);
   const interview = typeof patch.interview === 'boolean' ? patch.interview : surface.interview;
+  if (surface.interview && !interview) setTextEditing(win, false, {restore: false});
   if(patch.answer === false && !interview) compact = true;
   else if((patch.answer === true && !surface.answer) || (interview && !surface.interview)) compact = false;
   if(typeof patch.answer === 'boolean') surface.answer = patch.answer;
@@ -313,13 +349,16 @@ function setTheme(win, value) {
 
 function showWindow(win) {
   if (!win || win.isDestroyed()) return;
+  setTextEditing(win, false, {restore: false});
   if (!win.isVisible()) win.showInactive();
   setOverlayFocusable(win, false);
   setClickThrough(win, true);
 }
 
 function hideWindow(win) {
-  if (!win || win.isDestroyed() || !win.isVisible()) return;
+  if (!win || win.isDestroyed()) return;
+  setTextEditing(win, false, {restore: false});
+  if (!win.isVisible()) return;
   setInteractive(win, false);
   win.hide();
 }
@@ -331,6 +370,7 @@ function toggleVisible(win) {
 }
 
 let interact = false;
+let textEditing = false;
 let armedAt = 0;
 let previousPid = '';
 
@@ -383,13 +423,44 @@ function isInteractive() {
   return interact;
 }
 
+function isTextEditing() {
+  return textEditing;
+}
+
+function releaseKeyboardFocus(win, restore) {
+  const hadFocus = typeof win.isFocused === 'function' && win.isFocused();
+  setOverlayFocusable(win, false);
+  const pid = previousPid;
+  previousPid = '';
+  const own = process.platform === 'win32' ? nativeWindowId(win) : String(process.pid);
+  if (restore && hadFocus && pid && pid !== own) activatePid(pid, win);
+}
+
+function setTextEditing(win, on, { restore = true } = {}) {
+  if (typeof on !== 'boolean') return false;
+  if (!win || win.isDestroyed()) {
+    if (!on) textEditing = false;
+    return false;
+  }
+  if (on && (!interact || !win.isVisible() || !win.isFocused())) return false;
+  if (textEditing === on) return textEditing;
+  textEditing = on;
+  if (!interact) {
+    setClickThrough(win, true);
+    if (textEditing) setOverlayFocusable(win, true);
+    else releaseKeyboardFocus(win, restore);
+  }
+  win.webContents.send('cockpit:textEditing', textEditing);
+  return textEditing;
+}
+
 function setInteractive(win, on, { restore = true } = {}) {
   if (!win || win.isDestroyed()) return interact;
   const next = Boolean(on);
   if (interact === next) {
     if (!next) {
       setClickThrough(win, true);
-      setOverlayFocusable(win, false);
+      setOverlayFocusable(win, textEditing);
       win.webContents.send('cockpit:armed', false);
     }
     return interact;
@@ -402,20 +473,13 @@ function setInteractive(win, on, { restore = true } = {}) {
     }
     armedAt = Date.now();
     if (!win.isVisible()) win.showInactive();
-    // 不主动 focus：按下 Command 只解除鼠标穿透，用户仍可继续在题目
-    // 窗口里操作；真正点击悬浮层时才由 macOS 把焦点交给它。
     setOverlayFocusable(win, true);
     setClickThrough(win, false);
   } else {
-    const hadFocus = typeof win.isFocused === 'function' && win.isFocused();
     setClickThrough(win, true);
-    setOverlayFocusable(win, false);
-    const pid = previousPid;
-    previousPid = '';
-    // 只有悬浮层真的取得过焦点时才把焦点还给原来的应用。单纯按住
-    // Command 不会打断用户正在输入的题目。
-    const own = process.platform === 'win32' ? nativeWindowId(win) : String(process.pid);
-    if (restore && hadFocus && pid && pid !== own) activatePid(pid, win);
+    // A focused editor can receive keyboard input while every mouse event passes through.
+    if (textEditing) setOverlayFocusable(win, true);
+    else releaseKeyboardFocus(win, restore);
   }
   win.webContents.send('cockpit:armed', interact);
   return interact;
@@ -438,6 +502,7 @@ module.exports = {
   setOpacity,
   changeOpacity,
   setZoom,
+  setReadingFontSize,
   changeZoom,
   resetZoom,
   toggleCompact,
@@ -446,8 +511,10 @@ module.exports = {
   hideWindow,
   setClickThrough,
   setInteractive,
+  setTextEditing,
   beginHoldInteract,
   isInteractive,
+  isTextEditing,
   RENDERER_INDEX,
   COMPACT,
   EXPANDED,

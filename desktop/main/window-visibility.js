@@ -11,7 +11,7 @@ function createWindowVisibility({ getMainWindow, getWindows, setInteractive }) {
   const owned = () => getWindows().filter(alive);
   const applyInteraction = () => {
     const main = getMainWindow();
-    setInteractive(Boolean(held && !capturing && alive(main) && main.isVisible()));
+    setInteractive(Boolean(held && !capturing && !privacyHidden && alive(main) && main.isVisible()));
   };
   const show = windows => windows.filter(alive).forEach(window => window.showInactive());
   const hide = window => { window.webContents?.send('app:privacy-hidden'); window.hide(); };
@@ -30,8 +30,10 @@ function createWindowVisibility({ getMainWindow, getWindows, setInteractive }) {
       if (capturing || privacyHidden) return;
       setInteractive(false);
       show([getMainWindow()]);
+      applyInteraction();
     },
     modifierChanged(value) { held = Boolean(value); applyInteraction(); },
+    refreshInteraction: applyInteraction,
     toggle() {
       if (capturing || !privacyHidden) hideAll();
       else {

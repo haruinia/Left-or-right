@@ -7,6 +7,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,7 +78,7 @@ from services.chat_service import iter_chat_deltas
 from services.chat_service.service import build_chat_messages
 from services.gateway.learning_assets import router as learning_assets_router
 from services.gateway.transcription import router as transcription_router
-from services.gateway import model_config
+from services.gateway import model_config, knowledge as project_knowledge
 from services.exam_service import solve_exam_screenshot
 from services.memory_service import (
     delete_candidate_memories,
@@ -335,6 +336,7 @@ async def lifespan(fastapi_app: FastAPI):
 app = FastAPI(title="左右", version="0.1.0", lifespan=lifespan)
 app.include_router(learning_assets_router)
 app.include_router(transcription_router)
+app.include_router(project_knowledge.router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["null", "file://"],  # Electron loadFile 的本地页面来源
@@ -968,17 +970,30 @@ def get_ui_settings() -> UiSettings:
     return _read_ui_settings()
 
 
+_UI_SETTINGS_LOCK = threading.RLock()
+
+
 @app.post("/api/ui/settings", response_model=UiSettings)
 def save_ui_settings(payload: UiSettings) -> UiSettings:
     try:
         payload.hotkeys.validate_unique()
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    path = _ui_settings_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # 只迁移旧版默认值；用户在新版显式保存旧组合键时，读取不能再把它改掉。
-    stored = {**payload.model_dump(), "_hotkeys_version": 2}
-    path.write_text(json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+    with _UI_SETTINGS_LOCK:
+        path = _ui_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stored = {**payload.model_dump(), "_hotkeys_version": 2}
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, prefix=".ui-settings-", delete=False) as output:
+                temporary = Path(output.name)
+                json.dump(stored, output, ensure_ascii=False, indent=2)
+                output.flush()
+                os.fsync(output.fileno())
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     return payload
 
 
@@ -986,14 +1001,26 @@ def save_ui_settings(payload: UiSettings) -> UiSettings:
 def patch_ui_settings(payload: dict):
     if set(payload) - set(UiSettings.model_fields):
         raise HTTPException(422, "未知设置项")
-    current = _read_ui_settings().model_dump()
-    if isinstance(payload.get("hotkeys"), dict):
-        payload = {**payload, "hotkeys": {**current["hotkeys"], **payload["hotkeys"]}}
-    try:
-        settings = UiSettings.model_validate({**current, **payload})
-    except ValueError as exc:
-        raise HTTPException(422, "设置值无效") from exc
-    return save_ui_settings(settings)
+    with _UI_SETTINGS_LOCK:
+        current = _read_ui_settings().model_dump()
+        if isinstance(payload.get("hotkeys"), dict):
+            payload = {**payload, "hotkeys": {**current["hotkeys"], **payload["hotkeys"]}}
+        try:
+            settings = UiSettings.model_validate({**current, **payload})
+        except ValueError as exc:
+            raise HTTPException(422, "设置值无效") from exc
+        return save_ui_settings(settings)
+
+
+def _remove_knowledge_selection(project_id: str) -> None:
+    with _UI_SETTINGS_LOCK:
+        settings = _read_ui_settings()
+        if project_id in settings.interview_knowledge_project_ids:
+            settings.interview_knowledge_project_ids.remove(project_id)
+            save_ui_settings(settings)
+
+
+project_knowledge.on_project_deleted = _remove_knowledge_selection
 
 
 @app.get("/styles.css")

@@ -1,6 +1,8 @@
 'use strict';
 
-const { app, ipcMain, Menu, shell, nativeTheme, systemPreferences, screen, BrowserWindow } = require('electron');
+const { app, ipcMain, Menu, shell, dialog, nativeTheme, systemPreferences, screen, BrowserWindow } = require('electron');
+const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { loadConfig, saveConfig } = require('./config');
 const {
   createWindow,
@@ -11,12 +13,16 @@ const {
   changeZoom,
   resetZoom,
   setOpacity,
+  setZoom,
+  setReadingFontSize,
   setLayout,
   getDisplayState,
   setSurface,
   setTheme,
   setInteractive,
+  setTextEditing,
   isInteractive,
+  isTextEditing,
 } = require('./window');
 const { registerHotkeys, unregisterHotkeys, BINDINGS, bindingsWith, formatAccelerator } = require('./hotkeys');
 const { captureScreenshot } = require('./capture');
@@ -28,8 +34,11 @@ const { openSettingsWindow, getSettingsWindow } = require('./settings-window');
 const { audioCapabilities, configureAudioCapture } = require('./audio-capture');
 const { createWindowVisibility } = require('./window-visibility');
 const { registerInterviewRelay } = require('./interview-relay');
+const { registerInterviewSocket } = require('./interview-socket');
+const { registerKnowledgeImport } = require('./knowledge-import');
 
 app.setName('左右');
+app.userAgentFallback = app.userAgentFallback.replace(/[^\x20-\x7e]+/g, 'LeftOrRight');
 const config = loadConfig();
 let win = null;
 let failedHotkeys = [];
@@ -68,6 +77,7 @@ function screenAccessStatus() {
 const STEP = 24;
 
 function toggleAppVisibility() {
+  setTextEditing(win, false, {restore: false});
   if (screenBusy) cancelSelection();
   visibility.toggle();
 }
@@ -99,6 +109,7 @@ function hotkeyHandlers() {
     // 全屏截图不该弹框选十字：screencapture 不带 -i 直接抓当前显示器的完整画面。
     captureScreen: () => attachScreenshot({ interactive: false }),
     sendChat: () => sendChat(),
+    toggleInterviewView: () => sendInterviewControl('view'),
     toggleInterview: () => sendInterviewControl('toggle'),
     muteInterviewMic: () => sendInterviewControl('mic'),
     muteInterviewSystem: () => sendInterviewControl('system'),
@@ -169,6 +180,7 @@ function sleep(ms) {
 }
 
 async function hideWindowForCapture() {
+  setTextEditing(win, false, {restore: false});
   const snapshot = visibility.beginCapture();
   if (snapshot.windows.length) await sleep(160);
   return snapshot;
@@ -210,23 +222,19 @@ async function attachScreenshot({ interactive }) {
   } catch (error) {
     if (!canCapture()) return;
     const raw = String(error.message || error);
-    // Unpackaged builds often report 'not-determined' even when the host app is
-    // authorized, so only 'denied' is trusted on its own; the screencapture stderr
-    // message is the reliable missing-permission signal.
-    const permissionDenied = process.platform === 'darwin' &&
-      (raw.includes('could not create image') || screenAccessStatus() === 'denied');
+    const permissionDenied = process.platform === 'darwin' && screenAccessStatus() === 'denied';
     if (permissionDenied) {
       if (!permissionPaneOpened) {
         permissionPaneOpened = true;
         openScreenRecordingSettings();
       }
       sendCaptureError(
-        '缺少屏幕录制权限：已打开「系统设置 > 隐私与安全性 > 屏幕录制」，'
-        + '请给启动左右的应用（终端 / Qoder 等；打包安装后是「左右」本身）打开开关，再按一次截图。', captureId
+        '当前版本的屏幕录制权限未生效。已打开「系统设置 > 隐私与安全性 > 屏幕与系统音频录制」，'
+        + '请启用正式版本「左右」（/Applications/左右.app），然后完全退出并重新打开应用。', captureId
       );
       return;
     }
-    sendCaptureError(raw, captureId);
+    sendCaptureError(raw.includes('could not create image') ? '截图未能生成，请确认应用所在显示器后重试。' : raw, captureId);
   } finally {
     restoreWindow(wasVisible);
     screenBusy = false;
@@ -252,8 +260,30 @@ function captureOptions() {
   return {mode:config.screenshotMode || 'full',displayId:String(runningDisplay().id),displays:displays.map((d,i)=>({id:String(d.id),label:d.label || `显示器 ${i+1}`,width:d.bounds.width,height:d.bounds.height,scaleFactor:d.scaleFactor}))};
 }
 
+function persistDisplay(patch, display) {
+  Object.assign(config, patch);
+  const saved = saveConfig(patch);
+  const settings = getSettingsWindow();
+  if (settings && !settings.isDestroyed()) {
+    settings.webContents.setZoomFactor(display.zoomFactor);
+    settings.webContents.send('cockpit:display', {...display, saved});
+  }
+  return saved;
+}
+
+function trustedSettingsFrame(event) {
+  const settings = getSettingsWindow();
+  if (!settings || settings.isDestroyed() || event.sender !== settings.webContents || event.senderFrame !== settings.webContents.mainFrame) return false;
+  try {
+    const url = new URL(settings.webContents.getURL());
+    return url.origin === new URL(config.gatewayUrl).origin && ['/settings', '/settings.html'].includes(url.pathname);
+  } catch { return false; }
+}
+
 function registerIpc() {
-  registerInterviewRelay({ ipcMain, getMainWindow: () => win, getSettingsWindow, gatewayUrl: config.gatewayUrl, visibility });
+  const { RENDERER_INDEX } = require('./window');
+  registerInterviewRelay({ ipcMain, getMainWindow: () => win, getSettingsWindow, gatewayUrl: config.gatewayUrl, visibility, rendererIndex: RENDERER_INDEX });
+  registerInterviewSocket({ ipcMain, getMainWindow: () => win, gatewayUrl: config.gatewayUrl, rendererIndex: RENDERER_INDEX });
   ipcMain.handle('cockpit:getConfig', () => ({
     gatewayUrl: config.gatewayUrl,
     gatewayApiKey: config.gatewayApiKey,
@@ -261,7 +291,13 @@ function registerIpc() {
     display: getDisplayState(win),
     captureOptions: captureOptions(),
     armed: isInteractive(),
+    textEditing: isTextEditing(),
   }));
+  ipcMain.handle('cockpit:setTextEditing', (event, value) => {
+    if (typeof value !== 'boolean' || !win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame
+        || win.webContents.getURL().split(/[?#]/)[0] !== pathToFileURL(RENDERER_INDEX).href) return false;
+    return setTextEditing(win, value);
+  });
   ipcMain.on('cockpit:getConfigSync', (event) => {
     event.returnValue = { gatewayUrl: config.gatewayUrl, gatewayApiKey: config.gatewayApiKey, audioCapture: audioCapabilities() };
   });
@@ -271,16 +307,33 @@ function registerIpc() {
     if (Number.isFinite(patch.opacity)) setOpacity(win, patch.opacity);
     if (typeof patch.theme === 'string') setTheme(win, patch.theme);
     if (typeof patch.layout === 'string') setLayout(win, patch.layout);
+    if (Number.isFinite(patch.zoomFactor)) setZoom(win, patch.zoomFactor);
+    if (Number.isFinite(patch.readingFontSize)) setReadingFontSize(win, patch.readingFontSize);
     if (typeof patch.compact === 'boolean' && patch.compact !== getDisplayState(win).compact) toggleCompact(win);
     const display = getDisplayState(win);
     const {x, y, width, height} = display;
-    const saved = saveConfig({panelOpacity: display.opacity, windowLayout: display.layout, panelTheme:display.theme, surfaceVersion:1,
-      ...(!display.compact && Number.isFinite(x) ? {windowBounds: {x, y, width, height}} : {})});
+    const saved = saveConfig({panelOpacity: display.opacity, windowLayout: display.layout, panelTheme:display.theme, readingFontSize:display.readingFontSize, zoomFactor:display.zoomFactor, surfaceVersion:1,
+      ...(!display.compact && Number.isFinite(x) ? {windowBounds: {...config.windowBounds, x, y, ...(display.interview ? {interviewWidth:width, interviewHeight:height} : {width, height})}} : {})});
     return {...display, saved};
+  });
+  ipcMain.handle('settings:getDisplay', event => {
+    if (!trustedSettingsFrame(event)) throw new Error('Display settings require the app settings window');
+    return getDisplayState(win);
+  });
+  ipcMain.handle('settings:setDisplay', (event, patch) => {
+    if (!trustedSettingsFrame(event)) throw new Error('Display settings require the app settings window');
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some(key => !['readingFontSize', 'zoomFactor'].includes(key))) throw new Error('Invalid display settings');
+    if (Object.hasOwn(patch, 'readingFontSize') && ![16,18,20,22,24].includes(patch.readingFontSize)) throw new Error('Invalid reading font size');
+    if (Object.hasOwn(patch, 'zoomFactor') && (!Number.isFinite(patch.zoomFactor) || patch.zoomFactor < .7 || patch.zoomFactor > 1.6)) throw new Error('Invalid interface scale');
+    if (Object.hasOwn(patch, 'readingFontSize')) setReadingFontSize(win, patch.readingFontSize);
+    if (Object.hasOwn(patch, 'zoomFactor')) setZoom(win, patch.zoomFactor);
+    return getDisplayState(win);
   });
   ipcMain.handle('cockpit:setSurface', (_event, patch) => {
     if(!patch || typeof patch !== 'object') throw new Error('Invalid surface state');
-    return setSurface(win, patch);
+    const display = setSurface(win, patch);
+    visibility.refreshInteraction();
+    return display;
   });
   ipcMain.handle('cockpit:setCaptureOptions', (_event, patch) => {
     if(!patch || typeof patch !== 'object') throw new Error('Invalid capture settings');
@@ -292,6 +345,10 @@ function registerIpc() {
     config.windowDisplayId = options.displayId;
     const saved = saveConfig({screenshotMode:options.mode,windowDisplayId:options.displayId});
     return {...captureOptions(),saved};
+  });
+  registerKnowledgeImport({
+    ipcMain, dialog, getSettingsWindow, gatewayUrl: config.gatewayUrl, visibility,
+    sourcesPath: path.join(app.getPath('userData'), 'knowledge-sources.json'),
   });
   ipcMain.handle('settings:audioPermissions', async (event, kind) => {
     const settings = getSettingsWindow();
@@ -314,7 +371,7 @@ function registerIpc() {
       return false;
     }
     if (!visibility.canShow(version)) return false;
-    const opened = await openSettingsWindow(config, section, win, () => visibility.canShow(version));
+    const opened = await openSettingsWindow(config, section, win, () => visibility.canShow(version), () => getDisplayState(win));
     if (!opened && visibility.canShow(version)) sendCaptureError('设置页未能打开，本地服务未能加载设置页面，请重试。');
     return opened;
   });
@@ -351,10 +408,11 @@ async function boot() {
   win = createWindow(config, {
     canShow: () => visibility.canShow(startupVersion),
     onMove: (bounds) => {
+      config.windowBounds = bounds;
       config.windowDisplayId = String(runningDisplay().id);
       saveConfig({ windowBounds: bounds, windowDisplayId: config.windowDisplayId });
     },
-    onDisplay: (patch) => saveConfig(patch),
+    onDisplay: persistDisplay,
   });
   if (!backendReady) {
     win.webContents.once('did-finish-load', () => {

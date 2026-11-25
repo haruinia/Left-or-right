@@ -20,6 +20,14 @@ test('no new counterpart statement reuses the stable previous question without u
   assert.equal(selectInterviewQuestion({...snapshot,transcripts:[]},new Set()),null);
 });
 
+test('answer requests keep the logical conversation id across physical recording runs',()=>{
+  const first=selectInterviewQuestion({run_id:'capture-1',conversation_id:'interview-1',role:'candidate',transcripts:[segment(10,'第一问')]});
+  const continued=selectInterviewQuestion({run_id:'capture-2',conversation_id:'interview-1',role:'candidate',transcripts:[segment(10,'第一问'),segment(3010,'继续追问')]},new Set(['system:10']),first);
+  assert.equal(first.run_id,'interview-1');assert.equal(continued.run_id,'interview-1');
+  assert.equal(continued.text,'继续追问');assert.equal(continued.interview_target,'system:3010');
+  assert.equal(continued.interview_transcript.length,2);
+});
+
 test('interviewer identity is snapshotted instead of inferred from microphone source', () => {
   assert.equal(selectInterviewQuestion({run_id:'b',role:'interviewer',transcripts:[segment(1,'候选人的回答')]}).interview_role,'interviewer');
 });
@@ -62,7 +70,10 @@ test('compact interview UI reuses one answer reader and keeps provider credentia
   const html=fs.readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
   const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(match=>match[1]);
   assert.equal(new Set(ids).size,ids.length);
-  for(const id of ['liuwaAnswerTabs','liuwaThread','liuwaCurrentQuestion','quickMode','liuwaInterviewRecord','liuwaTranscript'])assert.equal(ids.filter(value=>value===id).length,1);
+  for(const id of ['liuwaAnswerTabs','liuwaThread','liuwaCurrentQuestion','quickMode','liuwaInterviewRecord','liuwaInterviewRecordLabel','liuwaInterviewVoice','liuwaInterviewTimer','liuwaInterviewModes','liuwaInterviewManual','liuwaInterviewAuto','liuwaInterviewHeading','liuwaInterviewExtra','liuwaInterviewView','liuwaInterviewViewLabel','liuwaTranscript'])assert.equal(ids.filter(value=>value===id).length,1);
+  assert.doesNotMatch(html,/preview-states|data-state=/);
+  assert.match(html,/id="liuwaInterviewRecordLabel">开始面试</);
+  assert.match(html,/aria-label="回答触发方式"/);
   const source=fs.readFileSync(new URL('../web/modules/interview-overlay.js',import.meta.url),'utf8');
   assert.doesNotMatch(source,/new WebSocket|getUserMedia|getDisplayMedia|api_key|audioBuffer/);
   assert.match(source,/onInterviewState/);

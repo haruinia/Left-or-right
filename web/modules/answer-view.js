@@ -2,6 +2,7 @@ import { renderMarkdown } from './markdown.js';
 import { splitAnswer } from './answer-sections.js';
 
 const readers = new WeakMap();
+const scrollBox = root => root.closest?.('.liuwa-interview-stack') || root;
 
 // 复制按钮的点击落在每次重绘后的新节点上，所以在容器上委托一次即可。
 // 流式生成中也可能被点，读的是当时已经渲染出来的那部分代码。
@@ -49,7 +50,7 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
   }
   wireCodeCopy(root);
   const model = splitAnswer(markdown);
-  reader.positions.set(reader.selected, root.scrollTop || 0);
+  reader.positions.set(reader.selected, scrollBox(root).scrollTop || 0);
   reader.model = model;
   if (!reader.manual) reader.selected = model.preferred;
   if (complete && !model.panels.some(p => p.key === reader.selected && p.hasContent)) {
@@ -58,6 +59,9 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
   reader.complete = complete;
   const paint = () => {
     const panel = reader.model.panels.find(p => p.key === reader.selected);
+    const scroll = scrollBox(root);
+    const above = stackEntry && root.getBoundingClientRect().bottom < scroll.getBoundingClientRect().top;
+    const height = scroll.scrollHeight;
     root.innerHTML = panel?.hasContent ? renderMarkdown(panel.markdown) : '';
     if (root.dataset) {
       root.dataset.answerPanel = reader.selected;
@@ -65,9 +69,13 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
       root.dataset.hasAnswer = String(Boolean(panel?.hasContent));
       root.dataset.waiting = `正在生成${panel?.label || '回答'}…`;
     }
-    root.scrollTop = reader.positions.get(reader.selected) || 0;
+    scroll.scrollTop = (reader.positions.get(reader.selected) || 0) + (above ? scroll.scrollHeight - height : 0);
   };
-  const tabs = root.closest?.('.liuwa-reader')?.querySelector('#liuwaAnswerTabs');
+  // 面试堆叠里每个条目一条回答；标签栏挂在 readonly 区，堆叠模式下跟着当前条目走。
+  const stackEntry = root.closest?.('.liuwa-stack-entry');
+  const tabs = stackEntry
+    ? stackEntry.querySelector('.liuwa-stack-tabs')
+    : root.closest?.('.liuwa-reader')?.querySelector('#liuwaAnswerTabs');
   const syncTabs = () => {
     if (!tabs) return;
     const keys = reader.model.panels.filter(p => !reader.complete || p.hasContent).map(p => p.key);
@@ -79,9 +87,10 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
         const p = reader.model.panels.find(p => p.key === key);
         const button = tabs.ownerDocument.createElement('button');
         button.type = 'button'; button.role = 'tab'; button.dataset.panel = key;
-        button.id = `answer-tab-${key}`;
+        const bodyId = stackEntry ? `${stackEntry.id}-body` : 'liuwaAnswerBody';
+        button.id = stackEntry ? `${bodyId}-tab-${key}` : `answer-tab-${key}`;
         button.textContent = p.label;
-        button.setAttribute('aria-controls', 'liuwaAnswerBody');
+        button.setAttribute('aria-controls', bodyId);
         return button;
       }));
       tabs.dataset.signature = signature;
@@ -92,14 +101,14 @@ export function renderAnswer(markdown, root, {complete = false} = {}) {
       button.setAttribute('aria-selected', String(selected));
       button.tabIndex = selected ? 0 : -1;
     });
-    root.id = 'liuwaAnswerBody';
+    root.id = stackEntry ? `${stackEntry.id}-body` : 'liuwaAnswerBody';
     root.setAttribute('role', 'tabpanel');
-    root.setAttribute('aria-labelledby', `answer-tab-${reader.selected}`);
+    root.setAttribute('aria-labelledby', stackEntry ? `${root.id}-tab-${reader.selected}` : `answer-tab-${reader.selected}`);
     root.tabIndex = 0;
   };
   const select = key => {
     if(!reader.model.panels.some(p => p.key === key)) return;
-    reader.positions.set(reader.selected, root.scrollTop);
+    reader.positions.set(reader.selected, scrollBox(root).scrollTop);
     reader.selected = key; reader.manual = true;
     paint(); syncTabs();
     root.dispatchEvent(new Event('answer-panel-change', {bubbles:true}));
@@ -123,7 +132,7 @@ export function exportAnswerReadingState(root) {
   const reader = readers.get(root);
   if (!reader) return null;
   const positions = new Map(reader.positions);
-  if (reader.selected) positions.set(reader.selected, root.scrollTop || 0);
+  if (reader.selected) positions.set(reader.selected, scrollBox(root).scrollTop || 0);
   return { selected: reader.selected, manual: reader.manual, positions: Object.fromEntries(positions) };
 }
 
@@ -134,7 +143,7 @@ export function restoreAnswerReadingState(root, state) {
   reader.positions = new Map(Object.entries(state.positions || {}).filter(([key, value]) => reader.model.panels.some(panel => panel.key === key) && Number.isFinite(value) && value >= 0));
   reader.selected = selected;
   reader.manual = Boolean(state.manual);
-  root.scrollTop = reader.positions.get(selected) || 0;
+  scrollBox(root).scrollTop = reader.positions.get(selected) || 0;
   const panel = reader.model.panels.find(item => item.key === selected);
   root.innerHTML = panel?.hasContent ? renderMarkdown(panel.markdown) : '';
   root.dataset.answerPanel = selected;
@@ -146,7 +155,7 @@ export function restoreAnswerReadingState(root, state) {
     button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
   });
   root.setAttribute('aria-labelledby', `answer-tab-${selected}`);
-  root.scrollTop = reader.positions.get(selected) || 0;
+  scrollBox(root).scrollTop = reader.positions.get(selected) || 0;
   return true;
 }
 

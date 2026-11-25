@@ -36,7 +36,7 @@ test('speaker transcripts alone never become invented knowledge answers',()=>{
 
 const settingsSource=fs.readFileSync(new URL('../web/modules/settings.js',import.meta.url),'utf8');
 test('knowledge preference is a boolean field rather than a text control',()=>{
-  const form={'#studySpecialtyCustom':{},'#studyLanguageCustom':{},'#jdText':{value:'job'},'#resumeText':{value:'resume'},'#interviewUseKnowledge':{checked:false}};
+  const form={'#studySpecialtyCustom':{},'#studyLanguageCustom':{},'#jdText':{value:'job'},'#resumeText':{value:'resume'},'#interviewUseKnowledge':{checked:false},'#interviewKnowledgeProjects':{value:'[]'}};
   const c=vm.createContext({studyFields:{study_specialty:{value:'后端'},study_language:{value:'Go'}},$:id=>form[id],readStudyChoice:select=>select.value,readHotkeys:()=>({})});
   vm.runInContext(settingsSource.slice(settingsSource.indexOf('function readSettings()'),settingsSource.indexOf('function changedSettings()')),c);
   assert.equal(c.readSettings().interview_use_knowledge,false);
@@ -46,7 +46,7 @@ test('knowledge preference is a boolean field rather than a text control',()=>{
 
 test('knowledge checkbox saves only its own changed preference',async()=>{
   let payload;
-  const c=vm.createContext({savedSettings:{interview_use_knowledge:false,study_language:'Go',hotkeys:{}},saving:false,window:{dispatchEvent(){}},Event:class{},saveState:{},readSettings:()=>({interview_use_knowledge:true,study_language:'Go',hotkeys:{}}),validateHotkeys:()=>true,$:()=>({}),postJson:async(_url,body)=>{payload=body;return body;}});
+  const c=vm.createContext({savedSettings:{interview_use_knowledge:false,study_language:'Go',hotkeys:{}},saving:false,window:{dispatchEvent(){}},Event:class{},saveState:{},readSettings:()=>({interview_use_knowledge:true,study_language:'Go',hotkeys:{}}),validateHotkeys:()=>true,syncSavebar:()=>{},$:()=>({}),postJson:async(_url,body)=>{payload=body;return body;}});
   vm.runInContext(settingsSource.slice(settingsSource.indexOf('function changedSettings()'),settingsSource.indexOf('function validateHotkeys()'))+settingsSource.slice(settingsSource.indexOf('async function saveSettings('),settingsSource.indexOf('\nhotkeyInputs().forEach')),c);
   await c.saveSettings({preventDefault(){}});
   assert.deepEqual(JSON.parse(JSON.stringify(payload)),{interview_use_knowledge:true});

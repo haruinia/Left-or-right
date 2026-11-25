@@ -316,7 +316,7 @@ function armedModule() {
   const classes=new Set(['liuwa-armed']);let armedHandler;let resolve;
   const classList={remove:name=>classes.delete(name),add:name=>classes.add(name),toggle(name,on){if(on)classes.add(name);else classes.delete(name);}};
   const cockpit={onArmed:handler=>{armedHandler=handler;},getConfig:()=>new Promise(r=>{resolve=r;})};
-  const sandbox={document:{documentElement:{classList},body:{classList}},state:{},applyHotkeyHints(){},applyTheme(){},applyDisplay(){}};
+  const sandbox={document:{documentElement:{classList},body:{classList},querySelector:()=>null,querySelectorAll:()=>[],addEventListener(){}},window:{addEventListener(){}},state:{},applyHotkeyHints(){},applyTheme(){},applyDisplay(){}};
   const context=vm.createContext(sandbox);sandbox.cockpit=cockpit;
   vm.runInContext(homeSource.slice(homeSource.indexOf('function wireDesktop('),homeSource.indexOf('\nwindow.cycleTheme')),context);
   vm.runInContext('wireDesktop(cockpit)',context);

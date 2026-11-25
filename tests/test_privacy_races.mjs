@@ -11,24 +11,34 @@ const display = { id: 1, bounds: { x: 0, y: 0, width: 1440, height: 900 }, workA
 
 function indexFixture() {
   const events = [], timers = [], handlers = new Map(), appEvents = new Map();
-  const window = { visible: true, isDestroyed: () => false, isVisible() { return this.visible; }, hide() { this.visible = false; }, showInactive() { this.visible = true; }, getBounds: () => display.bounds, webContents: { send: (...args) => events.push(args) } };
-  const state = { backend: async () => true, settings: async () => true, selection: async () => ({ x: 0, y: 0, width: 20, height: 20 }), capture: async () => ({ mime: 'image/png', data: Buffer.from('image') }) };
+  const window = { visible: true, isDestroyed: () => false, isVisible() { return this.visible; }, hide() { this.visible = false; }, showInactive() { this.visible = true; }, getBounds: () => display.bounds, webContents: { mainFrame:{},getURL:()=> 'file:///app/web/index.html',send: (...args) => events.push(args) } };
+  const state = { armed:false,textEditing:false,surface: {interview:false}, screenAccess:'denied', backend: async () => true, settings: async () => true, selection: async () => ({ x: 0, y: 0, width: 20, height: 20 }), capture: async () => ({ mime: 'image/png', data: Buffer.from('image') }) };
   const electron = {
-    app: { setName() {}, requestSingleInstanceLock: () => true, on: (name, fn) => appEvents.set(name, fn), whenReady: () => ({ then() {} }) },
+    app: { userAgentFallback:'TestAgent/1.0', setName() {}, getPath: () => '/test-user-data', requestSingleInstanceLock: () => true, on: (name, fn) => appEvents.set(name, fn), whenReady: () => ({ then() {} }) },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), on() {} },
     BrowserWindow: { getAllWindows: () => [window] }, screen: { getAllDisplays: () => [display], getDisplayMatching: () => display, getPrimaryDisplay: () => display },
     dialog: { showErrorBox: (...args) => events.push(['dialog', ...args]) },
-    shell: { openExternal: async (...args) => events.push(['external', ...args]) }, systemPreferences: { getMediaAccessStatus: () => 'denied' },
+    shell: { openExternal: async (...args) => events.push(['external', ...args]) }, systemPreferences: { getMediaAccessStatus: () => state.screenAccess },
   };
   const modules = {
     './config': { loadConfig: () => ({}), saveConfig() {} },
-    './window': { setInteractive: (...args) => events.push(['interactive', ...args]) },
+    './window': {
+      RENDERER_INDEX:'/app/web/index.html',
+      setInteractive: (...args) => {state.armed=Boolean(args[1]);events.push(['interactive', ...args]);},
+      isInteractive:()=>state.armed,
+      setTextEditing: (_window,value) => {state.textEditing=value;events.push(['editing',value]);return value;},
+      isTextEditing:()=>state.textEditing,
+      getDisplayState: () => ({...state.surface}),
+      setSurface: (_window,patch) => Object.assign(state.surface,patch),
+    },
     './hotkeys': { BINDINGS: [] },
     './capture': { captureScreenshot: options => { events.push(['capture']); return state.capture(options); } },
     './capture-options': require('../desktop/main/capture-options.js'),
     './selector': { selectRegion: (...args) => { events.push(['select']); return state.selection(...args); }, cancelSelection: () => events.push(['cancel']) },
     './backend': { ensureBackend: () => state.backend() },
     './interview-relay': { registerInterviewRelay() {} },
+    './interview-socket': { registerInterviewSocket() {} },
+    './knowledge-import': { registerKnowledgeImport() {} },
     './audio-capture': { audioCapabilities: () => ({}), configureAudioCapture() {} },
     './command-key': {}, './settings-window': { getSettingsWindow: () => state.settingsWindow || null, openSettingsWindow: (...args) => { events.push(['settings']); return state.settings(...args); } },
     './window-visibility': require('../desktop/main/window-visibility.js'),
@@ -44,6 +54,72 @@ test('speech shortcuts dispatch distinct commands without revealing or focusing 
   f.run('visibility.hideAll(); hotkeyHandlers().toggleInterview(); hotkeyHandlers().muteInterviewMic(); hotkeyHandlers().muteInterviewSystem()');
   assert.deepEqual(f.events.filter(([name])=>name==='liuwa:interview-control').map(([,action])=>action),['toggle','mic','system']);
   assert.equal(f.window.visible,false);
+});
+
+test('text editing IPC accepts only a boolean from the bundled main frame',()=>{
+  const f=indexFixture(),request=f.handlers.get('cockpit:setTextEditing');
+  const event={sender:f.window.webContents,senderFrame:f.window.webContents.mainFrame};
+  assert.equal(request({sender:{},senderFrame:event.senderFrame},true),false);
+  assert.equal(request({sender:event.sender,senderFrame:{}},true),false);
+  for(const value of [undefined,null,1,'true',{}])assert.equal(request(event,value),false);
+  for(const url of ['https://example.test/','file:///app/web/index.html.evil','http://127.0.0.1:9958/settings']){
+    f.window.webContents.getURL=()=>url;assert.equal(request(event,true),false);
+  }
+  assert.equal(f.events.filter(([name])=>name==='editing').length,0);
+  f.window.webContents.getURL=()=> 'file:///app/web/index.html#interview';
+  assert.equal(request(event,true),true);assert.equal(f.state.textEditing,true);
+  assert.equal(f.handlers.get('cockpit:getConfig')().textEditing,true);
+  assert.equal(request(event,false),false);assert.equal(f.state.textEditing,false);
+  f.window.isDestroyed=()=>true;assert.equal(request(event,true),false);
+});
+
+test('capture and explicit visibility changes end text editing before hiding',async()=>{
+  const capture=indexFixture();capture.state.textEditing=true;
+  const pending=capture.run('attachScreenshot({interactive:false})');
+  assert.equal(capture.state.textEditing,false);
+  assert.ok(capture.events.findIndex(([name])=>name==='editing')<capture.events.findIndex(([name])=>name==='app:privacy-hidden'));
+  capture.timers[0].fn();await pending;
+  const hidden=indexFixture();hidden.state.textEditing=true;
+  hidden.run('toggleAppVisibility()');
+  assert.equal(hidden.state.textEditing,false);assert.equal(hidden.window.visible,false);
+  assert.ok(hidden.events.findIndex(([name])=>name==='editing')<hidden.events.findIndex(([name])=>name==='app:privacy-hidden'));
+});
+
+test('surface mode changes preserve the modifier gate and hidden-window guards',()=>{
+  const f=indexFixture(),surface=f.handlers.get('cockpit:setSurface');
+  const armed=()=>f.events.filter(([name])=>name==='interactive').at(-1)[2];
+  for(const interview of [true,false]){
+    surface({}, {interview});assert.equal(armed(),false);
+    f.run('visibility.modifierChanged(true)');assert.equal(armed(),true);
+    surface({}, {interview:!interview});assert.equal(armed(),true);
+    f.run('visibility.modifierChanged(false)');assert.equal(armed(),false);
+    surface({}, {interview});assert.equal(armed(),false);
+  }
+  f.run('visibility.hideAll()');surface({}, {interview:true});f.appEvents.get('second-instance')();
+  assert.equal(f.window.visible,false);assert.equal(armed(),false);
+  f.run('visibility.modifierChanged(true)');assert.equal(armed(),false);assert.equal(f.window.visible,false);
+  f.run('visibility.modifierChanged(false);visibility.toggle()');assert.equal(f.window.visible,true);assert.equal(armed(),false);
+});
+
+for(const status of ['granted','unknown','not-determined'])test(`generic capture failure with ${status} screen access is not misreported as denied permission`,async()=>{
+  const f=indexFixture();f.state.screenAccess=status;f.state.capture=async()=>{throw Error('could not create image from display');};
+  const pending=f.run('attachScreenshot({interactive:false})');f.timers[0].fn();await pending;
+  const failures=f.events.filter(([name])=>name==='liuwa:capture-error');
+  assert.equal(failures.length,1);assert.equal(failures[0][1].detail,'截图未能生成，请确认应用所在显示器后重试。');
+  assert.doesNotMatch(failures[0][1].detail,/缺少|权限|授权/);
+  assert.ok(!f.events.some(([name])=>name==='external'||name==='dialog'));
+  assert.equal(f.window.visible,true);assert.equal(f.run('screenBusy'),false);
+});
+
+test('an explicit denied screen status keeps precise recovery instructions and opens settings only once',async()=>{
+  const f=indexFixture();f.state.screenAccess='denied';f.state.capture=async()=>{throw Error('could not create image from display');};
+  for(let attempt=0;attempt<2;attempt++){
+    const pending=f.run('attachScreenshot({interactive:false})');f.timers[attempt].fn();await pending;
+  }
+  const failures=f.events.filter(([name])=>name==='liuwa:capture-error');assert.equal(failures.length,2);
+  assert.ok(failures.every(([,payload])=>payload.detail.includes('屏幕录制权限未生效')));
+  const external=f.events.filter(([name])=>name==='external');assert.equal(external.length,1);
+  assert.match(external[0][1],/Privacy_ScreenCapture/);assert.equal(f.window.visible,true);
 });
 
 test('capture start and completion share a unique token before any hiding delay', async () => {

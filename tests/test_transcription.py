@@ -396,13 +396,14 @@ def test_start_reports_model_permission_failure_and_closes_both_sources(setup):
     assert len(sessions.items) == 2 and all(session.closed for session in sessions.items)
 
 
-def test_connectivity_check_is_not_reported_as_recognition(setup):
+def test_connectivity_check_sends_bounded_audio_without_claiming_text_accuracy(setup):
     client, sessions, _settings = setup
     profile_id = asr_config.list_response()["active_profile_id"]
     checked = client.post(f"/api/config/asr/profiles/{profile_id}/check").json()
     assert checked["ok"] is True
-    assert "尚未进行语音识别" in checked["detail"]
-    assert len(sessions.items) == 1 and sessions.items[0].closed and not sessions.items[0].sent
+    assert "音频验证通过" in checked["detail"]
+    assert len(sessions.items) == 1 and sessions.items[0].closed
+    assert len(sessions.items[0].sent) == 1 and len(sessions.items[0].sent[0]) == 1600
     sessions.fail_connect = "check"
     failed = client.post(f"/api/config/asr/profiles/{profile_id}/check").json()
     assert not failed["ok"] and "synthetic-secret" not in json.dumps(failed)

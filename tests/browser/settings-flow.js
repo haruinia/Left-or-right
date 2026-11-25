@@ -2,12 +2,20 @@ async (page, {base=new URL(page.url()).origin}={})=>{
   const errors=[],writes=[],reveals=[];
   page.on('pageerror',error=>errors.push(error.message));
   const initial=await(await page.request.get(`${base}/api/ui/settings`,{headers:{'user-agent':'Left-or-right UI test'}})).json();
-  const prefs={...initial,interview_use_knowledge:false,assistant_role:'candidate'};
-  let active='personal',saveFails=false,next=0;
+  const prefs={...initial,interview_use_knowledge:false,interview_knowledge_project_ids:[],assistant_role:'candidate',jd_text:'',resume_text:''};
+  const preferenceWrites=[];
+  let active='personal',saveFails=false,preferenceSaveFails=false,next=0;
   let models=[{id:'personal',name:'个人接口',llm_model:'shared-model',llm_base_url:'https://personal.example.test/v1',llm_protocol:'auto',llm_api_path:'/chat/completions',llm_auth_header:'Authorization',llm_auth_scheme:'Bearer',llm_response_content_path:'choices.0.message.content',llm_extra_body_json:'',llm_max_tokens:30000,vision_model:'',llm_api_key_configured:true},{id:'work',name:'公司接口',llm_model:'shared-model',llm_base_url:'https://work.example.test/v1',llm_protocol:'auto',llm_api_path:'/chat/completions',llm_auth_header:'Authorization',llm_auth_scheme:'Bearer',llm_response_content_path:'choices.0.message.content',llm_extra_body_json:'',llm_max_tokens:30000,vision_model:'',llm_api_key_configured:true}];
   let asrActive='speech',speech=[{id:'speech',name:'个人语音',provider:'aliyun_ws',endpoint:'wss://speech.example.test/inference',model:'speech-model',language_hints:'zh,en',vocabulary_id:'',api_key_configured:true}];
-  await page.route('**/api/ui/settings',route=>route.fulfill({json:prefs}));
+  await page.route('**/api/ui/settings',route=>{
+    if(route.request().method()==='PATCH') {
+      if(preferenceSaveFails)return route.fulfill({status:503,json:{detail:'测试保存失败'}});
+      const patch=route.request().postDataJSON();preferenceWrites.push(patch);Object.assign(prefs,patch);
+    }
+    return route.fulfill({json:prefs});
+  });
   await page.route('**/api/learning-assets/**',route=>route.fulfill({json:{items:[]}}));
+  await page.route('**/api/knowledge/**',route=>route.fulfill({json:{projects:[],formats:[]}}));
   await page.route('**/api/config/llm**',async route=>{
     const path=new URL(route.request().url()).pathname,method=route.request().method();
     const store=()=>({profiles:models,active_profile_id:active,presets:[]});
@@ -38,7 +46,8 @@ async (page, {base=new URL(page.url()).origin}={})=>{
   await page.goto(`${base}/settings?flow#models`);
   await page.locator('[data-edit="personal"]').waitFor();
   check(!await page.locator('#llmForm').isVisible()&&!await page.locator('#asrForm').isVisible()&&!await page.locator('#llmImport').isVisible(),'Root list exposes editor/import fields');
-  check(await page.locator('.settings-nav a[href="#asr"]').count()===0&&await page.locator('.settings-nav a[href="#interview"]').count()===0,'Redundant sections remain in navigation');
+  check(JSON.stringify(await page.locator('.settings-nav a').allTextContents())===JSON.stringify(['接入','答题偏好','显示','面试资料','知识库','记录','快捷键']),'Settings navigation does not match the supported sections');
+  check(await page.locator('#interview').count()===0&&await page.locator('.site-footer').count()===0,'Obsolete recorder or marketing footer remains');
   await page.locator('[data-edit="work"]').click();
   await page.waitForFunction(()=>document.querySelector('#llmName').value==='公司接口'&&!document.querySelector('#llmForm').hidden);
   check(active==='personal','Opening inactive profile changed current model');
@@ -75,10 +84,32 @@ async (page, {base=new URL(page.url()).origin}={})=>{
   check(await page.locator('#llmForm').isVisible()===false,'Direct editor Back did not return to its list');
   await page.locator('[data-delete="work"]').click();await page.locator('dialog[open]').waitFor();await page.evaluate(()=>window.dispatchEvent(new Event('app:privacy-hidden')));await page.waitForFunction(()=>!document.querySelector('dialog'));
   check(models.some(item=>item.id==='work'),'Privacy hide confirmed model deletion');
-  await page.locator('.settings-nav a[href="#briefing"]').click();await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
+  await page.locator('.settings-nav a[href="#briefing"]').click();
+  check(await page.locator('#briefingList').isVisible()&&!await page.locator('#jdText').isVisible()&&!await page.locator('#resumeText').isVisible(),'Materials list exposes full document forms');
+  await page.locator('#editBriefingJd').click();
+  check(await page.locator('#jdText').isVisible()&&!await page.locator('#resumeText').isVisible()&&!await page.locator('#studyAssistantRole').isVisible(),'Job detail exposes unrelated fields');
+  await page.locator('#jdText').fill('保留的岗位草稿');await page.locator('#settingsBack').click();
+  check((await page.locator('#jdSummary').textContent())==='保留的岗位草稿','Material summary does not reflect its draft');
+  await page.locator('#editBriefingResume').click();await page.locator('#resumeText').fill('保留的简历草稿');
+  check(!await page.locator('#jdText').isVisible(),'Resume detail also shows job editor');
+  preferenceSaveFails=true;await page.locator('#saveUiSettings').click();await page.getByText('保存失败，修改仍保留在页面中。',{exact:true}).waitFor();
+  check(await page.locator('#resumeText').inputValue()==='保留的简历草稿','Failed material save discarded its draft');
+  preferenceSaveFails=false;await page.locator('#saveUiSettings').click();await page.waitForFunction(()=>document.querySelector('#saveUiSettings').disabled);
+  check(JSON.stringify(preferenceWrites.at(-1))===JSON.stringify({jd_text:'保留的岗位草稿',resume_text:'保留的简历草稿'}),'Material save overwrote unrelated preferences');
+  check((await page.locator('#settingsSaveState').textContent())==='','Successful save leaves permanent confirmation text');
+  await page.locator('#settingsBack').click();await page.locator('#editBriefingKnowledge').click();
+  check(await page.locator('#knowledgeSelection').isVisible()&&await page.locator('#interviewUseKnowledge').isVisible()&&!await page.locator('#resumeText').isVisible(),'Knowledge selection is not an independent detail');
+  check((await page.locator('#interviewKnowledgeHint').textContent()).includes('仅将选中的资料中命中片段'),'Knowledge detail omits external-send consent');
+  await page.locator('#settingsBack').click();await page.locator('#editBriefingIdentity').click();await page.locator('#studyAssistantRole').selectOption('interviewer');
+  await page.locator('#settingsBack').click();check((await page.locator('#identitySummary').textContent())==='面试官','Role summary lost its unsaved selection');
+  await page.locator('#editBriefingJd').click();check(await page.locator('#jdText').inputValue()==='保留的岗位草稿','Returning to a material discarded saved content');
+  check(!((await page.locator('#jdFile').getAttribute('accept')).includes('image/'))&&!((await page.locator('#jdFile').getAttribute('accept')).split(',').includes('.doc')),'Upload offers unverified formats');
+  await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
   check(await page.locator('.site-header').evaluate(node=>Math.abs(node.getBoundingClientRect().top)<1),'Settings navigation is not fixed while scrolling');
   check((await page.locator('#briefingTitle').textContent())==='面试资料','Marketing headline remains in briefing');
   await page.setViewportSize({width:375,height:812});check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Settings flow overflows narrow viewport');
+  await page.goto(`${base}/settings?old-link#interview`);await page.waitForFunction(()=>location.hash==='#briefing'&&!document.querySelector('#briefing').hidden);
+  check(await page.locator('#briefingList').isVisible()&&await page.locator('#interviewStart').count()===0,'Old recording deep link did not resolve to materials');
   check(errors.length===0,errors.join('\n'));
-  return {passed:true,unifiedConnections:true,progressiveEditors:true,noAutomaticActivation:true,draftRetention:true,cancelDiscards:true,keyRemasking:true,saveFailureRetention:true,separateImport:true,speechDetail:true,historyBackForward:true,directLinkBack:true,privacyDismissedDelete:true,stickyNavigation:true,narrowLayout:true};
+  return {passed:true,unifiedConnections:true,progressiveEditors:true,noAutomaticActivation:true,draftRetention:true,cancelDiscards:true,keyRemasking:true,saveFailureRetention:true,separateImport:true,speechDetail:true,historyBackForward:true,directLinkBack:true,privacyDismissedDelete:true,materialDetails:true,materialSaveFailureRetention:true,knowledgeConsent:true,oldRecordingRedirect:true,stickyNavigation:true,narrowLayout:true};
 }

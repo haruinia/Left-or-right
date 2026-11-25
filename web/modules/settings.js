@@ -5,10 +5,11 @@ import { parseDocumentFile } from "./documents.js";
 import { fetchGatewayJson, postJson } from "./gateway.js";
 import { state } from "./state.js";
 import { loadProfiles, wireModelConfig } from "./model-config.js";
-import { settingsRoute, navigateSettings, returnToConnections } from './settings-navigation.js';
+import { settingsRoute, navigateSettings, returnToConnections, returnToSettingsList } from './settings-navigation.js';
 import "./assets.js";
 import "./asr-config.js";
-import "./interview-transcription.js";
+import "./knowledge-projects.js";
+import "./display.js";
 
 const $ = (selector) => document.querySelector(selector);
 document.addEventListener("pointerdown", () => { document.documentElement.dataset.keyboardFocus = "false"; });
@@ -24,9 +25,9 @@ const studyFields = {
 };
 const shortcutGroups = [
   ["截图与对话", { captureRegion: "截图", captureScreen: "全屏截图", sendChat: "回答 / 解题", newQuestion: "新对话", resetView: "重置对话", deleteLastShot: "删除最后一张截图", clearShots: "清空截图" }],
-  ["面试语音", { toggleInterview: "开始 / 停止面试", muteInterviewMic: "麦克风静音 / 恢复", muteInterviewSystem: "系统声音静音 / 恢复" }],
+  ["面试语音", { toggleInterviewView: "进入 / 退出面试界面", toggleInterview: "开始 / 结束面试", muteInterviewMic: "麦克风静音 / 恢复", muteInterviewSystem: "系统声音静音 / 恢复" }],
   ["阅读", { readPrev: "回答上一页", readNext: "回答下一页", scrollUp: "回答内容上滚", scrollDown: "回答内容下滚" }],
-  ["窗口", { toggleWindow: "隐藏 / 显示", toggleVisible: "按住操作面板", toggleCompact: "紧凑 / 展开", moveUp: "窗口上移", moveDown: "窗口下移", moveLeft: "窗口左移", moveRight: "窗口右移", opacityDown: "降低不透明度", opacityUp: "提高不透明度", zoomOut: "缩小字号", zoomReset: "还原字号", zoomIn: "放大字号", quitApp: "退出应用" }],
+  ["窗口", { toggleWindow: "隐藏 / 显示", toggleVisible: "按住操作面板", toggleCompact: "紧凑 / 展开", moveUp: "窗口上移", moveDown: "窗口下移", moveLeft: "窗口左移", moveRight: "窗口右移", opacityDown: "降低不透明度", opacityUp: "提高不透明度", zoomOut: "缩小界面", zoomReset: "还原界面缩放", zoomIn: "放大界面", quitApp: "退出应用" }],
 ];
 const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 const saveState = $("#settingsSaveState");
@@ -53,6 +54,7 @@ function readSettings() {
     jd_text: $("#jdText").value,
     resume_text: $("#resumeText").value,
     interview_use_knowledge: $("#interviewUseKnowledge").checked,
+    interview_knowledge_project_ids: JSON.parse($("#interviewKnowledgeProjects").value),
     hotkeys: readHotkeys(),
   };
 }
@@ -60,7 +62,9 @@ function changedSettings() {
   return Object.fromEntries(Object.entries(readSettings()).filter(([key, value]) => (
     key === "hotkeys"
       ? Object.entries(value).some(([action, binding]) => binding !== savedSettings?.hotkeys?.[action])
-      : value !== savedSettings?.[key]
+      : Array.isArray(value)
+        ? JSON.stringify([...value].sort()) !== JSON.stringify([...(savedSettings?.[key] || [])].sort())
+        : value !== savedSettings?.[key]
   )));
 }
 function validateHotkeys() {
@@ -69,10 +73,25 @@ function validateHotkeys() {
   node.classList.toggle("is-error", Boolean(conflict));
   node.textContent = conflict
     ? `「${document.querySelector(`[data-hotkey="${conflict[0]}"]`).closest("label").querySelector("span").textContent}」与「${document.querySelector(`[data-hotkey="${conflict[1]}"]`).closest("label").querySelector("span").textContent}」按键冲突。`
-    : "组合键需包含 ⌘、Ctrl 或 Alt。";
+    : "";
   return !conflict;
 }
+function syncSummaries() {
+  const summary = (value, fallback) => value.trim().replace(/\s+/g, ' ').slice(0, 90) || fallback;
+  $('#identitySummary').textContent = studyFields.assistant_role.value === 'interviewer' ? '面试官' : '面试者';
+  $('#jdSummary').textContent = summary($('#jdText').value, '未添加');
+  $('#resumeSummary').textContent = summary($('#resumeText').value, '未添加');
+  $('#instructionsSummary').textContent = summary(studyFields.study_instructions.value, '未设置');
+}
+function syncSavebar() {
+  const route = settingsRoute();
+  const dirty = savedSettings && Object.keys(changedSettings()).length > 0;
+  const visible = ['study', 'shortcuts'].includes(route.section)
+    || (route.section === 'briefing' && Boolean(route.detail || dirty || saveState.textContent));
+  $('#settingsSavebar').hidden = !visible;
+}
 function syncDirty() {
+  syncSummaries();
   syncStudyCustom(studyFields.study_specialty, $("#studySpecialtyCustom"));
   const exam = isExamSpecialty(readStudyChoice(studyFields.study_specialty, $("#studySpecialtyCustom")));
   $("#studySpecialtyHint").hidden = !exam;
@@ -82,7 +101,8 @@ function syncDirty() {
   const valid = validateHotkeys();
   const dirty = Object.keys(changedSettings()).length > 0;
   $("#saveUiSettings").disabled = !valid || !dirty;
-  saveState.textContent = !valid ? "快捷键冲突，尚未保存。" : dirty ? "有未保存的修改" : "已与应用同步";
+  saveState.textContent = !valid ? "快捷键冲突，尚未保存。" : dirty ? "有未保存的修改" : "";
+  syncSavebar();
 }
 function fillSettings(saved) {
   savedSettings = saved;
@@ -95,12 +115,14 @@ function fillSettings(saved) {
   $("#resumeText").value = saved.resume_text || "";
   $("#interviewUseKnowledge").checked = Boolean(saved.interview_use_knowledge);
   $("#interviewUseKnowledge").disabled = false;
+  $("#interviewKnowledgeProjects").value = JSON.stringify(saved.interview_knowledge_project_ids || []);
   fillHotkeys(saved.hotkeys || DEFAULT_HOTKEYS);
   $("#resetHotkeys").disabled = false;
+  window.dispatchEvent(new CustomEvent('settings:loaded', { detail: saved }));
 }
 async function loadSettings() {
   try { fillSettings(await fetchGatewayJson("/api/ui/settings")); syncDirty(); }
-  catch { saveState.textContent = "读取设置失败，请重新打开此页。"; }
+  catch { saveState.textContent = "读取设置失败，请重新打开此页。"; syncSavebar(); }
 }
 async function saveSettings(event) {
   event.preventDefault();
@@ -112,14 +134,14 @@ async function saveSettings(event) {
   saveState.textContent = "正在保存…";
   try {
     const saved = await postJson("/api/ui/settings", changes, { method: "PATCH" });
-    // 请求期间的新输入仍留在表单里，只更新保存基线。
     savedSettings = saved;
     window.dispatchEvent(new Event('settings:saved'));
-    saveState.textContent = "已保存并同步到应用";
+    saveState.textContent = Object.keys(changedSettings()).length ? "有未保存的修改" : "";
   } catch { saveState.textContent = "保存失败，修改仍保留在页面中。"; }
   finally {
     saving = false;
     $("#saveUiSettings").disabled = !validateHotkeys() || !Object.keys(changedSettings()).length;
+    syncSavebar();
   }
 }
 
@@ -156,9 +178,15 @@ function showView() {
   let route = settingsRoute();
   let id = route.section;
   if (!views.some(view => view.id === id)) { id = 'models'; route = settingsRoute('#models'); }
-  if (location.hash === '#asr') history.replaceState(history.state, '', '#models/asr');
+  if (['#asr', '#interview', '#legacySettings'].includes(location.hash)
+    || (['study', 'briefing'].includes(id) && location.hash !== route.hash)) {
+    history.replaceState(history.state, '', route.hash);
+  }
   views.forEach(view => { view.hidden = view.id !== id; });
-  document.body.classList.toggle('audio-start-view', id === 'interview');
+  $('#briefingList').hidden = Boolean(id === 'briefing' && route.detail);
+  $('#studyList').hidden = Boolean(id === 'study' && route.detail);
+  document.querySelectorAll('[data-briefing-detail]').forEach(view => { view.hidden = id !== 'briefing' || view.dataset.briefingDetail !== route.detail; });
+  document.querySelectorAll('[data-study-detail]').forEach(view => { view.hidden = id !== 'study' || view.dataset.studyDetail !== route.detail; });
   links.forEach(link => {
     if (link.hash === `#${id}`) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
@@ -177,13 +205,17 @@ function showView() {
     if ((route.tab === 'asr') === (link.hash === '#models/asr')) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   });
-  $('#settingsSavebar').hidden = !['study', 'briefing', 'shortcuts'].includes(id);
-  const title = id === 'interview' ? '开始面试' : links.find(link => link.hash === `#${id}`)?.textContent || '接入设置';
+  syncSavebar();
+  syncSummaries();
+  const title = links.find(link => link.hash === `#${id}`)?.textContent || '接入';
   document.title = `${title} · 左右`;
   const assetDetail = id === 'assets' && location.hash.split('/').length > 2;
-  $('#settingsBack').textContent = connectionDetail || assetDetail ? '← 返回列表' : '← 返回';
-  $('#settingsBack').setAttribute('aria-label', connectionDetail || assetDetail ? '返回列表' : '返回应用');
-  if (id !== 'assets') {
+  const knowledgeDetail = id === 'knowledge' && location.hash.split('/').length > 1;
+  const preferenceDetail = ['briefing', 'study'].includes(id) && Boolean(route.detail);
+  const detail = connectionDetail || assetDetail || knowledgeDetail || preferenceDetail;
+  $('#settingsBack').textContent = detail ? '← 返回列表' : '← 返回';
+  $('#settingsBack').setAttribute('aria-label', detail ? '返回列表' : '返回应用');
+  if (!['assets', 'knowledge'].includes(id)) {
     if (previousHash !== location.hash) {
       window.scrollTo({ top: history.state?.settingsScroll || 0, behavior: 'instant' });
       const focus = history.state?.settingsFocus;
@@ -195,18 +227,22 @@ function showView() {
   }
 }
 for (const event of ['hashchange', 'popstate', 'settings:navigate']) window.addEventListener(event, showView);
-for (const link of [...links, ...$('#connectionTabs').querySelectorAll('a')]) link.addEventListener('click', event => {
+for (const link of [...links, ...$('#connectionTabs').querySelectorAll('a'), ...document.querySelectorAll('[data-settings-detail]')]) link.addEventListener('click', event => {
   event.preventDefault();
   if (location.hash === link.hash) return;
   history.replaceState({ ...history.state, assetScroll: window.scrollY }, '');
-  navigateSettings(link.hash);
+  navigateSettings(link.hash, { focus: link.id ? { kind: 'button', id: link.id } : null });
 });
 window.addEventListener('scroll', () => {
-  if (renderedHash === location.hash && settingsRoute().section !== 'assets') history.replaceState({ ...history.state, settingsScroll: window.scrollY }, '');
+  if (renderedHash === location.hash && !['assets', 'knowledge'].includes(settingsRoute().section)) history.replaceState({ ...history.state, settingsScroll: window.scrollY }, '');
 }, { passive: true });
 $('#settingsBack').addEventListener('click', () => {
   const route = settingsRoute();
   if (route.section === 'models' && route.kind !== 'list') { returnToConnections(route.tab); return; }
+  if (['briefing', 'study'].includes(route.section) && route.detail) { returnToSettingsList(route.section); return; }
+  if (route.section === 'knowledge' && location.hash.split('/').length > 1) {
+    window.dispatchEvent(new Event('knowledge:back')); return;
+  }
   if (route.section === 'assets' && location.hash.split('/').length > 2) {
     document.querySelector('#assets [data-asset-back]')?.click(); return;
   }
@@ -224,7 +260,7 @@ if (!state.gatewayApiKey && typeof window.__GATEWAY_KEY__ === "string") state.ga
 showView();
 wireModelConfig();
 Promise.all([loadSettings(), loadProfiles()]);
-fetchGatewayJson("/health").then(() => { $("#serviceStatus").textContent = "本机已连接"; }).catch(() => {
+fetchGatewayJson("/health").then(() => { $("#serviceStatus").textContent = ""; }).catch(() => {
   $("#serviceStatus").textContent = "本机服务未连接";
   $("#serviceStatus").dataset.kind = "error";
 });

@@ -118,7 +118,7 @@ export class DualSourceTranscription {
           else this.fail(run, data.detail || '语音识别服务异常，转写已停止。');
         }
       });
-      run.socket.addEventListener('error', () => this.fail(run, '无法连接语音转写服务。'));
+      run.socket.addEventListener('error', () => this.fail(run, '无法连接本机语音服务，请重新开始录音。'));
       run.socket.addEventListener('close', () => {
         if (!run.finished && !run.cancelled && !run.receivedStopped) this.fail(run, '转写连接已断开，已收到的文字仍保留，可导出文字。');
       });

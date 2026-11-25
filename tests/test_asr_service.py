@@ -21,6 +21,7 @@ from services.asr_service.service import (
 )
 from services.asr_service.aliyun_engine import AliyunWSASREngine
 from services.asr_service.nls_engine import AliyunNLSWSASREngine
+from services.asr_service.xfyun_engine import XfyunRTASREngine
 
 
 def test_stub_asr_decodes_text_and_metadata() -> None:
@@ -257,6 +258,15 @@ def test_get_asr_engine_uses_aliyun_nls_ws_provider(monkeypatch) -> None:
     get_settings.cache_clear()
 
     assert isinstance(get_asr_engine(), AliyunNLSWSASREngine)
+
+
+def test_get_asr_engine_uses_xfyun_rtasr_provider(monkeypatch) -> None:
+    monkeypatch.setenv("ASR_PROVIDER", "xfyun_rtasr")
+    monkeypatch.setenv("XFYUN_APP_ID", "synthetic-app-id")
+    monkeypatch.setenv("XFYUN_API_KEY", "synthetic-api-key")
+    get_settings.cache_clear()
+
+    assert isinstance(get_asr_engine(), XfyunRTASREngine)
 
 
 def test_asr_session_manager_accepts_partial_then_final_same_seq() -> None:

@@ -21,11 +21,18 @@
     <main class="liuwa-orb">
       <div class="liuwa-shots" id="liuwaShots" aria-label="题目截图" hidden></div>
       <nav class="liuwa-command-bar" aria-label="截图与解题">
-        <button type="button" id="liuwaCapture">截图 <kbd id="hintCapture" data-key-action="captureRegion">⌘H</kbd></button>
+        <div id="liuwaInterviewVoice" class="liuwa-interview-voice" hidden>
+          <span id="liuwaInterviewTimer" class="liuwa-interview-timer" hidden></span>
+          <button type="button" id="liuwaInterviewMic" class="liuwa-audio-toggle" aria-label="麦克风" aria-pressed="false" hidden disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 10v1a6 6 0 0 0 12 0v-1M12 17v4m-4 0h8"/></svg></button>
+          <button type="button" id="liuwaInterviewSystem" class="liuwa-audio-toggle" aria-label="系统声音" aria-pressed="false" hidden disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 5-6 4H2v6h3l6 4V5Zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg></button>
+          <button type="button" id="liuwaInterviewRecord"><span id="liuwaInterviewRecordLabel">开始面试</span> <kbd data-key-action="toggleInterview">⌘⌥I</kbd></button>
+        </div>
+        <button type="button" id="liuwaCapture" title="截图"><svg class="liuwa-capture-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M7 7h10v10H7z"/></svg><span class="liuwa-capture-label">截图</span> <kbd id="hintCapture" data-key-action="captureRegion">⌘H</kbd></button>
         <button type="button" id="liuwaSend"><span id="liuwaSendLabel">解题</span> <kbd data-key-action="sendChat">⌘Enter</kbd></button>
+        <div id="liuwaInterviewModes" class="liuwa-interview-modes" role="group" aria-label="回答触发方式" hidden><button type="button" id="liuwaInterviewManual" aria-pressed="true">手动</button><button type="button" id="liuwaInterviewAuto" aria-pressed="false">自动</button></div>
         <button type="button" id="liuwaDelete">删图 <kbd data-key-action="deleteLastShot">⌘L</kbd></button>
-        <button type="button" id="liuwaInterviewRecord" hidden>开始面试</button>
         <button type="button" id="liuwaReset">重置 <kbd data-key-action="resetView">⌘R</kbd></button>
+        <button type="button" id="liuwaInterviewView" class="liuwa-mode-entry" title="进入 / 退出面试"><span id="liuwaInterviewViewLabel">面试</span> <kbd data-key-action="toggleInterviewView">⌘K</kbd></button>
         <button type="button" id="liuwaToggleShots" aria-expanded="true" aria-controls="liuwaShots" hidden>题图</button>
         <details class="liuwa-display" id="liuwaDisplay">
           <summary aria-label="快捷设置" title="快捷设置">⚙</summary>
@@ -74,14 +81,15 @@
               <span>窗口右移 <kbd data-key-action="moveRight">⌘→</kbd></span>
               <span>降低不透明度 <kbd data-key-action="opacityDown">⌘[</kbd></span>
               <span>提高不透明度 <kbd data-key-action="opacityUp">⌘]</kbd></span>
-              <span>缩小字号 <kbd data-key-action="zoomOut">⌘−</kbd></span>
-              <span>还原字号 <kbd data-key-action="zoomReset">⌘0</kbd></span>
-              <span>放大字号 <kbd data-key-action="zoomIn">⌘=</kbd></span>
+              <span>缩小界面 <kbd data-key-action="zoomOut">⌘−</kbd></span>
+              <span>还原界面缩放 <kbd data-key-action="zoomReset">⌘0</kbd></span>
+              <span>放大界面 <kbd data-key-action="zoomIn">⌘=</kbd></span>
               <span>重置对话 <kbd data-key-action="resetView">⌘R</kbd></span>
               <span>新对话 <kbd data-key-action="newQuestion">⌘N</kbd></span>
               <span>清空截图 <kbd data-key-action="clearShots">⌘⇧⌫</kbd></span>
               <span>操作面板 <kbd id="hintInteract" data-key-action="toggleVisible">⌘⇧Space</kbd></span>
-              <span>开始 / 停止面试 <kbd data-key-action="toggleInterview">⌘⌥I</kbd></span>
+              <span>进入 / 退出面试 <kbd data-key-action="toggleInterviewView">⌘K</kbd></span>
+              <span>开始 / 结束面试 <kbd data-key-action="toggleInterview">⌘⌥I</kbd></span>
               <span>麦克风静音 <kbd data-key-action="muteInterviewMic">⌘⌥M</kbd></span>
               <span>系统声音静音 <kbd data-key-action="muteInterviewSystem">⌘⌥U</kbd></span>
               <span>全屏截图 <kbd data-key-action="captureScreen">⌘⇧Y</kbd></span>
@@ -99,10 +107,11 @@
         </details>
       </nav>
       <section id="liuwaInterview" class="liuwa-interview" aria-label="面试转录" hidden>
-        <div class="liuwa-interview-controls"><button type="button" id="liuwaInterviewMic" aria-pressed="false" disabled>麦克风</button><button type="button" id="liuwaInterviewSystem" aria-pressed="false" disabled>系统声</button><button type="button" id="liuwaInterviewAuto" aria-pressed="false" hidden title="对方说完后自动回答（会消耗模型请求）">自动回答</button><span id="liuwaInterviewStatus" role="status" hidden></span></div>
-        <details id="liuwaTranscript" class="liuwa-transcript"><summary>转录 <span id="liuwaTranscriptCount"></span></summary><div id="liuwaTranscriptBody" class="liuwa-transcript-body" role="log" aria-label="双方转录"></div></details>
+        <details id="liuwaTranscript" class="liuwa-transcript"><summary>转录 <span id="liuwaTranscriptCount"></span><span id="liuwaInterviewStatus" role="status" hidden></span></summary><div id="liuwaTranscriptBody" class="liuwa-transcript-body" role="log" aria-label="双方转录"></div></details>
       </section>
       <section class="liuwa-reader" aria-label="题解阅读区">
+        <header id="liuwaInterviewHeading" class="liuwa-interview-heading" hidden><span>回答 <span id="liuwaInterviewAnswerCount"></span></span><button type="button" id="liuwaInterviewExtraToggle" aria-expanded="false" aria-controls="liuwaInterviewExtra">额外要求</button></header>
+        <div id="liuwaInterviewExtra" class="liuwa-interview-extra" hidden><label class="sr-only" for="liuwaInterviewExtraText">额外要求</label><textarea id="liuwaInterviewExtraText" rows="2" maxlength="500" placeholder="例如：先给结论，再说明一个技术取舍"></textarea></div>
         <p id="liuwaCurrentQuestion" class="liuwa-current-question" hidden></p>
         <nav class="liuwa-pagination" id="liuwaPagination" aria-label="题解翻页" hidden>
           <button type="button" id="liuwaReadingPrev" disabled>上一页</button>
@@ -118,6 +127,8 @@
           <p>截下这道题，慢慢看懂它。</p>
         </div>
       </div>
+      <!-- 面试专用：历史回答按时间倒序堆叠，最新在最上面。与 #liuwaThread 同级，互不挤占。 -->
+      <div class="liuwa-interview-stack" id="liuwaInterviewStack" role="region" aria-label="面试回答" hidden></div>
       </section>
 
       <div class="liuwa-feedback"><p class="liuwa-status" id="liuwaStatus" role="status"></p></div>

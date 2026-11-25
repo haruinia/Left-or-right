@@ -146,3 +146,14 @@ def test_target_longer_than_schema_limit_is_rejected():
 def test_invalid_interview_task_is_rejected():
     with pytest.raises(ValidationError):
         ChatStreamRequest(context='interview', text='问题', interview_task='chat')
+
+
+def test_temporary_requirements_only_affect_interview_requests():
+    extra = '优先说明技术取舍，回答简短些。'
+    interview = build_chat_messages(ChatStreamRequest(context='interview', text='介绍索引', interview_extra=extra), UiSettings())
+    assert extra in interview[0].content
+    assert '保留事实依据' in interview[0].content
+    study = build_chat_messages(ChatStreamRequest(text='介绍索引', interview_extra=extra), UiSettings())
+    assert all(extra not in message.content for message in study)
+    with pytest.raises(ValidationError):
+        ChatStreamRequest(context='interview', text='问题', interview_extra='字' * 501)

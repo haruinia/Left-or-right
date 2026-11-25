@@ -9,9 +9,11 @@ import { page, resetReading } from "./reading.js";
 import { syncSections, jumpToSection } from "./answer-navigation.js";
 import { applyDisplay } from "./display.js";
 import { mountInterviewOverlay } from './interview-overlay.js';
+import { createInterviewRecording } from './interview-recording.js';
 import './quick-settings.js';
 
 const thread = document.querySelector("#liuwaThread");
+const interviewStack = document.querySelector("#liuwaInterviewStack");
 const idle = document.querySelector("#liuwaIdle");
 const shots = document.querySelector("#liuwaShots");
 const statusNode = document.querySelector("#liuwaStatus");
@@ -88,6 +90,12 @@ function showQuestion(entry, { restoreContext = false } = {}) {
 
 // 截图题解固定在当前阅读位置；自动追尾只适用于实时语音面板。
 function syncReadingControls() {
+  if (chatMode === 'interview') {
+    const hasAnswer = interviewEntries.some(entry => entry.body.dataset.hasAnswer === 'true');
+    if (readingPrev) { readingPrev.disabled = !hasAnswer; readingPrev.title = '向上查看面试回答'; }
+    if (readingNext) { readingNext.disabled = !hasAnswer; readingNext.title = '向下查看面试回答'; }
+    return;
+  }
   const hasAnswer = thread?.querySelector(".liuwa-stream")?.dataset.hasAnswer === 'true';
   const tabs = document.querySelector("#liuwaAnswerTabs");
   const tabButtons = tabs && !tabs.hidden ? Array.from(tabs.querySelectorAll("button[data-panel]")).filter(b => !b.hidden) : [];
@@ -105,7 +113,7 @@ function syncReadingControls() {
 
 function stepReading(direction) {
   const delta = typeof direction === "string" ? (direction === "prev" ? -1 : 1) : (direction < 0 ? -1 : 1);
-  if (stepAnswerTab(delta)) return;
+  if (chatMode !== 'interview' && stepAnswerTab(delta)) return;
   page(delta);
 }
 
@@ -139,66 +147,15 @@ const modeContexts = new Map();
 const captureGenerations = new Map();
 const currentQuestion = document.querySelector('#liuwaCurrentQuestion');
 let interviewRunId = '';
-let requestedInterviewRunId = '';
-let preparingInterviewSession = false;
 let activeResetTask = null;
 
 function emptyModeContext() {
   return { history: [], questions: [], viewedQuestionId: '', nextQuestionId: 1, pending: [], nextShotId: 1, activeShotId: '', shotsExpanded: true, sessionStartedAt: new Date().toISOString(), sessionRecordId: '' };
 }
 
-function beginInterviewSession(runId) {
-  requestedInterviewRunId = runId;
-  if (runId === interviewRunId) return Promise.resolve(true);
-  preparingInterviewSession = true;
-  if (chatMode === 'interview') stopChat();
-  const previousModeTask = modeSwitchTask;
-  const previousResetTask = activeResetTask;
-  const transition = Promise.all([previousModeTask, previousResetTask]).then(async () => {
-    if (runId !== requestedInterviewRunId) return false;
-    switchingMode = true;
-    document.querySelector('#quickMode').disabled = true;
-    try {
-      if (chatMode === 'interview') {
-        stopChat();
-        if (activeSendTask) await activeSendTask;
-        rememberReadingPosition();
-      }
-      const oldContext = chatMode === 'interview'
-        ? { history: history.slice(), sessionStartedAt, sessionRecordId }
-        : modeContexts.get('interview');
-      if (oldContext?.history.length) {
-        await interviewSaveTask;
-        await saveSessionRecord({ id: oldContext.sessionRecordId || undefined, turns: oldContext.history, startedAt: oldContext.sessionStartedAt, note: '面试问答' });
-      }
-      if (runId !== requestedInterviewRunId) return false;
-      const fresh = emptyModeContext();
-      modeContexts.set('interview', fresh);
-      if (chatMode === 'interview') {
-        history.length = 0; questions.length = 0; pending.length = 0;
-        ({ viewedQuestionId, nextQuestionId, nextShotId, activeShotId, shotsExpanded, sessionStartedAt, sessionRecordId } = fresh);
-        sessionGeneration += 1; captureGenerations.clear();
-        closeLightbox();
-        thread.querySelectorAll('.liuwa-turn').forEach(turn => turn.remove());
-        const tabs = document.querySelector('#liuwaAnswerTabs');
-        tabs.hidden = true; tabs.replaceChildren(); delete tabs.dataset.signature;
-        delete questionSelect.dataset.questions;
-        showQuestionText(); renderPending(); syncQuestionSelector(); syncEmpty();
-      }
-      interviewRunId = runId;
-      preparingInterviewSession = false;
-      return true;
-    } catch {
-      if (runId === requestedInterviewRunId) setStatus('上一场面试问答保存失败，已保留原内容；请重试保存后再开始新一场。');
-      return false;
-    } finally {
-      switchingMode = false;
-      document.querySelector('#quickMode').disabled = false;
-      interviewOverlay?.refresh();
-    }
-  });
-  modeSwitchTask = transition;
-  return transition;
+function beginInterviewSession(conversationId) {
+  interviewRunId = conversationId;
+  return Promise.resolve(true);
 }
 
 function showQuestionText(text = '') {
@@ -218,7 +175,7 @@ function setChatMode(next) {
       stopChat();
       if (activeSendTask) await activeSendTask;
       rememberReadingPosition();
-      modeContexts.set(chatMode, { history: history.slice(), questions: questions.slice(), viewedQuestionId, nextQuestionId, pending: pending.slice(), nextShotId, activeShotId, shotsExpanded, sessionStartedAt, sessionRecordId });
+      modeContexts.set(chatMode, { history: history.slice(), questions: questions.slice(), viewedQuestionId, nextQuestionId, pending: pending.slice(), nextShotId, activeShotId, shotsExpanded, sessionStartedAt, sessionRecordId, stack: snapshotInterviewStack() });
       const restored = modeContexts.get(next) || emptyModeContext();
       history.splice(0, history.length, ...restored.history);
       questions.splice(0, questions.length, ...restored.questions);
@@ -229,9 +186,11 @@ function setChatMode(next) {
       captureGenerations.clear();
       closeLightbox();
       document.body.classList.toggle('interview-mode', next === 'interview');
+      restoreInterviewStack(next === 'interview');
       document.querySelector('#quickMode').value = next;
       document.querySelector('#liuwaDisplay').open = false;
       document.querySelector('#liuwaSendLabel').textContent = next === 'interview' ? '回答' : '解题';
+      document.querySelector('#liuwaInterviewViewLabel').textContent = next === 'interview' ? '笔试' : '面试';
       document.querySelector('#liuwaDelete').hidden = next === 'interview';
       interviewOverlay?.setMode(next);
       thread.querySelectorAll('.liuwa-turn').forEach(turn => turn.remove());
@@ -240,7 +199,11 @@ function setChatMode(next) {
       delete questionSelect.dataset.questions;
       showQuestionText();
       const entry = questions.find(question => question.id === viewedQuestionId);
-      if (entry) showQuestion(entry, { restoreContext: true });
+      if (next === 'interview') {
+        showQuestionText(entry?.text || '');
+        renderPending(); syncQuestionSelector(); syncEmpty();
+        restoreInterviewStack(true);
+      } else if (entry) showQuestion(entry, { restoreContext: true });
       else { renderPending(); syncQuestionSelector(); syncEmpty(); }
       setStatus('');
       return true;
@@ -285,12 +248,17 @@ function setStatus(text) {
 
 function syncEmpty() {
   const hasTurns = Boolean(thread && thread.querySelector(".liuwa-turn"));
+  // 面试的回答在堆叠容器里，不在单题 thread 里；漏掉它会让整页一直停留在空态。
+  const hasStacked = chatMode === 'interview' && interviewEntries.length > 0;
   // 只有「一条对话都没有」才算空。截了图但还没发送时，之前也算非空——
   // 结果 idle 被藏起来、thread 又是空的，整块区域一片空白，只剩 dock 里一张缩略图。
-  const empty = !hasTurns;
+  const empty = chatMode === 'interview' ? !hasStacked : !hasTurns;
+  syncInterviewStackVisibility();
   document.body.classList.toggle("is-empty", empty);
   if (idle) idle.hidden = !empty;
-  if (pagination) pagination.hidden = empty;
+  if (pagination) pagination.hidden = chatMode === 'interview' || empty;
+  const answerCount = document.querySelector('#liuwaInterviewAnswerCount');
+  if (answerCount) answerCount.textContent = interviewEntries.length ? String(interviewEntries.length) : '';
   if (empty) document.querySelector('#liuwaAnswerTabs').hidden = true;
   syncReadingControls();
   const surface = {answer:!empty,shotCount:shotsExpanded ? pending.length : 0,interview:chatMode === 'interview',transcriptOpen:chatMode === 'interview' && document.querySelector('#liuwaTranscript').open};
@@ -424,6 +392,107 @@ async function ensureGateway(signal) {
   throw new Error(failures.join("；") || "无法连接本地服务");
 }
 
+
+// ===== 面试回答堆叠 =====
+// 面试与笔试分开：笔试一次只读一道题，面试把所有回答按时间倒序留在右侧，
+// 方便边听边往回翻。流式生成的那一条固定在最上面，完成后变成普通条目。
+const interviewEntries = [];
+
+
+function stackEntryLabel(entry) {
+  const time = entry.createdAt ? new Date(entry.createdAt) : null;
+  const stamp = time && !Number.isNaN(time.valueOf())
+    ? time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    : '';
+  return stamp ? `回答 #${entry.number} · ${stamp}` : `回答 #${entry.number}`;
+}
+
+function paintStackLabels() {
+  if (!interviewStack) return;
+  for (const entry of interviewEntries) {
+    const node = entry.node.querySelector('.liuwa-stack-head span');
+    if (node) node.textContent = stackEntryLabel(entry);
+    entry.node.classList.toggle('is-stopped', Boolean(entry.stoppedMarker));
+    if (entry.stoppedMarker && entry.node.dataset.stoppedLabel !== entry.stoppedMarker) {
+      entry.node.dataset.stoppedLabel = entry.stoppedMarker;
+    }
+  }
+}
+
+function appendInterviewAnswer({ generating = false, question = '' } = {}) {
+  if (!interviewStack) return null;
+  const entry = {
+    number: interviewEntries.length + 1,
+    createdAt: Date.now(),
+    node: document.createElement('article'),
+    stoppedMarker: '',
+  };
+  entry.node.className = `liuwa-stack-entry${generating ? ' is-stream' : ''}`;
+  entry.node.id = `interview-answer-${entry.number}`;
+  const head = document.createElement('header');
+  head.className = 'liuwa-stack-head';
+  const label = document.createElement('span');
+  const tabs = document.createElement('div');
+  tabs.className = 'liuwa-answer-tabs liuwa-stack-tabs';
+  tabs.setAttribute('role', 'tablist');
+  tabs.hidden = true;
+  head.append(label, tabs);
+  const body = document.createElement('div');
+  body.className = 'liuwa-stream md';
+  body.hidden = generating;
+  entry.body = body;
+  const prompt = document.createElement('p');
+  prompt.className = 'liuwa-stack-question';
+  prompt.textContent = question;
+  prompt.hidden = !question;
+  entry.node.append(head, prompt, body);
+  if (generating) {
+    // runChat 需要这个节点来收起等待提示；笔试的卡片里有，堆叠条目也要有。
+    const waiting = document.createElement('div');
+    waiting.className = 'liuwa-analysis-status';
+    waiting.setAttribute('role', 'status');
+    const spinner = document.createElement('span');
+    spinner.className = 'liuwa-analysis-spinner';
+    spinner.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.textContent = '正在分析题目…';
+    waiting.append(spinner, label);
+    entry.node.insertBefore(waiting, body);
+  }
+  const top = interviewStack.scrollTop, height = interviewStack.scrollHeight;
+  interviewStack.prepend(entry.node);
+  if (top > 0) interviewStack.scrollTop = top + interviewStack.scrollHeight - height;
+  interviewEntries.push(entry);
+  paintStackLabels();
+  syncEmpty();
+  return entry;
+}
+
+
+function snapshotInterviewStack() {
+  return { scrollTop: interviewStack?.scrollTop || 0 };
+}
+
+function restoreInterviewStack(enabled) {
+  syncInterviewStackVisibility();
+  if (enabled && interviewStack) interviewStack.scrollTop = modeContexts.get('interview')?.stack?.scrollTop || 0;
+}
+
+function clearInterviewStack() {
+  interviewEntries.length = 0;
+  if (interviewStack) interviewStack.replaceChildren();
+  syncEmpty();
+}
+
+// 切换到面试视图时显示堆叠、隐藏单题阅读区；回到笔试反之。
+function syncInterviewStackVisibility() {
+  if (!interviewStack) return;
+  const stacking = chatMode === 'interview';
+  interviewStack.hidden = !stacking;
+  if (thread) thread.hidden = stacking && interviewEntries.length > 0;
+  if (stacking && interviewEntries.length === 0 && thread) thread.hidden = false;
+}
+
 function authHeaders(headers = {}) {
   return state.gatewayApiKey ? { ...headers, "X-API-Key": state.gatewayApiKey } : headers;
 }
@@ -505,6 +574,12 @@ let sessionGeneration = 0;
 // 停止或出错时保留模型已经生成的内容，并标记这一轮，方便用户继续阅读。
 function finalizeStopped(streamNode, reply, assistantTurn, marker = "（已中断）") {
   // 中断标记挂在卡片上，正文保留模型已经生成的内容。
+  const stackEntry = interviewEntries.find(entry => entry.body === streamNode);
+  if (stackEntry) {
+    stackEntry.stoppedMarker = marker;
+    stackEntry.node.classList.add('is-stopped');
+    stackEntry.node.dataset.stoppedLabel = marker;
+  }
   assistantTurn.classList.add("is-stopped");
   assistantTurn.dataset.stoppedLabel = marker;
   renderAnswer(reply, streamNode, {complete:true});
@@ -584,15 +659,15 @@ let activeRequest = null;
 let queuedInterviewRequest = null;
 let replacingInterviewTask = null;
 function sendChat(request = {}) {
-  if (resetting || savingSession || (chatMode === 'interview' && preparingInterviewSession)) return Promise.resolve(false);
+  if (resetting || savingSession) return Promise.resolve(false);
   if (switchingMode) return modeSwitchTask.then(() => sendChat(request));
   if (request.context === 'interview' && chatMode !== 'interview') return Promise.resolve(false);
-  if (chatMode === 'interview' && typeof request.text !== 'string') request = interviewOverlay?.question() || {};
+  if (chatMode === 'interview' && typeof request.text !== 'string') request = { ...interviewOverlay?.question(), interview_extra: interviewOverlay?.extra?.() || '' };
   const text = typeof request.text === 'string' ? request.text.trim() : '';
   if (text.length > 8000) { setStatus('问题较长，请在转录中选择具体一条。'); return Promise.resolve(false); }
   if (chatMode === 'interview' && request.run_id && request.run_id !== interviewRunId) return Promise.resolve(false);
   const transcript = request.interview_transcript || interviewOverlay?.transcript() || [];
-  const snapshot = { ...request, text, context: chatMode === 'interview' ? 'interview' : 'study', interview_role: request.interview_role || interviewOverlay?.role() || 'candidate', interview_transcript: transcript.map(item => ({ source: item.source, speaker: item.speaker, text: item.text, segment_id: item.segment_id || '' })) };
+  const snapshot = { ...request, text, interview_extra: typeof request.interview_extra === 'string' ? request.interview_extra : interviewOverlay?.extra?.() || '', context: chatMode === 'interview' ? 'interview' : 'study', interview_role: request.interview_role || interviewOverlay?.role() || 'candidate', interview_transcript: transcript.map(item => ({ source: item.source, speaker: item.speaker, text: item.text, segment_id: item.segment_id || '' })) };
   if (activeSendTask) {
     if (snapshot.context !== 'interview' || (activeRequest?.text === snapshot.text && activeRequest?.interview_role === snapshot.interview_role)) return activeSendTask;
     queuedInterviewRequest = snapshot;
@@ -659,7 +734,9 @@ async function runChat(request) {
   shots.querySelectorAll("[data-remove]").forEach((button) => { button.disabled = true; });
   rememberReadingPosition();
   showQuestionText(request.text);
-  const streamNode = appendAssistantTurn({ generating: true });
+  const stacked = request.context === 'interview' && Boolean(interviewStack);
+  const stackEntry = stacked ? appendInterviewAnswer({ generating: true, question: request.text }) : null;
+  const streamNode = stackEntry ? stackEntry.body : appendAssistantTurn({ generating: true });
   const assistantTurn = streamNode.parentElement;
   const waiting = assistantTurn.querySelector('.liuwa-analysis-status');
   syncEmpty();
@@ -675,7 +752,7 @@ async function runChat(request) {
     streamNode.hidden = !hasBodyOutput && !complete;
     if (hasContent) streamNode.dataset.hasContent = 'true';
     if (!hasBodyOutput) document.querySelector('#liuwaAnswerTabs').hidden = true;
-    if (pagination) pagination.hidden = !hasBodyOutput;
+    if (pagination) pagination.hidden = request.context === 'interview' || !hasBodyOutput;
     syncReadingControls();
   };
   const commitTurn = (complete = true) => {
@@ -694,6 +771,8 @@ async function runChat(request) {
     };
     renderPending();
     questions.push(entry);
+    const stackedEntry = interviewEntries.find(item => item.body === streamNode);
+    if (stackedEntry) { stackedEntry.markdown = reply; stackedEntry.node.classList.remove('is-stream'); }
     viewedQuestionId = entry.id;
     syncQuestionSelector();
     history.push({
@@ -743,6 +822,7 @@ async function runChat(request) {
           interview_transcript: request.interview_transcript,
           ...(request.interview_target ? { interview_target: request.interview_target } : {}),
           ...(request.interview_task === 'solve' ? { interview_task: 'solve' } : {}),
+          ...(request.interview_extra ? { interview_extra: request.interview_extra } : {}),
         } : {}),
         images,
         history: history.slice(-16).map((turn) => ({ role: turn.role, text: turn.text.slice(0, 8000) })),
@@ -772,7 +852,11 @@ async function runChat(request) {
       setStatus(aborted ? "已停止。" : message);
     } else {
       assistantTurn.remove();
-      if (previousQuestion && requestGeneration === sessionGeneration && requestMode === chatMode && !switchingMode && !resetting && !preparingInterviewSession && !queuedInterviewRequest) showQuestion(previousQuestion, { restoreContext: true });
+      if (stackEntry) {
+        interviewEntries.splice(interviewEntries.indexOf(stackEntry), 1);
+        showQuestionText(previousQuestion?.text || '');
+        syncEmpty();
+      } else if (previousQuestion && requestGeneration === sessionGeneration && requestMode === chatMode && !switchingMode && !resetting && !queuedInterviewRequest) showQuestion(previousQuestion, { restoreContext: true });
       else syncEmpty();
       setStatus(aborted ? "已停止。" : message);
     }
@@ -829,7 +913,60 @@ function applyTheme(cfg) {
 function wireDesktop(cockpit) {
   document.body.classList.remove("liuwa-armed");
   document.body.inert = true;
-  let receivedArmedState=false;
+  let receivedArmedState = false, receivedEditingState = false;
+  let armed = false, textEditing = false, editVersion = 0;
+  const editor = document.querySelector('#liuwaInterviewExtraText');
+  const updateInteraction = () => {
+    document.body.classList.toggle('liuwa-armed', armed);
+    document.body.classList.toggle('liuwa-text-editing', textEditing);
+    document.body.inert = !armed && !textEditing;
+    const isolateEditor = textEditing && !armed;
+    document.querySelectorAll('.liuwa-orb > :not(.liuwa-reader), .liuwa-reader > :not(#liuwaInterviewExtra)').forEach(node => { node.inert = isolateEditor; });
+  };
+  const finishEditing = () => {
+    editVersion += 1;
+    textEditing = false;
+    updateInteraction();
+    cockpit.setTextEditing?.(false).catch(() => {});
+  };
+  editor?.addEventListener('focus', async () => {
+    if (!cockpit.setTextEditing) return;
+    const version = ++editVersion;
+    try {
+      const accepted = await cockpit.setTextEditing(true);
+      if (version !== editVersion || document.activeElement !== editor || document.hidden) {
+        await cockpit.setTextEditing(false);
+        return;
+      }
+      if (!accepted) {
+        editor.blur();
+        setStatus('请按住操作快捷键点入输入框后编辑。');
+      }
+    } catch {
+      editor.blur();
+      setStatus('文本编辑暂时无法启用，请重试。');
+    }
+  });
+  editor?.addEventListener('blur', finishEditing);
+  editor?.addEventListener('keydown', event => {
+    if (event.isComposing || !['Escape', 'Tab'].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    editor.blur();
+    if (event.key === 'Escape') {
+      document.querySelector('#liuwaInterviewExtra').hidden = true;
+      document.querySelector('#liuwaInterviewExtraToggle').setAttribute('aria-expanded', 'false');
+    }
+  });
+  cockpit.onTextEditing?.(value => {
+    receivedEditingState = true;
+    textEditing = Boolean(value) && document.activeElement === editor && !document.hidden;
+    updateInteraction();
+    if (value && !textEditing) cockpit.setTextEditing(false).catch(() => {});
+  });
+  window.addEventListener('app:privacy-hidden', () => { editor?.blur(); finishEditing(); });
+  window.addEventListener('pagehide', finishEditing);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { editor?.blur(); finishEditing(); } });
   document.documentElement.classList.add("liuwa-host");
   document.body.classList.add("liuwa-shell");
   cockpit.onHotkeys?.(applyHotkeyHints);
@@ -886,17 +1023,16 @@ function wireDesktop(cockpit) {
   }
   if (typeof cockpit.onArmed === "function") {
     cockpit.onArmed((value) => {
-      receivedArmedState=true;
-      document.body.classList.toggle("liuwa-armed", Boolean(value));
-      document.body.inert = !value;
+      receivedArmedState = true;
+      armed = Boolean(value);
+      updateInteraction();
     });
   }
   if (typeof cockpit.getConfig === "function") {
     cockpit.getConfig().then((cfg) => {
-      if(!receivedArmedState) {
-        document.body.classList.toggle('liuwa-armed', Boolean(cfg?.armed));
-        document.body.inert = !cfg?.armed;
-      }
+      if (!receivedArmedState) armed = Boolean(cfg?.armed);
+      if (!receivedEditingState) textEditing = Boolean(cfg?.textEditing) && document.activeElement === editor;
+      updateInteraction();
       applyHotkeyHints(cfg || {});
       applyTheme(cfg || {});
       applyDisplay(cfg.display || {});
@@ -947,6 +1083,7 @@ shots?.addEventListener("keydown", (event) => {
 readingPrev?.addEventListener("click", () => stepReading(-1));
 readingNext?.addEventListener("click", () => stepReading(1));
 document.querySelector('#liuwaSend')?.addEventListener('click',()=>sendChat());
+document.querySelector('#liuwaInterviewView')?.addEventListener('click',()=>interviewOverlay?.control('view'));
 document.querySelector('#liuwaDelete')?.addEventListener('click',deleteLastShot);
 document.querySelector('#liuwaReset')?.addEventListener('click',resetView);
 document.addEventListener('keydown',event=>{
@@ -958,7 +1095,9 @@ document.addEventListener('keydown',event=>{
     return;
   }
   if (!window.cockpit) {
-    if (accel === "CommandOrControl+,") {
+    if (accel === "CommandOrControl+K") {
+      event.preventDefault(); interviewOverlay?.control('view');
+    } else if (accel === "CommandOrControl+,") {
       event.preventDefault(); stepReading(-1);
     } else if (accel === "CommandOrControl+.") {
       event.preventDefault(); stepReading(1);
@@ -978,6 +1117,13 @@ sections?.addEventListener('change', () => jumpToSection(thread?.querySelector('
 questionSelect?.addEventListener('change', () => {
   rememberReadingPosition();
   showQuestion(questions.find((question) => question.id === questionSelect.value));
+});
+// 堆叠条目各自切小节时，把选择记到对应条目上，恢复时才能回到同一小节。
+interviewStack?.addEventListener('answer-panel-change', event => {
+  const node = event.target?.closest?.('.liuwa-stack-entry');
+  const entry = interviewEntries.find(item => item.node === node);
+  const panel = event.target?.dataset?.answerPanel;
+  if (entry && panel) entry.panel = panel;
 });
 thread?.addEventListener('answer-panel-change', () => {
   if(sections) { sections.value = ''; delete sections.dataset.sections; }
@@ -1106,6 +1252,7 @@ async function newQuestion() {
   nextShotId = 1;
   // 题目选择器只覆盖当前这次会话；会话保存后新题从空列表重新开始。
   questions.length = 0;
+  if (chatMode === 'interview') clearInterviewStack();
   viewedQuestionId = "";
   nextQuestionId = 1;
   syncQuestionSelector();
@@ -1131,7 +1278,10 @@ async function runResetView() {
     if(activeSendTask)await activeSendTask;
     if(chatMode === 'interview' && !await interviewOverlay.stopForReset(resetRunId)) { setStatus('音频会话尚未结束，当前内容已保留，请稍后重试。'); return; }
     const cleared = await newQuestion();
-    if(cleared && chatMode === 'interview')interviewOverlay.clear(resetRunId);
+    if(cleared && chatMode === 'interview') {
+      await interviewOverlay.clear(resetRunId);
+      interviewRunId = '';
+    }
     if(document.body.classList.contains('is-empty')) document.querySelector('#liuwaDisplay').open=false;
   } finally {resetting=false;interviewOverlay?.refresh();}
 }
@@ -1140,7 +1290,9 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshContext();
 });
 
-interviewOverlay = mountInterviewOverlay({ setMode: setChatMode, answer: sendChat, setStatus, onNewSession: beginInterviewSession, isBlocked: () => switchingMode || resetting || preparingInterviewSession });
+const interviewRecording = window.cockpit?.publishInterview ? createInterviewRecording({ bridge: window.cockpit, gatewayUrl: () => state.apiOrigin, gatewayKey: () => state.gatewayApiKey, onNotice: text => interviewOverlay?.notice(text) }) : null;
+window.addEventListener('pagehide', () => interviewRecording?.dispose());
+interviewOverlay = mountInterviewOverlay({ startRecording: () => interviewRecording?.start(), setMode: setChatMode, answer: sendChat, setStatus, onNewSession: beginInterviewSession, isBlocked: () => switchingMode || resetting });
 document.querySelector('#quickMode')?.addEventListener('change', event => setChatMode(event.target.value));
 document.querySelector('#liuwaTranscript')?.addEventListener('toggle', syncEmpty);
 syncEmpty();

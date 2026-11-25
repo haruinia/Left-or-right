@@ -132,7 +132,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
   try {
     return await fetch(url, {
       ...options,
-      signal: controller.signal,
+      signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
     });
   } finally {
     window.clearTimeout(timer);

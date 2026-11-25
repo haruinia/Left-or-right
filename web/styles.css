@@ -4,6 +4,7 @@
 :root {
   --panel-opacity: .9;
   --reader-width: 780px;
+  --reading-font-size: 1.125rem;
   color-scheme: light;
   --bg: #f4f6fc;
   --surface: #ffffff;
@@ -2259,7 +2260,7 @@ html.transparent-white {
   box-shadow: none;
   color: var(--ink);
   padding: 16px 24px 20px;
-  font-size: 16px;
+  font-size: var(--reading-font-size);
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
@@ -2336,10 +2337,10 @@ html.transparent-white {
   color: var(--ink);
   font-weight: 600;
 }
-.md h2.md-heading { font-size: 20px; }
-.md h3.md-heading { font-size: 18px; }
+.md h2.md-heading { font-size: 1.25em; }
+.md h3.md-heading { font-size: 1.125em; }
 .md h4.md-heading,
-.md h5.md-heading { font-size: 14px; }
+.md h5.md-heading { font-size: 1em; }
 
 .md ul,
 .md ol {
@@ -2363,7 +2364,7 @@ html.transparent-white {
   width: 100%;
   margin: 8px 0;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: .875em;
   line-height: 1.6;
 }
 .md-table th,
@@ -2463,7 +2464,7 @@ html.transparent-white {
   flex: none;
   padding: 0 8px 0 14px;
   font-family: "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: .875em;
   line-height: 1.6;
   white-space: pre;
   text-align: right;
@@ -2481,7 +2482,7 @@ html.transparent-white {
   color: inherit;
   overflow-x: auto;
   font-family: "SF Mono", Menlo, Consolas, monospace;
-  font-size: 12.5px;
+  font-size: .875em;
   line-height: 1.6;
 }
 .md .md-code code { background: none; padding: 0; }
@@ -3783,10 +3784,16 @@ html[data-theme="dark"], html.liuwa-host[data-theme="dark"],
 html[data-theme="transparent-white"], html.liuwa-host[data-theme="transparent-white"] {
   color-scheme: dark;
   --panel-rgb: 22,30,46;
-  --ink: #f1f5fd; --muted: #b6c1d7; --faint: #99a9c6;
+  --ink: #f1f5fd;
   --surface: #26334a; --surface-2: #1f2b40;
   --line: #3a4963; --line-soft: #334159;
   --accent: #8eb3ff; --accent-soft: #2b3c5b; --accent-ring: #628ddd50;
+}
+html[data-theme="dark"],
+html[data-theme="transparent-white"],
+html[data-theme="dark"] .liuwa-page,
+html[data-theme="transparent-white"] .liuwa-page {
+  --muted: #b6c1d7; --faint: #99a9c6;
 }
 .liuwa-page {
   --surface: transparent;
@@ -3812,14 +3819,28 @@ html[data-theme="light"] .md-code :is(.hljs-code, .hljs-comment, .hljs-formula) 
 html[data-theme="light"] .md-code :is(.hljs-name, .hljs-quote, .hljs-selector-pseudo, .hljs-selector-tag) { color: #116329; }
 html[data-theme="light"] .md-code :is(.hljs-subst, .hljs-emphasis, .hljs-strong) { color: var(--ink); }
 html[data-theme="light"] .md-code :is(.hljs-bullet) { color: #9a6700; }
+html[data-theme^="transparent-"] .liuwa-orb,
 html[data-theme^="transparent-"] .liuwa-command-bar,
 html[data-theme^="transparent-"] .liuwa-reader,
+html[data-theme^="transparent-"] .liuwa-interview,
+html[data-theme^="transparent-"] .liuwa-interview-heading,
+html[data-theme^="transparent-"] .liuwa-transcript > summary,
+html[data-theme^="transparent-"] .liuwa-transcript-turn,
+html[data-theme^="transparent-"] .liuwa-interview-extra,
+html[data-theme^="transparent-"] .liuwa-stack-entry,
+html[data-theme^="transparent-"] .liuwa-stack-head,
+html[data-theme^="transparent-"] .liuwa-interview-modes,
+html[data-theme^="transparent-"] .liuwa-interview-modes button,
+html[data-theme^="transparent-"] .liuwa-audio-toggle,
 html[data-theme^="transparent-"] .liuwa-display-panel {
   background: transparent !important; border-color: transparent !important; box-shadow: none;
 }
 html[data-theme^="transparent-"] .liuwa-command-bar > button,
+html[data-theme^="transparent-"] .liuwa-interview-voice button,
+html[data-theme^="transparent-"] .liuwa-interview-modes button,
 html[data-theme^="transparent-"] .liuwa-display > summary { text-shadow: 0 1px 2px #7774; }
-html[data-theme^="transparent-"] .liuwa-answer-tabs button[aria-selected="true"] { background: transparent; border-color: transparent; color: var(--ink); text-decoration: underline; text-underline-offset: 5px; }
+html[data-theme^="transparent-"] .liuwa-answer-tabs button[aria-selected="true"],
+html[data-theme^="transparent-"] .liuwa-interview-modes button[aria-pressed="true"] { background: transparent; border-color: transparent; color: var(--ink); text-decoration: underline; text-underline-offset: 5px; }
 html[data-theme^="transparent-"] .md-code-block,
 html[data-theme^="transparent-"] .md-code,
 html[data-theme^="transparent-"] .md-inline-code,
@@ -3828,42 +3849,98 @@ html[data-theme^="transparent-"] .md-table tbody tr,
 html[data-theme^="transparent-"] .md blockquote { background: transparent; color: var(--ink); }
 html[data-theme^="transparent-"] .md-code code,
 html[data-theme^="transparent-"] .md-code code span { background: transparent; color: var(--ink); }
-html[data-theme="dark"] .md th, html[data-theme="transparent-white"] .md th { background: var(--surface); }
+html[data-theme="dark"] .md th { background: var(--surface); }
 @media (max-width: 540px) {
   .liuwa-command-bar { gap: 0; padding: 5px; }
   .liuwa-command-bar > button { padding: 6px; font-size: 11px; }
   .liuwa-command-bar kbd, .liuwa-command-bar #liuwaToggleShots { display: none; }
 }
 
-.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-orb { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
-.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-reader { display: flex; grid-row: 4; background: rgba(var(--panel-rgb,255,255,255), var(--panel-opacity)); border-radius: 15px; }
-.liuwa-page.interview-mode .liuwa-feedback { grid-row: 5; }
-.liuwa-page.interview-mode .liuwa-idle { display: none; }
-.liuwa-page.interview-mode.is-empty .liuwa-reader { display: none; }
-.liuwa-page.interview-mode.is-empty .liuwa-transcript-body { max-height: 180px; }
+.liuwa-capture-icon { display: none; }
+#liuwaInterviewView kbd { display: inline; }
+.interview-mode #liuwaInterviewView { order: 4; }
+.liuwa-interview-voice, .liuwa-interview-modes { display: flex; align-items: center; -webkit-app-region: no-drag; }
+.liuwa-interview-voice { gap: 5px; flex: 0 0 206px; }
+body:not(.interview-mode) .liuwa-interview-voice { flex-basis: auto; }
+body:not(.interview-mode) .liuwa-interview-timer, body:not(.interview-mode) .liuwa-audio-toggle { display: none; }
+.liuwa-interview-voice button, .liuwa-interview-modes button { min-height: 30px; padding: 5px 7px; border: 0; border-radius: 6px; box-shadow: none; background: transparent; color: var(--ink); font: inherit; font-size: 12px; white-space: nowrap; transform: none; transition: none; }
+.liuwa-interview-voice svg, .liuwa-capture-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.liuwa-interview-voice .liuwa-audio-toggle { width: 27px; padding: 5px; }
+.liuwa-audio-toggle[aria-pressed="true"] { color: var(--muted); opacity: .5; background: var(--accent-soft); }
+.liuwa-interview-timer { display: inline-flex; align-items: center; gap: 7px; padding-left: 3px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.liuwa-interview-timer::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: #ba6d6d; }
+.liuwa-interview-voice[data-phase="recording"] kbd, .liuwa-interview-voice[data-phase="stopping"] kbd { display: none; }
+.liuwa-interview-modes { padding: 3px; gap: 1px; border-radius: 7px; background: var(--accent-soft); }
+.liuwa-interview-modes button { min-height: 24px; padding: 3px 8px; color: var(--muted); font-size: 11px; }
+.liuwa-interview-modes button[aria-pressed="true"] { color: var(--ink); background: rgba(var(--panel-rgb,255,255,255), .75); }
+.liuwa-interview-voice button:hover:where(html:not(.liuwa-host) *, body.liuwa-armed *):not(:disabled), .liuwa-interview-heading button:hover:where(html:not(.liuwa-host) *, body.liuwa-armed *):not(:disabled) { background: var(--accent-soft); }
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-orb {
+  grid-template-columns: minmax(220px, 28%) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "bar bar" "interview reader" "feedback feedback";
+  width: min(calc(100% - 16px), 1180px); max-width: none; gap: 0;
+  border: 1px solid var(--line-soft); border-radius: 16px; overflow: hidden;
+  background: rgba(var(--panel-rgb,255,255,255), var(--panel-opacity));
+}
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-command-bar { grid-area: bar; gap: 12px; min-height: 64px; padding: 9px 18px; border: 0; border-radius: 0; border-bottom: 1px solid var(--line-soft); background: transparent; }
+.interview-mode .liuwa-command-bar > button { font-size: 14px; }
+.interview-mode #liuwaCapture { order: 5; margin-left: auto; }
+.interview-mode #liuwaCapture .liuwa-capture-label, .interview-mode #liuwaCapture kbd { display: none; }
+.interview-mode .liuwa-capture-icon { display: block; }
+.interview-mode .liuwa-command-bar .liuwa-display { order: 6; margin-left: 0; }
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-reader { grid-area: reader; display: flex; position: relative; min-height: 0; border: 0; border-radius: 0; background: transparent; }
+.liuwa-page.interview-mode .liuwa-feedback { grid-area: feedback; }
+.interview-mode #liuwaThread, .interview-mode #liuwaAnswerTabs, .interview-mode #liuwaPagination, .interview-mode #liuwaCurrentQuestion { display: none !important; }
+.liuwa-page.interview-mode.is-empty:not(.liuwa-compact) .liuwa-reader { display: flex; }
 .liuwa-page.liuwa-compact .liuwa-interview { display: none; }
-.liuwa-interview { grid-row: 3; min-width: 0; padding: 6px 10px; border-radius: 12px; background: rgba(var(--panel-rgb,255,255,255), var(--panel-opacity)); }
-.liuwa-interview-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.liuwa-interview button { min-height: 28px; padding: 4px 7px; border: 0; border-radius: 6px; box-shadow: none; background: transparent; color: var(--ink); font: inherit; font-size: 11px; transform: none; transition: none; }
-.liuwa-interview button:hover:where(html:not(.liuwa-host) *, body.liuwa-armed *):not(:disabled) { background: var(--accent-soft); }
-.liuwa-interview button[aria-pressed="true"] { text-decoration: line-through; color: var(--muted); }
-#liuwaInterviewStatus { margin-left: auto; max-width: 60%; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
-#liuwaInterviewStatus[data-kind="error"] { color: var(--ink); }
-.liuwa-transcript > summary { width: fit-content; padding: 4px 7px; cursor: pointer; color: var(--muted); font-size: 11px; }
-.liuwa-transcript-body { max-height: min(180px, 26dvh); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.liuwa-transcript-turn { max-width: 94%; margin: 5px 0; padding: 7px 8px; border-bottom: 1px solid var(--line-soft); font-size: 12px; line-height: 1.5; }
-.liuwa-transcript-turn.is-mic { margin-left: auto; }
+.liuwa-interview { min-width: 0; }
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-interview { grid-area: interview; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line-soft); }
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-transcript { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; }
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-transcript::details-content { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+.liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-transcript-body { max-height: none; flex: 1 1 0; min-height: 0; }
+.liuwa-transcript > summary, .liuwa-interview-heading { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-height: 49px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); color: var(--ink); font-size: 12px; font-weight: 500; }
+.liuwa-transcript > summary { cursor: pointer; flex-wrap: wrap; list-style: none; }
+.liuwa-transcript > summary::-webkit-details-marker { display: none; }
+#liuwaTranscriptCount, #liuwaInterviewAnswerCount { color: var(--muted); font-size: 11px; font-weight: 400; }
+#liuwaInterviewStatus { margin-left: auto; color: var(--muted); font-size: 10px; font-weight: 400; overflow-wrap: anywhere; }
+#liuwaInterviewStatus[data-kind="error"] { flex: 1 0 100%; margin-left: 0; color: var(--ink); line-height: 1.6; }
+.liuwa-interview-heading { justify-content: space-between; }
+.liuwa-interview-heading button { border: 0; border-radius: 5px; padding: 4px 0; color: var(--muted); background: transparent; font: inherit; font-size: 11px; -webkit-app-region: no-drag; }
+.liuwa-interview-extra { padding: 12px 20px; border-bottom: 1px solid var(--line-soft); }
+.liuwa-interview-extra .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.liuwa-interview-extra textarea { width: 100%; resize: vertical; padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; line-height: 1.6; }
+.liuwa-transcript-body { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0 20px; }
+.liuwa-transcript-turn { position: relative; margin: 0; padding: 18px 0; border-bottom: 1px solid var(--line-soft); font-size: var(--reading-font-size); line-height: 1.7; }
+.liuwa-transcript-turn:last-child { border-bottom: 0; }
 .liuwa-transcript-turn header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 10px; }
-.liuwa-transcript-turn p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.liuwa-transcript-turn p { margin: 7px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.liuwa-transcript-turn header button { min-height: 22px; padding: 2px 0; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 10px; box-shadow: none; }
+.liuwa-transcript-turn.is-current::before { content: ''; position: absolute; left: -10px; width: 2px; top: 42px; bottom: 18px; border-radius: 2px; background: var(--accent); }
 .liuwa-transcript-turn.is-partial, .liuwa-transcript-empty { color: var(--muted); }
-/* 回声片段是对方声音被麦克风重复收录，不是用户说的话：压低显示并且不提供「回答此条」。 */
-.liuwa-transcript-turn.is-echo { margin-left: 0; color: var(--muted); opacity: .72; font-style: italic; }
+.liuwa-transcript-empty { margin: 22px 0; font-size: 11px; }
+.liuwa-transcript-turn.is-echo { opacity: .65; font-style: italic; }
 .liuwa-transcript-turn.is-echo p { text-decoration: line-through; text-decoration-thickness: 1px; }
-.liuwa-transcript-empty { margin: 8px; font-size: 12px; }
-.liuwa-current-question { flex: 0 0 auto; max-height: 100px; overflow-y: auto; padding: 10px 14px; margin: 0; border-bottom: 1px solid var(--line-soft); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-html[data-theme^="transparent-"] .liuwa-interview { background: transparent; }
+.liuwa-interview-stack { display: flex; flex-direction: column; min-height: 0; flex: 1 1 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; padding: 0 24px; scrollbar-width: thin; }
+.liuwa-interview-stack:empty::before { content: '等待问题'; margin: auto; color: var(--muted); font-size: 12px; }
+.liuwa-stack-entry { flex: 0 0 auto; min-width: 0; display: flex; flex-direction: column; padding: 20px 0 22px; border-bottom: 1px solid var(--line-soft); }
+.liuwa-stack-entry:last-child { border-bottom: 0; }
+.liuwa-stack-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; margin-bottom: 7px; color: var(--muted); font-size: 10px; position: sticky; top: 0; z-index: 1; background: var(--surface); }
+.liuwa-stack-question { margin: 0 0 12px; color: var(--muted); font-size: var(--reading-font-size); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.liuwa-stack-tabs { padding: 2px 0; }
+.liuwa-stack-tabs button { min-height: 24px; padding: 2px 7px; font-size: 10px; }
+.liuwa-stack-entry.is-stopped::after { content: attr(data-stopped-label); color: var(--muted); font-size: 11px; }
+.liuwa-stack-entry .liuwa-analysis-status { min-height: 70px; }
+.liuwa-stack-entry .liuwa-stream { overflow: visible; max-height: none; font-size: var(--reading-font-size); line-height: 1.7; }
+.liuwa-current-question { flex: 0 0 auto; max-height: 100px; overflow-y: auto; padding: 10px 14px; margin: 0; border-bottom: 1px solid var(--line-soft); font-size: var(--reading-font-size); white-space: pre-wrap; overflow-wrap: anywhere; }
 .interview-mode .liuwa-stream:is([data-answer-panel="answer"], [data-answer-panel="code"], [data-answer-panel="thought"], [data-answer-panel="analysis"]) > .md-heading:first-child { display: none; }
 .interview-mode .liuwa-stream:is([data-answer-panel="answer"], [data-answer-panel="code"], [data-answer-panel="thought"], [data-answer-panel="analysis"]) > .md-heading:first-child + * { margin-top: 0; }
+@media (max-width: 800px) { .interview-mode .liuwa-command-bar kbd { display: none; } .liuwa-interview-voice { flex-basis: 190px; } }
+@media (max-width: 680px) {
+  .liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-orb { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(7rem, .4fr) minmax(0, 1fr) auto; grid-template-areas: "bar" "interview" "reader" "feedback"; }
+  .liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-command-bar { flex-wrap: wrap; gap: 5px; padding: 8px; }
+  .liuwa-interview-voice { flex-basis: 170px; }
+  .liuwa-page.interview-mode:not(.liuwa-compact) .liuwa-interview { max-height: 32dvh; border-right: 0; border-bottom: 1px solid var(--line-soft); }
+}
 
 /* ===== 学习资产板块（设置页） ===== */
 .asset-tabs {

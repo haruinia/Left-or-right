@@ -9,25 +9,10 @@ from contextlib import closing
 from typing import Any
 
 from services.gateway.learning_assets import _database_path
+from services.knowledge_service.tokens import tokens as _tokens
 
 _MAX_PAYLOAD_CHARS = 150000
 _MAX_DOCUMENTS = 5000
-_TOKEN = re.compile(r"[a-z][a-z0-9_]*(?:\+\+|#|(?:[.-][a-z0-9_]+)*)|[一-鿿]+", re.IGNORECASE)
-_ENGLISH_STOP = frozenset("a about an and answer answers are as at be between by can compare comparison could describe detail details difference differences discuss do does example examples explain for from had has have how i in introduce is it me of on or overview please question questions should some something tell that the their them these they this to us use using was were what when where which who why will with work works would you your".split())
-_CHINESE_STOP = re.compile("|".join(sorted(("请介绍一下", "请问一下", "介绍一下", "解释一下", "说一下", "讲一下", "请介绍", "请说明", "请解释", "能不能", "可不可以", "有什么", "为什么", "什么是", "怎么样", "你认为", "请问", "能否", "可以", "如何", "怎么", "怎样", "什么", "一下", "介绍", "说明", "解释", "谈谈", "说说", "请你", "简单", "简要", "详细", "这个", "这些", "问题"), key=len, reverse=True)))
-
-
-def _tokens(text: str) -> set[str]:
-    result: set[str] = set()
-    for match in _TOKEN.finditer(_CHINESE_STOP.sub(" ", text.lower())):
-        token = match.group()
-        if "一" <= token[0] <= "鿿":
-            result.update(token[index:index + 2] for index in range(len(token) - 1))
-        elif token not in _ENGLISH_STOP and (len(token) > 1 or token in {"c", "r"}):
-            result.add(token)
-    return result
-
-
 def _document(raw: str, record_id: str, exclude_session_id: str | None) -> dict[str, Any] | None:
     try:
         item = json.loads(raw)
@@ -142,7 +127,7 @@ def _snippet(item: dict[str, Any], tokens: set[str], budget: int) -> dict[str, A
     return {"id": item["id"], "question": question, "answer": answer, "tags": tags, "sourceSessionId": item["sourceSessionId"]}
 
 
-def retrieve_knowledge(query: str, *, limit: int = 3, max_chars: int = 6000, exclude_session_id: str | None = None) -> list[dict[str, Any]]:
+def _retrieve_history(query: str, *, limit: int = 3, max_chars: int = 6000, exclude_session_id: str | None = None) -> list[dict[str, Any]]:
     limit, max_chars = min(3, max(0, limit)), min(6000, max(0, max_chars))
     tokens = _tokens(query[:8000])
     if not tokens or not limit or max_chars < 2:
@@ -171,4 +156,26 @@ def retrieve_knowledge(query: str, *, limit: int = 3, max_chars: int = 6000, exc
         snippet = _snippet(item, tokens, remaining // (len(selected) - index))
         remaining -= len(snippet["question"]) + len(snippet["answer"]) + sum(map(len, snippet["tags"]))
         result.append(snippet)
+    return result
+
+
+def retrieve_knowledge(
+    query: str, *, limit: int = 3, max_chars: int = 6000,
+    exclude_session_id: str | None = None, project_ids: list[str] | tuple[str, ...] = (),
+    include_history: bool = True,
+) -> list[dict[str, Any]]:
+    limit, max_chars = min(3, max(0, limit)), min(6000, max(0, max_chars))
+    if not limit or max_chars < 2 or not _tokens(query[:8000]):
+        return []
+    result = []
+    if project_ids:
+        from services.knowledge_service.store import search
+
+        result = search(query, project_ids, limit=limit, max_chars=max_chars)
+    remaining = max_chars - sum(len(json.dumps(item, ensure_ascii=False)) for item in result)
+    if include_history and remaining >= 2 and len(result) < limit:
+        result.extend(_retrieve_history(
+            query, limit=limit - len(result), max_chars=remaining,
+            exclude_session_id=exclude_session_id,
+        ))
     return result

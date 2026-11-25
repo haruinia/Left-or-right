@@ -3,7 +3,10 @@ const opacityValue = document.querySelector('#liuwaOpacityValue');
 const layoutInput = document.querySelector('#liuwaLayout');
 const compactButton = document.querySelector('#liuwaCompact');
 const status = document.querySelector('#liuwaDisplayStatus');
-let current = {opacity: .9, layout: 'narrow', compact: true, theme:'light', answer:false};
+const readingInput = document.querySelector('#liuwaReadingFontSize');
+const zoomInput = document.querySelector('#liuwaZoom');
+const displayBridge = window.appearanceBridge || window.cockpit;
+let current = {opacity: .9, layout: 'narrow', compact: true, theme:'light', answer:false, readingFontSize:18, zoomFactor:1};
 let confirmed = {...current};
 let revision = -1;
 let requestId = 0;
@@ -20,6 +23,12 @@ export function applyDisplay(display = {}) {
   document.documentElement.style.setProperty('--panel-opacity', opacity);
   document.documentElement.dataset.layout = current.layout;
   document.documentElement.dataset.theme = current.theme;
+  const readingFontSize = [16,18,20,22,24].includes(current.readingFontSize) ? current.readingFontSize : 18;
+  const zoomFactor = Number.isFinite(current.zoomFactor) ? Math.max(.7, Math.min(1.6, current.zoomFactor)) : 1;
+  document.documentElement.style.setProperty('--reading-font-size', `${readingFontSize / 16}rem`);
+  if (!displayBridge) document.documentElement.style.zoom = String(zoomFactor);
+  if (readingInput) readingInput.value = String(readingFontSize);
+  if (zoomInput) zoomInput.value = String(zoomFactor);
   document.body.classList.toggle('liuwa-compact', Boolean(current.compact));
   const transparent = current.theme.startsWith('transparent-');
   if (opacityInput) {opacityInput.value = String(transparent ? 0 : Math.round(opacity * 100));opacityInput.disabled=transparent;}
@@ -37,8 +46,8 @@ async function updateDisplay(patch) {
   };
   applyDisplay();
   try {
-    if (window.cockpit?.setDisplay) {
-      const result = await window.cockpit.setDisplay(patch);
+    if (displayBridge?.setDisplay) {
+      const result = await displayBridge.setDisplay(patch);
       release();
       applyDisplay(result);
       if (status && id === requestId) status.textContent = result.saved === false ? '本次已应用，偏好保存失败。' : '';
@@ -46,7 +55,7 @@ async function updateDisplay(patch) {
       localStorage.setItem('liuwa.display', JSON.stringify(current));
       release();
       applyDisplay(patch);
-      if (status) status.textContent = '浏览器预览布局';
+      if (status) status.textContent = '';
     }
   } catch {
     release();
@@ -59,7 +68,19 @@ opacityInput?.addEventListener('input', () => updateDisplay({opacity: Number(opa
 layoutInput?.addEventListener('change', () => updateDisplay({layout: layoutInput.value, compact: false}));
 compactButton?.addEventListener('click', () => updateDisplay({compact: !current.compact}));
 document.querySelectorAll('[data-theme-mode]').forEach(button=>button.addEventListener('click',()=>updateDisplay({theme:button.dataset.themeMode})));
-window.cockpit?.onDisplay?.(applyDisplay);
-if (!window.cockpit) {
-  try { applyDisplay(JSON.parse(localStorage.getItem('liuwa.display') || '{}')); } catch { applyDisplay(); }
-} else applyDisplay();
+readingInput?.addEventListener('change', () => updateDisplay({readingFontSize: Number(readingInput.value)}));
+zoomInput?.addEventListener('change', () => updateDisplay({zoomFactor: Number(zoomInput.value)}));
+document.querySelector('#liuwaDisplayReset')?.addEventListener('click', () => updateDisplay({readingFontSize:18, zoomFactor:1}));
+displayBridge?.onDisplay?.(applyDisplay);
+if (!displayBridge) {
+  const restore = () => {
+    try { applyDisplay(JSON.parse(localStorage.getItem('liuwa.display') || '{}')); } catch { applyDisplay(); }
+  };
+  restore();
+  window.addEventListener?.('storage', event => { if (event.key === 'liuwa.display') restore(); });
+} else {
+  applyDisplay();
+  if (window.appearanceBridge) window.appearanceBridge.getDisplay().then(applyDisplay).catch(() => {
+    if (status) status.textContent = '显示设置读取失败，请重新打开此页。';
+  });
+}

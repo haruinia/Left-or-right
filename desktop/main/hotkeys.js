@@ -22,7 +22,8 @@ const BINDINGS = [
   { accelerator: 'CommandOrControl+Shift+Space', action: 'toggleVisible', label: '按住操作面板' },
   { accelerator: 'CommandOrControl+Shift+Y', action: 'captureScreen', label: '全屏截图' },
   { accelerator: 'CommandOrControl+Shift+J', action: 'toggleCompact', label: '紧凑/展开' },
-  { accelerator: 'CommandOrControl+Alt+I', action: 'toggleInterview', label: '开始/停止面试' },
+  { accelerator: 'CommandOrControl+K', action: 'toggleInterviewView', label: '进入/退出面试界面' },
+  { accelerator: 'CommandOrControl+Alt+I', action: 'toggleInterview', label: '开始/结束面试' },
   { accelerator: 'CommandOrControl+Alt+M', action: 'muteInterviewMic', label: '麦克风静音' },
   { accelerator: 'CommandOrControl+Alt+U', action: 'muteInterviewSystem', label: '系统声音静音' },
 

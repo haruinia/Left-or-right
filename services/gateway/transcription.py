@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 from libs.common.config import get_settings
 from services.asr_service.aliyun_engine import AliyunASRSession
 from services.asr_service.nls_engine import AliyunNLSSession, _nls_token_failure
+from services.asr_service.xfyun_engine import XfyunRTASRSession
 from services.gateway import asr_config
 from services.gateway.learning_assets import AssetWrite, upsert_asset
 
@@ -129,6 +130,10 @@ def reveal_nls_secret(profile_id: str, field: str, request: Request):
 def _create_provider_session(session_id: str, profile: asr_config.AsrProfile, settings):
     if profile.provider == "aliyun_ws":
         return AliyunASRSession(session_id, settings=settings)
+    if profile.provider == "xfyun_rtasr":
+        return XfyunRTASRSession(session_id, settings=settings)
+    if profile.provider != "aliyun_nls_ws":
+        raise ValueError("不支持的语音服务类型")
     provider = asr_config.nls_token_provider(profile)
     session = AliyunNLSSession(session_id, settings=settings, token_provider=provider)
     session._configured_token_provider = provider
@@ -144,7 +149,10 @@ async def _connect_provider(session, profile: asr_config.AsrProfile) -> None:
         if profile.provider != "aliyun_nls_ws":
             raise
         reason = session.error_reason or str(exc)
-        if session.started or provider is None or not _nls_token_failure(RuntimeError(reason)):
+        token_failure = _nls_token_failure(RuntimeError(reason))
+        if token_failure:
+            session.error_reason = 'invalid token'
+        if session.started or provider is None or not token_failure:
             if "No permission" in reason or "40020503" in reason:
                 session.error_reason = "nls_token_permission_denied"
             raise
@@ -171,6 +179,13 @@ async def _close_provider(session) -> None:
 
 
 def _provider_failure_detail(reason: str, provider: str = "aliyun_ws") -> str:
+    if provider == "xfyun_rtasr":
+        lowered = reason.lower()
+        if any(value in lowered for value in ("10114", "10105", "unauthorized", "signature")):
+            return "讯飞鉴权失败，请检查实时转写 APPID、APIKey 是否匹配，以及服务是否已开通。"
+        if "concurrent" in lowered or "concurrency" in lowered or "max connect" in lowered or "10800" in lowered:
+            return "讯飞并发连接额度不足，双音源需要两路实时识别连接，请检查账号额度。"
+        return "讯飞实时转写连接失败，请检查 APPID、APIKey、服务开通状态及网络。"
     if provider == "aliyun_nls_ws":
         lowered = reason.lower()
         if "nls_token_permission_denied" in reason or "40020503" in reason or "no permission" in lowered:
@@ -200,8 +215,23 @@ async def check_profile(profile_id: str, request: Request):
     session = _create_provider_session(f"check-{uuid4().hex}", profile, settings)
     ok = False
     reason = ""
+    heard_audio = False
     try:
         await asyncio.wait_for(_connect_provider(session, profile), CONNECT_TIMEOUT)
+        await asyncio.wait_for(session.send_audio(b"\x00" * 1600), SEND_TIMEOUT)
+
+        async def collect_transcripts():
+            nonlocal heard_audio
+            while True:
+                segment = await session.result_queue.get()
+                if segment is None:
+                    return
+                if segment.text.strip():
+                    heard_audio = True
+
+        collector = asyncio.create_task(collect_transcripts())
+        await asyncio.wait_for(_close_provider(session), CLOSE_TIMEOUT)
+        await asyncio.wait_for(collector, 2)
         ok = True
     except Exception:
         reason = session.error_reason
@@ -213,7 +243,8 @@ async def check_profile(profile_id: str, request: Request):
     ok = ok and not session.error_reason
     return {
         "ok": ok,
-        "detail": "连接验证通过，尚未进行语音识别；请在面试转写中测试声音。" if ok else _provider_failure_detail(reason or session.error_reason, profile.provider),
+        "detail": "连接及音频验证通过；正式面试时再核对识别文字。" if ok else _provider_failure_detail(reason or session.error_reason, profile.provider),
+        "audio_processed": heard_audio,
     }
 
 

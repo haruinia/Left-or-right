@@ -7,9 +7,7 @@ const { execFile } = require('node:child_process');
 
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
-    // Include stderr: without screen-recording permission `screencapture` exits 0-less
-    // with "could not create image from display" only on stderr, which is the signal
-    // used upstream to explain the permission fix.
+    // Preserve stderr so the caller can distinguish capture failures.
     execFile(cmd, args, (error, _stdout, stderr) => {
       if (!error) return resolve();
       const detail = String(stderr || '').trim();
@@ -90,7 +88,7 @@ async function captureScreenshot({ interactive = true, rect = null, displayIndex
   }
   fs.unlinkSync(file);
   if (!bytes.length) {
-    throw new Error('截图为空，可能缺少屏幕录制权限');
+    throw new Error('截图为空，请重新截图');
   }
   return { mime, data: bytes };
 }

@@ -1192,6 +1192,7 @@ class UiHotkeys(BaseModel):
     toggleVisible: str = "CommandOrControl+Shift+Space"
     captureScreen: str = "CommandOrControl+Shift+Y"
     toggleCompact: str = "CommandOrControl+Shift+J"
+    toggleInterviewView: str = "CommandOrControl+K"
     toggleInterview: str = "CommandOrControl+Alt+I"
     muteInterviewMic: str = "CommandOrControl+Alt+M"
     muteInterviewSystem: str = "CommandOrControl+Alt+U"
@@ -1216,6 +1217,7 @@ class UiHotkeys(BaseModel):
         "toggleWindow",
         "quitApp",
         "toggleCompact",
+        "toggleInterviewView",
         "toggleInterview",
         "muteInterviewMic",
         "muteInterviewSystem",
@@ -1278,6 +1280,8 @@ class ChatStreamRequest(BaseModel):
     interview_target: str = Field(default="", max_length=64)
     # 语音解题走实现题结构，与普通口头回答分开。
     interview_task: Literal["answer", "solve"] = "answer"
+    # 本轮临时要求（面试界面里填写），只影响这一次回答。
+    interview_extra: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")
     def require_text_or_images(self) -> "ChatStreamRequest":
@@ -1300,6 +1304,15 @@ class UiSettings(BaseModel):
     resume_text: str = ""
     long_term_memory_consent: bool = False
     interview_use_knowledge: bool = False
+    interview_knowledge_project_ids: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("interview_knowledge_project_ids")
+    @classmethod
+    def validate_knowledge_projects(cls, value: list[str]) -> list[str]:
+        if any(not item or len(item) > 100 or not item.isascii() or not all(char.isalnum() or char in "-_" for char in item) for item in value):
+            raise ValueError("invalid knowledge project id")
+        return list(dict.fromkeys(value))
+
     # 默认手动：自动回答会在录音中每次对方发言后消耗一次模型请求。
     interview_auto_answer: bool = False
     hotkeys: UiHotkeys = Field(default_factory=UiHotkeys)

@@ -56,9 +56,10 @@ def test_stream_retrieves_real_local_knowledge_once_and_sends_it_as_reference(ru
     original = service.retrieve_knowledge
     queries = []
 
-    def retrieve(query):
+    def retrieve(query, **options):
         queries.append(query)
-        return original(query)
+        assert options == {'project_ids': [], 'include_history': True}
+        return original(query, **options)
 
     monkeypatch.setattr(service, 'retrieve_knowledge', retrieve)
     response = runtime.post('/api/chat/stream', json={'context': 'interview', 'text': '如何处理 Redis 缓存击穿？', 'history': [{'role': 'user', 'text': '上一问'}, {'role': 'assistant', 'text': '上一答'}]})
@@ -134,7 +135,7 @@ def test_cancelling_during_local_retrieval_never_starts_a_model_request(monkeypa
     release = threading.Event()
     calls = capture_model(monkeypatch)
 
-    def delayed(_query):
+    def delayed(_query, **_options):
         began.set()
         release.wait(3)
         return [item()]

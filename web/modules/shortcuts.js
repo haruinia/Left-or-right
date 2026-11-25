@@ -13,6 +13,7 @@ export const DEFAULT_HOTKEYS = {
   toggleVisible: "CommandOrControl+Shift+Space",
   captureScreen: "CommandOrControl+Shift+Y",
   toggleCompact: "CommandOrControl+Shift+J",
+  toggleInterviewView: "CommandOrControl+K",
   toggleInterview: "CommandOrControl+Alt+I",
   muteInterviewMic: "CommandOrControl+Alt+M",
   muteInterviewSystem: "CommandOrControl+Alt+U",

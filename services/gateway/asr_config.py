@@ -19,7 +19,8 @@ from services.gateway import model_config
 
 DEFAULT_ENDPOINT = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 NLS_ENDPOINT = "wss://nls-gateway-cn-shanghai.aliyuncs.com/ws/v1"
-_SECRET_FIELDS = frozenset({"api_key", "app_key", "nls_token", "access_key_id", "access_key_secret"})
+XFYUN_ENDPOINT = "wss://rtasr.xfyun.cn/v1/ws"
+_SECRET_FIELDS = frozenset({"api_key", "app_id", "app_key", "nls_token", "access_key_id", "access_key_secret"})
 _LOCK = RLock()
 _TOKEN_PROVIDERS: OrderedDict[tuple[str, str], AliyunNLSTokenProvider] = OrderedDict()
 
@@ -28,13 +29,14 @@ class ProfileInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str | None = None
     name: str = Field(min_length=1, max_length=60)
-    provider: Literal["aliyun_ws", "aliyun_nls_ws"] = "aliyun_ws"
+    provider: Literal["aliyun_ws", "aliyun_nls_ws", "xfyun_rtasr"] = "aliyun_ws"
     auth_mode: Literal["token", "access_key"] = "token"
     endpoint: str | None = Field(default=None, max_length=2048)
     model: str | None = Field(default=None, max_length=160)
     language_hints: str = Field(default="zh,en", max_length=120)
     vocabulary_id: str = Field(default="", max_length=200)
     api_key: str | None = Field(default=None, repr=False)
+    app_id: str | None = Field(default=None, repr=False)
     app_key: str | None = Field(default=None, repr=False)
     nls_token: str | None = Field(default=None, repr=False)
     access_key_id: str | None = Field(default=None, repr=False)
@@ -44,13 +46,14 @@ class ProfileInput(BaseModel):
 class AsrProfile(BaseModel):
     id: str
     name: str
-    provider: Literal["aliyun_ws", "aliyun_nls_ws"] = "aliyun_ws"
+    provider: Literal["aliyun_ws", "aliyun_nls_ws", "xfyun_rtasr"] = "aliyun_ws"
     auth_mode: Literal["token", "access_key"] = "token"
     endpoint: str
     model: str = ""
     language_hints: str = "zh,en"
     vocabulary_id: str = ""
     api_key: str = Field(default="", repr=False)
+    app_id: str = Field(default="", repr=False)
     app_key: str = Field(default="", repr=False)
     nls_token: str = Field(default="", repr=False)
     access_key_id: str = Field(default="", repr=False)
@@ -59,12 +62,14 @@ class AsrProfile(BaseModel):
     def configured(self) -> bool:
         if self.provider == "aliyun_ws":
             return bool(self.api_key)
+        if self.provider == "xfyun_rtasr":
+            return bool(self.app_id and self.api_key)
         return bool(self.app_key and (self.nls_token if self.auth_mode == "token" else self.access_key_id and self.access_key_secret))
 
     def public(self) -> dict:
         result = self.model_dump(exclude=_SECRET_FIELDS)
         result.update({f"{field}_configured": bool(getattr(self, field)) for field in _SECRET_FIELDS})
-        result["api_key_configured"] = self.provider == "aliyun_ws" and bool(self.api_key)
+        result["api_key_configured"] = self.provider in {"aliyun_ws", "xfyun_rtasr"} and bool(self.api_key)
         result["configured"] = self.configured()
         return result
 
@@ -170,19 +175,28 @@ def save_profile(payload: ProfileInput) -> dict:
         if not name:
             raise ValueError("名称不能为空")
         secrets = {field: _secret(payload, existing, field) for field in _SECRET_FIELDS}
-        if provider == "aliyun_ws":
+        if provider in {"aliyun_ws", "xfyun_rtasr"}:
             if not secrets["api_key"]:
                 raise ValueError("请输入有效的语音服务 API Key，不能保存遮罩字符")
-            model = (payload.model if payload.model is not None else existing.model if existing else "paraformer-realtime-v2").strip()
-            if not model:
-                raise ValueError("语音模型不能为空")
-            if model.lower().startswith("qwen"):
-                raise ValueError("当前语音接入使用 Paraformer 实时识别协议，不能直接填写 Qwen 模型；请使用 paraformer-realtime-v2。")
-            secrets.update({field: "" for field in _SECRET_FIELDS - {"api_key"}})
-            default_endpoint = DEFAULT_ENDPOINT
+            model = ""
+            if provider == "aliyun_ws":
+                model = (payload.model if payload.model is not None else existing.model if existing else "paraformer-realtime-v2").strip()
+                if not model:
+                    raise ValueError("语音模型不能为空")
+                if model.lower().startswith("qwen"):
+                    raise ValueError("当前语音接入使用 Paraformer 实时识别协议，不能直接填写 Qwen 模型；请使用 paraformer-realtime-v2。")
+                retained = {"api_key"}
+                default_endpoint = DEFAULT_ENDPOINT
+            else:
+                if not secrets["app_id"]:
+                    raise ValueError("请输入讯飞实时转写 APPID")
+                retained = {"api_key", "app_id"}
+                default_endpoint = XFYUN_ENDPOINT
+            secrets.update({field: "" for field in _SECRET_FIELDS - retained})
         else:
             model = ""
             secrets["api_key"] = ""
+            secrets["app_id"] = ""
             if not secrets["app_key"]:
                 raise ValueError("请输入 NLS 项目 AppKey")
             if auth_mode == "token" and not secrets["nls_token"]:
@@ -239,6 +253,7 @@ def snapshot(profile_id: str | None = None) -> tuple[AsrProfile, Settings]:
     updates = {
         "asr_provider": selected.provider,
         "aliyun_asr_api_key": "", "aliyun_nls_app_key": "", "aliyun_nls_token": "", "aliyun_ak_id": "", "aliyun_ak_secret": "",
+        "xfyun_app_id": "", "xfyun_api_key": "",
     }
     if selected.provider == "aliyun_ws":
         updates.update({
@@ -249,6 +264,14 @@ def snapshot(profile_id: str | None = None) -> tuple[AsrProfile, Settings]:
             "aliyun_asr_vocabulary_id": selected.vocabulary_id,
             "aliyun_asr_sample_rate": 16000,
             "aliyun_asr_format": "pcm",
+        })
+    elif selected.provider == "xfyun_rtasr":
+        updates.update({
+            "xfyun_app_id": selected.app_id,
+            "xfyun_api_key": selected.api_key,
+            "xfyun_rtasr_endpoint": selected.endpoint,
+            "xfyun_sample_rate": 16000,
+            "xfyun_format": "pcm",
         })
     else:
         updates.update({
@@ -284,16 +307,18 @@ def nls_token_provider(profile: AsrProfile) -> AliyunNLSTokenProvider | None:
 def profile_api_key(profile_id: str) -> str:
     with _LOCK:
         profile = _find(_load()[0], profile_id)
-        if profile.provider != "aliyun_ws":
-            raise ValueError("该服务不使用百炼 API Key")
+        if profile.provider not in {"aliyun_ws", "xfyun_rtasr"}:
+            raise ValueError("该服务不使用此 API Key")
         return profile.api_key
 
 
 def profile_secret(profile_id: str, field: str) -> str:
-    if field not in _SECRET_FIELDS - {"api_key"}:
-        raise ValueError("不支持查看该凭据")
     with _LOCK:
         profile = _find(_load()[0], profile_id)
-        if profile.provider != "aliyun_nls_ws":
-            raise ValueError("该服务不使用 NLS 凭据")
-        return getattr(profile, field)
+        if profile.provider == "xfyun_rtasr":
+            if field != "app_id":
+                raise ValueError("该服务不使用此凭据")
+            return profile.app_id
+        if profile.provider == "aliyun_nls_ws" and field in {"app_key", "nls_token", "access_key_id", "access_key_secret"}:
+            return getattr(profile, field)
+        raise ValueError("该服务不使用此凭据")

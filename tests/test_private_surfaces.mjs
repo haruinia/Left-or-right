@@ -7,16 +7,37 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const indexSource = fs.readFileSync(new URL('../desktop/main/index.js', import.meta.url), 'utf8');
 
+test('preload exposes isolated text-editing requests and removable state subscriptions',async()=>{
+  const exposed={},listeners=new Map(),requests=[];
+  const ipcRenderer={
+    on:(name,listener)=>listeners.set(name,listener),
+    removeListener:(name,listener)=>{assert.equal(listeners.get(name),listener);listeners.delete(name);},
+    invoke:async(...args)=>{requests.push(args);return true;},
+    sendSync:()=>({}),
+  };
+  const context={require:name=>{assert.equal(name,'electron');return {contextBridge:{exposeInMainWorld:(name,value)=>exposed[name]=value},ipcRenderer};}};
+  vm.runInNewContext(fs.readFileSync(new URL('../desktop/preload/bridge.js',import.meta.url),'utf8'),context);
+  assert.equal(await exposed.cockpit.setTextEditing(true),true);
+  assert.deepEqual(requests,[['cockpit:setTextEditing',true]]);
+  const states=[],unsubscribe=exposed.cockpit.onTextEditing(value=>states.push(value));
+  const listener=listeners.get('cockpit:textEditing');listener({},true);listener({},false);
+  assert.deepEqual(states,[true,false]);unsubscribe();assert.equal(listeners.has('cockpit:textEditing'),false);
+});
+
 function startup({ platform = 'win32', backend = Promise.resolve(false) } = {}) {
   const events = [], windows = [];
   const screen = new EventEmitter();
   const app = new EventEmitter();
-  Object.assign(app, { setName() {}, requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }), dock: { hide() {} }, setActivationPolicy() {} });
+  Object.assign(app, { userAgentFallback:'Mozilla/5.0 左右/0.1.0 Electron/45', setName() {}, getPath: () => '/test-user-data', requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }), dock: { hide() {} }, setActivationPolicy() {} });
   const modules = {
     './config': { loadConfig: () => ({}), saveConfig() {} },
     './window': {
       RENDERER_INDEX: '/app/web/index.html',
+      getDisplayState: () => ({interview:false}),
       setInteractive: (_window, held) => events.push(['armed', held]),
+      isInteractive:()=>false,
+      setTextEditing: (_window, value) => {events.push(['editing',value]);return value;},
+      isTextEditing:()=>false,
       createWindow(_config, options) {
         const window = new EventEmitter();
         Object.assign(window, { visible: false, destroyed: false, options,
@@ -31,6 +52,8 @@ function startup({ platform = 'win32', backend = Promise.resolve(false) } = {}) 
     './backend': { ensureBackend: () => backend },
     './hotkeys': { BINDINGS: [], registerHotkeys: () => [] },
     './interview-relay': { registerInterviewRelay() {} },
+    './interview-socket': { registerInterviewSocket() {} },
+    './knowledge-import': { registerKnowledgeImport() {} },
     './audio-capture': { audioCapabilities: () => ({}), configureAudioCapture() {} },
     './command-key': { startCommandKeyMonitor: () => () => {} },
     './window-visibility': require('../desktop/main/window-visibility.js'),
@@ -163,4 +186,8 @@ test('document hiding dismisses the preview, while visible changes preserve an o
   assert.equal(f.document.count('keydown'), 0);
   f.document.hidden = false; f.document.dispatch('visibilitychange');
   assert.equal(f.run('isLightboxOpen()'), false);
+});
+
+test('network user agent remains ASCII without changing app display identity',()=>{
+ const f=startup();const ua=f.run('app.userAgentFallback');assert.doesNotMatch(ua,/[^\x20-\x7e]/);assert.match(ua,/LeftOrRight/);
 });

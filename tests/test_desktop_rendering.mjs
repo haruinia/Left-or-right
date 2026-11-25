@@ -11,7 +11,7 @@ function answerFixture() {
     return button;
   }};
   const tabs={hidden:false,dataset:{},ownerDocument:doc,buttons:[],contains:node=>tabs.buttons.includes(node),replaceChildren(...buttons){this.buttons=buttons;},querySelectorAll:()=>tabs.buttons,querySelector:selector=>tabs.buttons.find(button=>selector.includes(`"${button.dataset.panel}"`))};
-  const root={innerHTML:'',scrollTop:0,dataset:{},ownerDocument:doc,closest:()=>({querySelector:()=>tabs}),setAttribute(){},dispatchEvent(){}};
+  const root={innerHTML:'',scrollTop:0,dataset:{},ownerDocument:doc,closest:selector=>selector==='.liuwa-reader'?{querySelector:()=>tabs}:null,setAttribute(){},dispatchEvent(){}};
   return {root,tabs,button:key=>tabs.buttons.find(button=>button.dataset.panel===key)};
 }
 

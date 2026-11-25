@@ -14,6 +14,46 @@ function setup(){
   return {main,settings,armed,api,windows,window};
 }
 
+test('refreshing interaction never arms a visible workspace without a held modifier',()=>{
+  const {api,armed}=setup();
+  api.refreshInteraction();assert.equal(armed.at(-1),false);
+  api.refreshInteraction();assert.equal(armed.at(-1),false);
+  api.modifierChanged(true);api.refreshInteraction();assert.equal(armed.at(-1),true);
+  api.modifierChanged(false);api.refreshInteraction();assert.equal(armed.at(-1),false);
+});
+
+for(const heldAtEnd of [false,true])test(`capture restores interaction only when the modifier is ${heldAtEnd?'held':'released'}`,()=>{
+  const {api,armed,main,settings}=setup();api.modifierChanged(true);
+  const snapshot=api.beginCapture();
+  assert.equal(armed.at(-1),false);assert.ok(!main.visible&&!settings.visible);
+  for(const held of [true,false,heldAtEnd]){api.modifierChanged(held);api.refreshInteraction();assert.equal(armed.at(-1),false);assert.equal(main.visible,false);}
+  api.showMain();assert.equal(main.visible,false);assert.equal(armed.at(-1),false);
+  api.endCapture(snapshot);assert.ok(main.visible&&settings.visible);assert.equal(armed.at(-1),heldAtEnd);
+});
+
+test('interaction refresh and second-instance reveal cannot bypass hide-all',()=>{
+  const {api,armed,main,settings}=setup();api.modifierChanged(true);api.hideAll();
+  api.refreshInteraction();api.modifierChanged(false);api.modifierChanged(true);api.showMain();
+  assert.equal(armed.at(-1),false);assert.ok(!main.visible&&!settings.visible);
+  api.modifierChanged(false);api.toggle();
+  assert.ok(main.visible&&settings.visible);assert.equal(armed.at(-1),false);
+  api.modifierChanged(true);assert.equal(armed.at(-1),true);
+});
+
+test('explicit hide during capture prevents restoration and never arms the resumed workspace',()=>{
+  const {api,armed,main,settings}=setup();api.modifierChanged(true);
+  const snapshot=api.beginCapture();api.hideAll();api.endCapture(snapshot);api.refreshInteraction();api.showMain();
+  assert.equal(armed.at(-1),false);assert.ok(!main.visible&&!settings.visible);
+  api.modifierChanged(false);api.toggle();assert.ok(main.visible&&settings.visible);assert.equal(armed.at(-1),false);
+});
+
+test('second-instance reveal does not enable clicking without the modifier',()=>{
+  const {api,armed,main}=setup();main.visible=false;
+  api.showMain();assert.equal(main.visible,true);assert.equal(armed.at(-1),false);
+  api.modifierChanged(true);assert.equal(armed.at(-1),true);
+  api.modifierChanged(false);assert.equal(armed.at(-1),false);
+});
+
 test('one visibility action hides both app windows, and restores only previously visible ones',()=>{
   const {main,settings,api}=setup();api.toggle();assert.equal(main.visible,false);assert.equal(settings.visible,false);
   api.toggle();assert.equal(main.visible,true);assert.equal(settings.visible,true);

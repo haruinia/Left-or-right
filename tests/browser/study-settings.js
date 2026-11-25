@@ -1,7 +1,7 @@
 async (page) => {
   const base = 'http://127.0.0.1:9958';
   const defaults = await (await page.request.get(`${base}/api/ui/settings`, {headers:{'user-agent':'Left-or-right UI test'}})).json();
-  let prefs = {...defaults,study_specialty:'计算机 / 软件工程',study_language:'Go',jd_text:'',resume_text:'',study_goal:'',study_instructions:''};
+  let prefs = {...defaults,study_specialty:'计算机 / 软件工程',study_language:'Go',jd_text:'',resume_text:'',study_goal:'',study_instructions:'',interview_knowledge_project_ids:[]};
   const patches=[];
   const errors=[];
   const routePreferences=async route=>{
@@ -12,6 +12,7 @@ async (page) => {
   };
   await page.route('**/api/ui/settings',routePreferences);
   await page.route('**/api/learning-assets/**',route=>route.fulfill({status:200,contentType:'application/json',body:'{"items":[]}'}));
+  await page.route('**/api/knowledge/**',route=>route.fulfill({json:{projects:[],formats:[]}}));
   page.on('pageerror',error=>errors.push(error.message));
   await page.setViewportSize({width:1440,height:1000});
   await page.goto(`${base}/settings#study`);
@@ -72,6 +73,15 @@ async (page) => {
     await page.reload();
     await page.waitForFunction(()=>document.querySelector('#studyLanguage').value==='Fortran');
     if((await options('#studyLanguage')).filter(value=>value==='Fortran').length!==1)throw Error('custom language duplicated');
+    if(await page.locator('#studyInstructions').isVisible())throw Error('study list exposes supplementary instructions');
+    await page.locator('#editStudyInstructions').click();
+    if(!await page.locator('#studyInstructions').isVisible()||await page.locator('#studyGoal').isVisible())throw Error('instructions detail also exposes the study list');
+    await page.locator('#studyInstructions').fill('先给直接解法，再解释优化');await page.locator('#settingsBack').click();
+    if((await page.locator('#instructionsSummary').textContent())!=='先给直接解法，再解释优化')throw Error('instructions summary lost its draft');
+    await page.locator('#saveUiSettings').click();await page.waitForFunction(()=>document.querySelector('#saveUiSettings').disabled);
+    if(JSON.stringify(patches.at(-1))!==JSON.stringify({study_instructions:'先给直接解法，再解释优化'}))throw Error('supplementary preference save changed unrelated fields');
+    await page.locator('#editStudyInstructions').click();await page.locator('#settingsBack').click();
+    if(await page.locator('#studyLanguage').inputValue()!=='Fortran')throw Error('detail navigation lost the selected language');
     await page.setViewportSize({width:375,height:812});
     if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('mobile study form overflows');
     await app.locator('#quickSpecialty').selectOption('申论');
